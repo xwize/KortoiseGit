@@ -76,10 +76,20 @@ public:
     [[nodiscard]] QList<QAction *> versionControlActions(const KFileItemList& items) const override;
 
     /**
-     * @param items The selected items outside any git working tree.
-     * @returns No actions yet; TortoiseGit's Clone and Create repository here will go here.
+     * Dolphin asks every enabled plugin for these when the folder it shows belongs to no version control system,
+     * and lists all their answers. With nothing selected, @p items is the folder shown.
+     * @param items The selected items, outside any git working tree.
+     * @returns "Git Create repository here..." for one folder that is in no repository (TortoiseGit's CreateRepo
+     *          entry), else nothing.
      */
     [[nodiscard]] QList<QAction *> outOfVersionControlActions(const KFileItemList& items) const override;
+
+    /**
+     * Watches for a repository being created in a folder, and then tells Dolphin to look for it again so the
+     * folder's overlays appear. Called when "Git Create repository here..." is chosen; one folder at a time.
+     * @param folder The folder the repository will be created in.
+     */
+    void watchForNewRepository(const QString& folder);
 
 private:
     /**
@@ -119,10 +129,13 @@ private:
     [[nodiscard]] static QString commitMenuText(const QString& path);
 
     QAction *m_commitAction;
+    QAction *m_createRepoAction;
     QAction *m_showLogAction;
     std::optional<GitFolderStatus> m_folderStatus; // Only touched on Dolphin's retrieval thread
     KDirWatch m_indexWatch;
     QString m_watchedIndex; // The file m_indexWatch watches, if any
+    KDirWatch m_newRepoWatch; // Watches for the .git of a repository being created
+    QString m_watchedNewRepo; // The .git m_newRepoWatch waits for, if any
     QTimer m_refreshTimer; // Collects the several index writes of one git command into one refresh
     QString m_menuDirectory; // The folder m_menuStatus describes; main thread only
     std::optional<GitFolderStatus> m_menuStatus; // The last folder read, for the context menu; main thread only

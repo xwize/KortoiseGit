@@ -24,8 +24,12 @@ target_sources(kgtproc PRIVATE
     cmdlineargs.hpp
     commitdlg.cpp
     commitdlg.hpp
+    createrepodlg.cpp
+    createrepodlg.hpp
     commands/commitcommand.cpp
     commands/commitcommand.hpp
+    commands/createrepositorycommand.cpp
+    commands/createrepositorycommand.hpp
     commands/command.cpp
     commands/command.hpp
     commands/logcommand.cpp

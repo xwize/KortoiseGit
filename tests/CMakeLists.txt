@@ -4,6 +4,7 @@
 set(kgt_tests
     cmdlineargstest
     commitdlgtest
+    createrepositorytest
     gitadmindirtest
     gitnumstattest
     gitstatuslistctrltest

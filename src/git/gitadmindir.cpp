@@ -4,7 +4,7 @@
 
 /**
  * @file
- * Ported from TortoiseGit src/Git/GitAdminDir.cpp (GetWorktreeAdminDirPath, ReadGitLink) and src/Git/Git.cpp
+ * Ported from TortoiseGit src/Git/GitAdminDir.cpp (GetWorktreeAdminDirPath, ReadGitLink, IsBareRepo) and src/Git/Git.cpp
  * (CGit::GetCurrentBranchFromFile).
  */
 
@@ -71,6 +71,17 @@ QString GitAdminDir::worktreeAdminDirPath(const QString& path)
             return {};
         }
     }
+}
+
+bool GitAdminDir::isBareRepo(const QString& path)
+{
+    const QDir dir(path);
+    // A .git directory has the same files, but belongs to a working tree
+    if (path.isEmpty() || dir.dirName() == QLatin1String(".git")) {
+        return false;
+    }
+    return QFileInfo(dir.filePath(QStringLiteral("HEAD"))).isFile() && QFileInfo(dir.filePath(QStringLiteral("config"))).isFile()
+        && QFileInfo(dir.filePath(QStringLiteral("objects"))).isDir() && QFileInfo(dir.filePath(QStringLiteral("refs/heads"))).isDir();
 }
 
 QString GitAdminDir::currentBranchFromFile(const QString& adminDir)
