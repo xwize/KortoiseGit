@@ -71,9 +71,10 @@ public:
 
     /**
      * @param items The selected items, or the current directory when nothing is selected.
-     * @returns The context menu actions for items inside a git working tree: Commit (for versioned items, showing
-     *          the current branch), Show log, Revert... for changed files and versioned folders, and Add... if an
-     *          item is unversioned or ignored, or is a folder holding unversioned files.
+     * @returns The context menu actions for items inside a git working tree: Push... (for one versioned folder),
+     *          Commit (for versioned items, showing the current branch), Show log, Revert... for changed files and
+     *          versioned folders, and Add... if an item is unversioned or ignored, or is a folder holding
+     *          unversioned files.
      */
     [[nodiscard]] QList<QAction *> versionControlActions(const KFileItemList& items) const override;
 
@@ -159,6 +160,7 @@ private:
     QAction *m_showLogAction;
     QAction *m_revertAction;
     QAction *m_addAction;
+    QAction *m_pushAction;
     std::optional<GitFolderStatus> m_folderStatus; // Only touched on Dolphin's retrieval thread
     KDirWatch m_indexWatch;
     QString m_watchedIndex; // The file m_indexWatch watches, if any

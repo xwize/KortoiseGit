@@ -38,8 +38,12 @@ target_sources(kgtproc PRIVATE
     commands/command.hpp
     commands/logcommand.cpp
     commands/logcommand.hpp
+    commands/pushcommand.cpp
+    commands/pushcommand.hpp
     commands/revertcommand.cpp
     commands/revertcommand.hpp
+    gitclioutputparser.cpp
+    gitclioutputparser.hpp
     gitloglist.cpp
     gitloglist.hpp
     gitloglistmodel.cpp
@@ -52,6 +56,10 @@ target_sources(kgtproc PRIVATE
     logdlg.hpp
     progresscommands/revertprogresscommand.cpp
     progresscommands/revertprogresscommand.hpp
+    progressdlg.cpp
+    progressdlg.hpp
+    pushdlg.cpp
+    pushdlg.hpp
     revertdlg.cpp
     revertdlg.hpp
 )
