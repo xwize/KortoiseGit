@@ -70,7 +70,8 @@ public:
 
     /**
      * @param items The selected items, or the current directory when nothing is selected.
-     * @returns The context menu actions for items inside a git working tree.
+     * @returns The context menu actions for items inside a git working tree: Commit (for versioned items, showing
+     *          the current branch) and Show log.
      */
     [[nodiscard]] QList<QAction *> versionControlActions(const KFileItemList& items) const override;
 
@@ -95,11 +96,36 @@ private:
      */
     void watchIndex(const QString& indexFile);
 
+    /**
+     * Keeps the state of the folder Dolphin shows for the context menu. Runs on the main thread.
+     * @param directory The folder, as given to beginRetrieval().
+     * @param status Its state.
+     */
+    void setMenuStatus(const QString& directory, const GitFolderStatus& status);
+
+    /**
+     * Whether TortoiseGit's Commit entry applies (ITEMIS_INGIT or ITEMIS_FOLDERINGIT): some item is versioned.
+     * Items of a folder whose state isn't known count as versioned.
+     * @param items The selected items.
+     * @returns True if the commit entry is shown.
+     */
+    [[nodiscard]] bool hasVersionedItem(const KFileItemList& items) const;
+
+    /**
+     * Ported from CShellExt::InsertGitMenu: the Commit entry shows the current branch, "Git Commit -> "main"...".
+     * @param path A selected path.
+     * @returns The entry's text.
+     */
+    [[nodiscard]] static QString commitMenuText(const QString& path);
+
+    QAction *m_commitAction;
     QAction *m_showLogAction;
     std::optional<GitFolderStatus> m_folderStatus; // Only touched on Dolphin's retrieval thread
     KDirWatch m_indexWatch;
     QString m_watchedIndex; // The file m_indexWatch watches, if any
     QTimer m_refreshTimer; // Collects the several index writes of one git command into one refresh
+    QString m_menuDirectory; // The folder m_menuStatus describes; main thread only
+    std::optional<GitFolderStatus> m_menuStatus; // The last folder read, for the context menu; main thread only
 };
 
 } // namespace kgt

@@ -72,6 +72,14 @@ public:
     void setPathFilter(const QStringList& paths);
 
     /**
+     * Also lists staged changes outside the path filter (CGitStatusListCtrl::m_bIncludedStaged), as the commit
+     * dialog needs: git commit takes everything staged, so all of it must be shown. Takes effect on the next
+     * reload().
+     * @param include Whether to list them.
+     */
+    void setIncludeStaged(bool include);
+
+    /**
      * Picks which entries are listed and which start checked (CGitStatusListCtrl::Show). Reloads if ignored files
      * are wanted and the last load left them out.
      * @param show The kinds of entries to list.
@@ -102,6 +110,12 @@ public:
      * @param label The dialog's label. It is not owned.
      */
     void setStatLabel(QLabel *label);
+
+    /**
+     * Sets what the list says when it has nothing to show (CGitStatusListCtrl::SetEmptyString).
+     * @param text Translated text; "File list is empty" by default.
+     */
+    void setEmptyString(const QString& text);
 
     /**
      * @returns The model holding every entry, in git's order.
@@ -155,6 +169,7 @@ private:
     void openWith(const GitStatusListEntry& entry);
     void explore(const GitStatusListEntry& entry) const;
     [[nodiscard]] QStringList pathSpec() const;
+    [[nodiscard]] bool isInPathFilter(const GitStatusEntry& entry) const;
 
     GitStatusListModel *m_model;
     QSortFilterProxyModel *m_proxy;
@@ -166,8 +181,10 @@ private:
     std::unique_ptr<GitCall> m_numStatCall;
     QList<GitStatusEntry> m_pendingStatus; // The status of the running load, waiting for its line counts
     QString m_errorMessage; // Shown in the empty list after a failed load
+    QString m_emptyString; // Shown in the empty list after a load that found nothing
     bool m_isInitialRepo = false; // No commit yet (CGit::IsInitRepos): there is no HEAD to compare with
     bool m_hasIgnored = false; // Whether the last load listed ignored files
+    bool m_includeStaged = false; // Whether staged changes outside m_pathFilter are listed too
 };
 
 } // namespace kgt

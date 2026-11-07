@@ -3,6 +3,8 @@
 
 set(kgt_tests
     cmdlineargstest
+    commitdlgtest
+    gitadmindirtest
     gitnumstattest
     gitstatuslistctrltest
     gitstatustest

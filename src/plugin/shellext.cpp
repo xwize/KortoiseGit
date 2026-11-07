@@ -3,6 +3,7 @@
 
 #include "shellext.hpp"
 
+#include "git/gitadmindir.hpp"
 #include "kortoisegitplugin_debug.hpp"
 #include "utils/runtimeerror.hpp"
 
@@ -18,6 +19,7 @@
 
 #include <dlfcn.h>
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 
@@ -30,6 +32,8 @@ constexpr auto procName = "kortoisegitproc"_L1;
 // One git command gives several index events, KDirWatch reporting the replaced file about half a second after
 // it went: refresh once they have settled
 constexpr std::chrono::milliseconds refreshDelay{600};
+// CShellExt::InsertGitMenu's limit on the branch name in the Commit entry
+constexpr qsizetype maxMenuBranchLength = 64;
 
 /**
  * The directory holding this plugin's .so, like TortoiseGit's CPathUtils::GetAppDirectory(g_hmodThisDll).
@@ -89,9 +93,13 @@ namespace kgt
 
 ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     : KVersionControlPlugin(parent)
+    , m_commitAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-commit")), i18n("Git &Commit..."), this))
     , m_showLogAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"), this))
 {
     Q_UNUSED(args)
+    connect(m_commitAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("commit"), m_commitAction);
+    });
     connect(m_showLogAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("log"), m_showLogAction);
     });
@@ -125,8 +133,9 @@ bool ShellExt::beginRetrieval(const QString& directory)
     }
     QMetaObject::invokeMethod(
         this,
-        [this, indexFile = m_folderStatus->indexFile()] {
-            watchIndex(indexFile);
+        [this, directory, status = *m_folderStatus] {
+            watchIndex(status.indexFile());
+            setMenuStatus(directory, status);
         },
         Qt::QueuedConnection);
     return true;
@@ -150,8 +159,15 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
     if (paths.isEmpty()) {
         return {};
     }
+    QList<QAction *> actions;
+    if (hasVersionedItem(items)) {
+        m_commitAction->setText(commitMenuText(paths.constFirst()));
+        m_commitAction->setData(paths);
+        actions.append(m_commitAction);
+    }
     m_showLogAction->setData(paths);
-    return {m_showLogAction};
+    actions.append(m_showLogAction);
+    return actions;
 }
 
 QList<QAction *> ShellExt::outOfVersionControlActions(const KFileItemList& items) const
@@ -198,6 +214,38 @@ void ShellExt::watchIndex(const QString& indexFile)
     }
     m_indexWatch.addFile(indexFile);
     m_watchedIndex = indexFile;
+}
+
+void ShellExt::setMenuStatus(const QString& directory, const GitFolderStatus& status)
+{
+    m_menuDirectory = directory;
+    m_menuStatus = status;
+}
+
+bool ShellExt::hasVersionedItem(const KFileItemList& items) const
+{
+    return std::ranges::any_of(items, [this](const KFileItem& item) {
+        const QFileInfo info(item.localPath());
+        if (!m_menuStatus || info.absolutePath() + QLatin1Char('/') != m_menuDirectory) {
+            return true;
+        }
+        const ItemVersion version = m_menuStatus->itemVersion(info.fileName(), item.isDir());
+        return version != UnversionedVersion && version != IgnoredVersion;
+    });
+}
+
+QString ShellExt::commitMenuText(const QString& path)
+{
+    QString branch = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(path));
+    if (branch.isEmpty()) {
+        return i18n("Git &Commit...");
+    }
+    if (branch.size() > maxMenuBranchLength) {
+        branch = branch.left(maxMenuBranchLength) + QStringLiteral("...");
+    }
+    // EscapeAccellerators: a '&' in the branch name is not a shortcut
+    branch.replace(QLatin1Char('&'), QStringLiteral("&&"));
+    return i18nc("@action:inmenu %1 is the current branch", "Git &Commit -> \"%1\"...", branch);
 }
 
 } // namespace kgt
