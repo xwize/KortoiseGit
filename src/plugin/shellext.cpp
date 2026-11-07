@@ -99,6 +99,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_createRepoAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-git")), i18n("Git Create repositor&y here..."), this))
     , m_showLogAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"), this))
     , m_addAction(new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("&Add..."), this))
+    , m_pushAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-push")), i18n("Pus&h..."), this))
 {
     Q_UNUSED(args)
     connect(m_createRepoAction, &QAction::triggered, this, [this] {
@@ -110,6 +111,10 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     });
     connect(m_showLogAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("log"), m_showLogAction);
+    });
+    m_pushAction->setToolTip(i18n("Push commits to a remote repository."));
+    connect(m_pushAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("push"), m_pushAction);
     });
     m_addAction->setToolTip(i18n("Adds file(s) to Git control"));
     connect(m_addAction, &QAction::triggered, this, [this] {
@@ -174,6 +179,11 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
         return {};
     }
     QList<QAction *> actions;
+    // TortoiseGit's Push: one folder in the working tree, or the folder shown when nothing is selected
+    if (items.size() == 1 && items.constFirst().isDir() && hasVersionedItem(items)) {
+        m_pushAction->setData(paths);
+        actions.append(m_pushAction);
+    }
     if (hasVersionedItem(items)) {
         m_commitAction->setText(commitMenuText(paths.constFirst()));
         m_commitAction->setData(paths);
@@ -181,7 +191,7 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
     }
     m_showLogAction->setData(paths);
     actions.append(m_showLogAction);
-    // TortoiseGit's menu order: Commit, Show log, ..., Add
+    // TortoiseGit's menu order: Push, Commit, Show log, ..., Add
     if (hasAddableItem(items)) {
         m_addAction->setData(paths);
         actions.append(m_addAction);

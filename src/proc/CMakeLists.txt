@@ -38,6 +38,10 @@ target_sources(kgtproc PRIVATE
     commands/command.hpp
     commands/logcommand.cpp
     commands/logcommand.hpp
+    commands/pushcommand.cpp
+    commands/pushcommand.hpp
+    gitclioutputparser.cpp
+    gitclioutputparser.hpp
     gitloglist.cpp
     gitloglist.hpp
     gitloglistmodel.cpp
@@ -48,6 +52,10 @@ target_sources(kgtproc PRIVATE
     gitstatuslistmodel.hpp
     logdlg.cpp
     logdlg.hpp
+    progressdlg.cpp
+    progressdlg.hpp
+    pushdlg.cpp
+    pushdlg.hpp
 )
 
 target_include_directories(kgtproc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})

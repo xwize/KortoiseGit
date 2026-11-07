@@ -14,6 +14,7 @@
 #include "commands/commitcommand.hpp"
 #include "commands/createrepositorycommand.hpp"
 #include "commands/logcommand.hpp"
+#include "commands/pushcommand.hpp"
 
 #include <KLocalizedString>
 
@@ -41,6 +42,7 @@ constexpr std::array commands{
     CommandEntry{.name = u"add", .create = &create<kgt::AddCommand>},
     CommandEntry{.name = u"commit", .create = &create<kgt::CommitCommand>},
     CommandEntry{.name = u"log", .create = &create<kgt::LogCommand>},
+    CommandEntry{.name = u"push", .create = &create<kgt::PushCommand>},
     CommandEntry{.name = u"repocreate", .create = &create<kgt::CreateRepositoryCommand>},
 };
 

@@ -10,6 +10,7 @@
 
 #include <QMetaObject>
 #include <QProcessEnvironment>
+#include <QStandardPaths>
 
 #include <algorithm>
 #include <utility>
@@ -32,18 +33,26 @@ QString quoted(const QString& argument)
 }
 
 /**
- * @param mode Whether git may take optional locks.
- * @returns The environment for git: the inherited one with a fixed locale.
+ * @returns The path of ksshaskpass, or an empty string if it isn't installed. Looked up once.
  */
-QProcessEnvironment gitEnvironment(kgt::RunMode mode)
+const QString& ksshaskpass()
 {
-    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
-    // TortoiseGit sets this too: output we parse must not depend on the user's locale
-    environment.insert(QStringLiteral("LC_ALL"), QStringLiteral("C"));
-    if (mode == kgt::RunMode::ReadOnly) {
-        environment.insert(QStringLiteral("GIT_OPTIONAL_LOCKS"), QStringLiteral("0"));
+    // Initialised once, thread-safely: the plugin runs git on Dolphin's worker thread
+    static const QString path = QStandardPaths::findExecutable(QStringLiteral("ksshaskpass"));
+    return path;
+}
+
+/**
+ * Sets a variable unless the user has set it already.
+ * @param[in,out] environment The environment.
+ * @param name The variable.
+ * @param value Its value; nothing is set if this is empty.
+ */
+void insertIfUnset(QProcessEnvironment& environment, const QString& name, const QString& value)
+{
+    if (!value.isEmpty() && !environment.contains(name)) {
+        environment.insert(name, value);
     }
-    return environment;
 }
 
 } // namespace
@@ -56,7 +65,7 @@ GitCall::GitCall(const QString& workingDirectory, const QStringList& arguments, 
     m_process.setProgram(QLatin1String(gitProgram));
     m_process.setArguments(arguments);
     m_process.setWorkingDirectory(workingDirectory);
-    m_process.setProcessEnvironment(gitEnvironment(mode));
+    m_process.setProcessEnvironment(environment(mode));
     if (input.isEmpty()) {
         m_process.setStandardInputFile(QProcess::nullDevice());
     }
@@ -110,6 +119,23 @@ QByteArray GitCall::takeAvailableOutput()
         return std::exchange(m_stdout, {});
     }
     return m_process.readAllStandardOutput();
+}
+
+QProcessEnvironment GitCall::environment(RunMode mode)
+{
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    // TortoiseGit sets this too: output we parse must not depend on the user's locale
+    environment.insert(QStringLiteral("LC_ALL"), QStringLiteral("C"));
+    if (mode == RunMode::ReadOnly) {
+        environment.insert(QStringLiteral("GIT_OPTIONAL_LOCKS"), QStringLiteral("0"));
+    }
+    // There is no terminal to answer on: never wait for one. Passwords and host keys go to ksshaskpass instead
+    // (TortoiseGit's SshAskPass), unless the user chose another helper
+    environment.insert(QStringLiteral("GIT_TERMINAL_PROMPT"), QStringLiteral("0"));
+    insertIfUnset(environment, QStringLiteral("SSH_ASKPASS"), ksshaskpass());
+    insertIfUnset(environment, QStringLiteral("GIT_ASKPASS"), ksshaskpass());
+    insertIfUnset(environment, QStringLiteral("SSH_ASKPASS_REQUIRE"), QStringLiteral("prefer"));
+    return environment;
 }
 
 QByteArray GitCall::output() const

@@ -128,24 +128,28 @@ private Q_SLOTS:
         const QString commit = QStringLiteral("Git &Commit -> \"main\"...");
         const QString log = QStringLiteral("Show &log");
         const QString add = QStringLiteral("&Add...");
+        const QString push = QStringLiteral("Pus&h...");
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("tracked.txt")))}), (QStringList{commit, log}));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{commit, log}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{push, commit, log}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral(".git")))}), QStringList{log});
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{log, add}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("build.log")))}), (QStringList{log, add}));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("withnew")))}), (QStringList{commit, log, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("withnew")))}), (QStringList{push, commit, log, add}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("untracked")))}), (QStringList{log, add}));
         // One addable item among others is enough, as in TortoiseGit
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("tracked.txt"))), item(repo.filePath(QStringLiteral("new.txt")))}),
                  (QStringList{commit, log, add}));
         // Nothing selected: Dolphin asks about the folder it shows
-        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{commit, log, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{push, commit, log, add}));
+        // Push is for one folder only, as TortoiseGit's ITEMIS_ONLYONE
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean"))), item(repo.filePath(QStringLiteral("withnew")))}),
+                 (QStringList{commit, log, add}));
 
         // An expanded folder is read too; the items of the first folder keep their entries
         QVERIFY(retrieve(plugin, repo.filePath(QStringLiteral("clean"))));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean/a.txt")))}), (QStringList{commit, log}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{log, add}));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{commit, log}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{push, commit, log}));
 
         // Once the file is added, the next retrieval no longer offers it
         repo.run({QStringLiteral("add"), QStringLiteral("new.txt")});
@@ -178,8 +182,10 @@ private Q_SLOTS:
 
         // The folder shown, when nothing is selected
         actions = plugin.versionControlActions({item(repo.path())});
-        QCOMPARE(actions.size(), 3); // Commit, Show log, and Add for new.txt
-        QCOMPARE(actions.constFirst()->text(), QStringLiteral("Git &Commit -> \"main\"..."));
+        QCOMPARE(actions.size(), 4); // Push, Commit, Show log, and Add for new.txt
+        QCOMPARE(actions.at(0)->text(), QStringLiteral("Pus&h..."));
+        QCOMPARE(actions.at(0)->data().toStringList(), QStringList{repo.path()});
+        QCOMPARE(actions.at(1)->text(), QStringLiteral("Git &Commit -> \"main\"..."));
     }
 
     void createRepositoryEntryOutsideRepositories()

@@ -13,6 +13,7 @@
 #include <QByteArray>
 #include <QObject>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
 
@@ -74,6 +75,15 @@ public:
      *         command line and git's stderr.
      */
     [[nodiscard]] QByteArray output() const;
+
+    /**
+     * The environment every git process gets: the inherited one with the C locale, and set up so git never
+     * waits for a terminal (GIT_TERMINAL_PROMPT=0) but asks through ksshaskpass, unless SSH_ASKPASS, GIT_ASKPASS
+     * or SSH_ASKPASS_REQUIRE are set already.
+     * @param mode Whether git may take the repository's optional locks.
+     * @returns The environment.
+     */
+    [[nodiscard]] static QProcessEnvironment environment(RunMode mode);
 
     /**
      * @returns The command line, for messages: "git" followed by the arguments, quoted where they hold spaces.

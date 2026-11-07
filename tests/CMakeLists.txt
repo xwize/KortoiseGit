@@ -7,6 +7,7 @@ set(kgt_tests
     commitdlgtest
     createrepositorytest
     gitadmindirtest
+    gitclioutputparsertest
     gitnumstattest
     gitrevloglisttest
     gitstatuslistctrltest
@@ -15,6 +16,8 @@ set(kgt_tests
     logdlgtest
     massivegittasktest
     proctest
+    progressdlgtest
+    pushdlgtest
     resulttest
 )
 
