@@ -62,7 +62,14 @@ public:
     [[nodiscard]] bool isFinished() const;
 
     /**
-     * @returns Everything git wrote to stdout. Must only be called once isFinished().
+     * Takes what git has written to stdout so far, for a caller that parses long output as it arrives.
+     * @returns The output since the last call; output() then holds only what was not taken.
+     */
+    [[nodiscard]] QByteArray takeAvailableOutput();
+
+    /**
+     * @returns Everything git wrote to stdout that takeAvailableOutput() has not taken. Must only be called once
+     *          isFinished().
      * @throws RuntimeError (category Git) if git failed to start, crashed or exited non-zero. Its message holds the
      *         command line and git's stderr.
      */
@@ -74,6 +81,11 @@ public:
     [[nodiscard]] QString commandLine() const;
 
 Q_SIGNALS:
+    /**
+     * Git has written more to stdout: takeAvailableOutput() returns it.
+     */
+    void outputAvailable();
+
     /**
      * Git has exited or failed to start. Emitted once: from the event loop, or from inside waitForFinished().
      */

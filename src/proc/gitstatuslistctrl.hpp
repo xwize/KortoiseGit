@@ -88,6 +88,51 @@ public:
     void setShowFlags(GitStatusListModel::ShowFlags show, GitStatusListModel::ShowFlags check);
 
     /**
+     * Turns the checkboxes on or off (the bHasCheckboxes argument of CGitStatusListCtrl::Init).
+     * @param hasCheckboxes Whether the files have a checkbox; true by default.
+     */
+    void setHasCheckboxes(bool hasCheckboxes);
+
+    /**
+     * Makes the list show the files of a commit rather than the working tree (CGitStatusListCtrl::m_CurrentVersion).
+     * Comparing a file then compares the commit with the parent the change is against, the context menu offers
+     * only that, and reload() does nothing: the owner fills the list with updateWithGitPathList(). A merge's files
+     * are grouped by parent, under "Diff with parent N" (CGitStatusListCtrl::PrepareGroups).
+     * @param revision The commit's hash, or empty for the working tree.
+     * @param parents The commit's parents, first parent first; empty for a root commit.
+     */
+    void setCurrentVersion(const QString& revision, const QStringList& parents);
+
+    /**
+     * @returns The commit whose files are shown, or empty for the working tree.
+     */
+    [[nodiscard]] const QString& currentVersion() const;
+
+    /**
+     * Shows the given entries instead of loading them (CGitStatusListCtrl::UpdateWithGitPathList), and ends the
+     * busy state.
+     * @param entries All entries, listed or not.
+     */
+    void updateWithGitPathList(const QList<GitStatusListEntry>& entries);
+
+    /**
+     * Empties the list (CGitStatusListCtrl::Clear).
+     */
+    void clear();
+
+    /**
+     * Shows the busy string in the empty list while the owner loads its entries (CGitStatusListCtrl::SetBusy).
+     * @param busy Whether the owner is loading.
+     */
+    void setBusy(bool busy);
+
+    /**
+     * Sets what the empty list says while busy (CGitStatusListCtrl::SetBusyString).
+     * @param text Translated text; "Please wait..." by default.
+     */
+    void setBusyString(const QString& text);
+
+    /**
      * Runs git status and git diff --numstat in the background and refills the list when both are done
      * (CGitStatusListCtrl::GetStatus followed by Show). Any load still running is abandoned. F5 calls this.
      */
@@ -165,6 +210,8 @@ private:
     void onDoubleClicked(const QModelIndex& index);
     [[nodiscard]] QList<GitStatusListEntry> selectedEntries() const;
     void startDiff(const GitStatusListEntry& entry);
+    [[nodiscard]] QStringList revisionDiffArguments(int parentNo) const;
+    void showGroups();
     void open(const GitStatusListEntry& entry);
     void openWith(const GitStatusListEntry& entry);
     void explore(const GitStatusListEntry& entry) const;
@@ -182,9 +229,13 @@ private:
     QList<GitStatusEntry> m_pendingStatus; // The status of the running load, waiting for its line counts
     QString m_errorMessage; // Shown in the empty list after a failed load
     QString m_emptyString; // Shown in the empty list after a load that found nothing
+    QString m_busyString; // Shown in the empty list while busy
+    QString m_currentVersion; // The commit whose files are listed; empty for the working tree
+    QStringList m_parentVersions; // The parents of m_currentVersion; empty for a root commit
     bool m_isInitialRepo = false; // No commit yet (CGit::IsInitRepos): there is no HEAD to compare with
     bool m_hasIgnored = false; // Whether the last load listed ignored files
     bool m_includeStaged = false; // Whether staged changes outside m_pathFilter are listed too
+    bool m_isBusy = false; // The owner is loading the entries (setBusy)
 };
 
 } // namespace kgt

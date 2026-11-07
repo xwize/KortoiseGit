@@ -13,9 +13,12 @@
 
 #include <KLocalizedString>
 
+#include <QFont>
 #include <QIcon>
 #include <QMimeDatabase>
 
+#include <algorithm>
+#include <iterator>
 #include <utility>
 
 namespace
@@ -58,7 +61,7 @@ namespace kgt
 {
 
 GitStatusListModel::GitStatusListModel(QObject *parent)
-    : QAbstractTableModel(parent)
+    : QAbstractItemModel(parent)
     , m_show(Show::All)
 {
 }
@@ -79,6 +82,7 @@ QList<GitStatusListEntry> GitStatusListModel::makeEntries(const QList<GitStatusE
             .actions = entryActions(statusEntry),
             .linesAdded = {},
             .linesRemoved = {},
+            .parentNo = 0,
         };
         if (const NumStatEntry *stat = numStatByPath.value(statusEntry.path)) {
             entry.linesAdded = stat->added;
@@ -118,10 +122,34 @@ const QList<GitStatusListEntry>& GitStatusListModel::allEntries() const
     return m_entries;
 }
 
+void GitStatusListModel::setParentHeaders(const QStringList& headers)
+{
+    beginResetModel();
+    m_parentHeaders = headers;
+    rebuildGroups();
+    endResetModel();
+}
+
+bool GitStatusListModel::hasGroups() const
+{
+    return !m_groups.isEmpty();
+}
+
+int GitStatusListModel::listedCount() const
+{
+    return static_cast<int>(m_rows.size());
+}
+
 const GitStatusListEntry& GitStatusListModel::entry(int row) const
 {
     Q_ASSERT(row >= 0 && row < m_rows.size());
     return m_entries.at(m_rows.at(row));
+}
+
+const GitStatusListEntry *GitStatusListModel::entry(const QModelIndex& index) const
+{
+    const qsizetype row = listedRow(index);
+    return row < 0 ? nullptr : &m_entries.at(m_rows.at(row));
 }
 
 QList<GitStatusListEntry> GitStatusListModel::checkedEntries() const
@@ -151,9 +179,7 @@ void GitStatusListModel::setAllChecked(bool checked)
     for (const qsizetype index : std::as_const(m_rows)) {
         m_checkedByPath.insert(m_entries.at(index).path, checked);
     }
-    if (!m_rows.isEmpty()) {
-        Q_EMIT dataChanged(this->index(0, PathColumn), this->index(rowCount() - 1, PathColumn), {Qt::CheckStateRole});
-    }
+    emitCheckStatesChanged();
     Q_EMIT checkedCountChanged();
 }
 
@@ -204,14 +230,55 @@ QString GitStatusListModel::fileExtension(const QString& path)
     return dot > slash ? path.mid(dot) : QString();
 }
 
+QModelIndex GitStatusListModel::index(int row, int column, const QModelIndex& parent) const
+{
+    if (!hasIndex(row, column, parent)) {
+        return {};
+    }
+    // An entry under a group keeps the group's number plus one as its internal id; top-level rows keep 0
+    return createIndex(row, column, parent.isValid() ? static_cast<quintptr>(parent.row()) + 1 : 0);
+}
+
+QModelIndex GitStatusListModel::parent(const QModelIndex& child) const
+{
+    if (!child.isValid() || child.internalId() == 0) {
+        return {};
+    }
+    return createIndex(static_cast<int>(child.internalId() - 1), 0, quintptr(0));
+}
+
 int GitStatusListModel::rowCount(const QModelIndex& parent) const
 {
-    return parent.isValid() ? 0 : static_cast<int>(m_rows.size());
+    if (!hasGroups()) {
+        return parent.isValid() ? 0 : static_cast<int>(m_rows.size());
+    }
+    if (!parent.isValid()) {
+        return static_cast<int>(m_groups.size());
+    }
+    if (parent.internalId() != 0 || parent.column() != 0) {
+        return 0;
+    }
+    return static_cast<int>(m_groups.at(parent.row()).size());
 }
 
 int GitStatusListModel::columnCount(const QModelIndex& parent) const
 {
-    return parent.isValid() ? 0 : ColumnCount;
+    if (!parent.isValid() || (hasGroups() && parent.internalId() == 0)) {
+        return ColumnCount;
+    }
+    return 0;
+}
+
+void GitStatusListModel::setHasCheckboxes(bool hasCheckboxes)
+{
+    beginResetModel();
+    m_hasCheckboxes = hasCheckboxes;
+    endResetModel();
+}
+
+bool GitStatusListModel::hasCheckboxes() const
+{
+    return m_hasCheckboxes;
 }
 
 QVariant GitStatusListModel::data(const QModelIndex& index, int role) const
@@ -219,12 +286,16 @@ QVariant GitStatusListModel::data(const QModelIndex& index, int role) const
     if (!checkIndex(index, CheckIndexOption::IndexIsValid)) {
         return {};
     }
-    const GitStatusListEntry& rowEntry = entry(index.row());
+    const GitStatusListEntry *listEntry = entry(index);
+    if (!listEntry) {
+        return groupData(index, role);
+    }
+    const GitStatusListEntry& rowEntry = *listEntry;
     switch (role) {
     case Qt::DisplayRole:
         return displayData(rowEntry, index.column());
     case Qt::CheckStateRole:
-        if (index.column() == PathColumn) {
+        if (m_hasCheckboxes && index.column() == PathColumn) {
             return isChecked(rowEntry) ? Qt::Checked : Qt::Unchecked;
         }
         return {};
@@ -252,11 +323,15 @@ QVariant GitStatusListModel::data(const QModelIndex& index, int role) const
 
 bool GitStatusListModel::setData(const QModelIndex& index, const QVariant& value, int role)
 {
-    if (!checkIndex(index, CheckIndexOption::IndexIsValid) || index.column() != PathColumn || role != Qt::CheckStateRole) {
+    if (!m_hasCheckboxes || !checkIndex(index, CheckIndexOption::IndexIsValid) || index.column() != PathColumn || role != Qt::CheckStateRole) {
+        return false;
+    }
+    const GitStatusListEntry *listEntry = entry(index);
+    if (!listEntry) {
         return false;
     }
     const bool checked = value.value<Qt::CheckState>() == Qt::Checked;
-    m_checkedByPath.insert(entry(index.row()).path, checked);
+    m_checkedByPath.insert(listEntry->path, checked);
     Q_EMIT dataChanged(index, index, {Qt::CheckStateRole});
     Q_EMIT checkedCountChanged();
     return true;
@@ -267,8 +342,11 @@ Qt::ItemFlags GitStatusListModel::flags(const QModelIndex& index) const
     if (!checkIndex(index, CheckIndexOption::IndexIsValid)) {
         return Qt::NoItemFlags;
     }
+    if (!entry(index)) {
+        return Qt::ItemIsEnabled;
+    }
     Qt::ItemFlags itemFlags = Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemNeverHasChildren;
-    if (index.column() == PathColumn) {
+    if (m_hasCheckboxes && index.column() == PathColumn) {
         itemFlags |= Qt::ItemIsUserCheckable;
     }
     return itemFlags;
@@ -310,6 +388,74 @@ void GitStatusListModel::rebuildRows()
         if ((actions & show) != 0) {
             m_rows.append(index);
         }
+    }
+    rebuildGroups();
+}
+
+void GitStatusListModel::rebuildGroups()
+{
+    // CGitStatusListCtrl::PrepareGroups: a group per parent once any change is against a parent but the first
+    m_groups.clear();
+    int maxParent = 0;
+    for (const qsizetype index : std::as_const(m_rows)) {
+        maxParent = std::max(maxParent, m_entries.at(index).parentNo);
+    }
+    if (maxParent == 0) {
+        return;
+    }
+    m_groups.resize(std::max<qsizetype>(maxParent + 1, m_parentHeaders.size()));
+    for (qsizetype row = 0; row < m_rows.size(); ++row) {
+        std::next(m_groups.begin(), m_entries.at(m_rows.at(row)).parentNo)->append(row);
+    }
+}
+
+void GitStatusListModel::emitCheckStatesChanged()
+{
+    if (!hasGroups()) {
+        if (!m_rows.isEmpty()) {
+            Q_EMIT dataChanged(index(0, PathColumn), index(rowCount() - 1, PathColumn), {Qt::CheckStateRole});
+        }
+        return;
+    }
+    for (int group = 0; group < m_groups.size(); ++group) {
+        const QModelIndex groupIndex = index(group, 0);
+        const int count = rowCount(groupIndex);
+        if (count > 0) {
+            Q_EMIT dataChanged(index(0, PathColumn, groupIndex), index(count - 1, PathColumn, groupIndex), {Qt::CheckStateRole});
+        }
+    }
+}
+
+qsizetype GitStatusListModel::listedRow(const QModelIndex& index) const
+{
+    if (!index.isValid()) {
+        return -1;
+    }
+    if (!hasGroups()) {
+        return index.row();
+    }
+    if (index.internalId() == 0) {
+        return -1;
+    }
+    return m_groups.at(static_cast<qsizetype>(index.internalId() - 1)).at(index.row());
+}
+
+QVariant GitStatusListModel::groupData(const QModelIndex& index, int role) const
+{
+    const int group = index.row();
+    if (index.column() != PathColumn) {
+        return {};
+    }
+    switch (role) {
+    case Qt::DisplayRole:
+        return group < m_parentHeaders.size() ? m_parentHeaders.at(group) : i18n("Diff with parent %1", group + 1);
+    case Qt::FontRole: {
+        QFont font;
+        font.setBold(true);
+        return font;
+    }
+    default:
+        return {};
     }
 }
 

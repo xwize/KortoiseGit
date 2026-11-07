@@ -16,7 +16,7 @@
 #include "git/gitstatus.hpp"
 #include "git/tgitpath.hpp"
 
-#include <QAbstractTableModel>
+#include <QAbstractItemModel>
 #include <QFlags>
 #include <QHash>
 #include <QList>
@@ -35,6 +35,7 @@ struct GitStatusListEntry {
     TGitPath::Actions actions; // TortoiseGit's m_Action: what happened to the file, Missing included
     QString linesAdded; // TortoiseGit's m_StatAdd: a number, "-" for a binary file, empty if unknown
     QString linesRemoved; // TortoiseGit's m_StatDel
+    int parentNo = 0; // TortoiseGit's m_ParentNo: in a commit's list, the parent the change is against
 
     bool operator==(const GitStatusListEntry&) const = default;
 };
@@ -42,8 +43,11 @@ struct GitStatusListEntry {
 /**
  * The status list's rows: the entries the show flags let through, each with a checkbox. The check state of every
  * path is remembered across reloads and changes of the show flags, as TortoiseGit's m_mapFilenameToChecked does.
+ *
+ * The list is flat, except for a merge commit's files compared with more than one parent: those are grouped
+ * under a header row per parent, as CGitStatusListCtrl::PrepareGroups does, and the entries are its children.
  */
-class GitStatusListModel : public QAbstractTableModel
+class GitStatusListModel : public QAbstractItemModel
 {
     Q_OBJECT
 
@@ -137,10 +141,33 @@ public:
     [[nodiscard]] const QList<GitStatusListEntry>& allEntries() const;
 
     /**
-     * @param row A row of this model.
-     * @returns The entry shown in that row.
+     * Names the groups of a commit's files, one per parent (IDS_STATUSLIST_GROUP_DIFFWITHPARENT). The list is
+     * grouped only when an entry is against a parent other than the first.
+     * @param headers The header of each parent's group, in parent order; empty for no groups.
+     */
+    void setParentHeaders(const QStringList& headers);
+
+    /**
+     * @returns Whether the entries are grouped by parent.
+     */
+    [[nodiscard]] bool hasGroups() const;
+
+    /**
+     * @returns How many entries are listed, not counting group headers.
+     */
+    [[nodiscard]] int listedCount() const;
+
+    /**
+     * @param row Which listed entry, from 0 to listedCount(); the same as the model row when there are no groups.
+     * @returns The entry.
      */
     [[nodiscard]] const GitStatusListEntry& entry(int row) const;
+
+    /**
+     * @param index An index of this model.
+     * @returns The entry shown there, or nullptr for a group header.
+     */
+    [[nodiscard]] const GitStatusListEntry *entry(const QModelIndex& index) const;
 
     /**
      * @returns The listed entries that are checked, in row order.
@@ -159,6 +186,18 @@ public:
     void setAllChecked(bool checked);
 
     /**
+     * Turns the checkboxes on or off (the bHasCheckboxes argument of CGitStatusListCtrl::Init). They are on by
+     * default; the log dialog's list has none.
+     * @param hasCheckboxes Whether the Path column has a checkbox.
+     */
+    void setHasCheckboxes(bool hasCheckboxes);
+
+    /**
+     * @returns Whether the Path column has a checkbox.
+     */
+    [[nodiscard]] bool hasCheckboxes() const;
+
+    /**
      * @param actions What happened to a file.
      * @returns The Status column's text for it (CTGitPath::GetActionName).
      */
@@ -171,6 +210,8 @@ public:
      */
     [[nodiscard]] static QString fileExtension(const QString& path);
 
+    [[nodiscard]] QModelIndex index(int row, int column, const QModelIndex& parent = {}) const override;
+    [[nodiscard]] QModelIndex parent(const QModelIndex& child) const override;
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
@@ -186,15 +227,22 @@ Q_SIGNALS:
 
 private:
     void rebuildRows();
+    void rebuildGroups();
+    void emitCheckStatesChanged();
+    [[nodiscard]] qsizetype listedRow(const QModelIndex& index) const;
+    [[nodiscard]] QVariant groupData(const QModelIndex& index, int role) const;
     [[nodiscard]] bool isChecked(const GitStatusListEntry& entry) const;
     [[nodiscard]] QVariant displayData(const GitStatusListEntry& entry, int column) const;
     [[nodiscard]] static QVariant sortData(const GitStatusListEntry& entry, int column);
 
     QList<GitStatusListEntry> m_entries;
     QList<qsizetype> m_rows; // TortoiseGit's m_arListArray: the index in m_entries of each listed row
+    QStringList m_parentHeaders; // The header of each parent's group
+    QList<QList<qsizetype>> m_groups; // When grouped: the index in m_rows of each entry, per parent
     QHash<QString, bool> m_checkedByPath; // TortoiseGit's m_mapFilenameToChecked
     ShowFlags m_show;
     ShowFlags m_check;
+    bool m_hasCheckboxes = true;
 };
 
 } // namespace kgt
