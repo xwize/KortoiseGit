@@ -42,18 +42,20 @@ public:
      * Runs git and waits for it to exit.
      * @param arguments The arguments after "git".
      * @param mode Whether git may take the repository's optional locks.
+     * @param input What git reads on stdin; empty for none.
      * @returns Everything git wrote to stdout.
      * @throws RuntimeError (category Git) if git fails to start or exits non-zero.
      */
-    [[nodiscard]] QByteArray run(const QStringList& arguments, RunMode mode = RunMode::ReadWrite) const;
+    [[nodiscard]] QByteArray run(const QStringList& arguments, RunMode mode = RunMode::ReadWrite, const QByteArray& input = {}) const;
 
     /**
      * Starts git without waiting for it.
      * @param arguments The arguments after "git".
      * @param mode Whether git may take the repository's optional locks.
+     * @param input What git reads on stdin; empty for none.
      * @returns The running call: connect to its finished() signal, then read its output().
      */
-    [[nodiscard]] std::unique_ptr<GitCall> runAsync(const QStringList& arguments, RunMode mode = RunMode::ReadWrite) const;
+    [[nodiscard]] std::unique_ptr<GitCall> runAsync(const QStringList& arguments, RunMode mode = RunMode::ReadWrite, const QByteArray& input = {}) const;
 
     /**
      * Finds the top of the working tree holding a path, with git rev-parse --show-toplevel.

@@ -20,12 +20,16 @@ add_library(kgtproc STATIC)
 
 target_sources(kgtproc PRIVATE
     ${kgtproc_logging}
+    adddlg.cpp
+    adddlg.hpp
     cmdlineargs.cpp
     cmdlineargs.hpp
     commitdlg.cpp
     commitdlg.hpp
     createrepodlg.cpp
     createrepodlg.hpp
+    commands/addcommand.cpp
+    commands/addcommand.hpp
     commands/commitcommand.cpp
     commands/commitcommand.hpp
     commands/createrepositorycommand.cpp

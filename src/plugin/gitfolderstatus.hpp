@@ -63,6 +63,17 @@ public:
     [[nodiscard]] ItemVersion itemVersion(const QString& name, bool isDir) const;
 
     /**
+     * @param name A folder directly inside the folder.
+     * @returns Whether an untracked file lies somewhere below it, so there is something in it to add.
+     */
+    [[nodiscard]] bool hasUnversioned(const QString& name) const;
+
+    /**
+     * @returns Whether an untracked file lies anywhere in the folder.
+     */
+    [[nodiscard]] bool hasUnversioned() const;
+
+    /**
      * @returns The repository's index file, whose changes (git add, commit) change the overlays. Empty unless
      *          built by fetch().
      */
@@ -91,6 +102,7 @@ private:
     QHash<QString, ChildState> m_children;
     QSet<QString> m_trackedChildren;
     std::optional<ItemVersion> m_wholeFolder; // Set when the folder itself lies inside an ignored or untracked folder
+    bool m_hasUnversioned = false; // An untracked file lies somewhere in the folder
     QString m_indexFile;
 };
 
