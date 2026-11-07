@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Restarts Dolphin with the KortoiseGit plugin from the build tree, without installing anything.
+# Usage: scripts/dolphin-dev.sh [preset] [dolphin arguments...]   (preset defaults to gcc-debug)
+# Closing that Dolphin and starting it normally goes back to the installed plugins.
+set -euo pipefail
+
+source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+preset="${1:-gcc-debug}"
+[[ $# -gt 0 ]] && shift
+build_dir="$source_dir/build/$preset"
+plugin="$build_dir/bin/dolphin/vcs/kortoisegitplugin.so"
+
+if [[ ! -f "$build_dir/CMakeCache.txt" ]]; then
+    cmake --preset "$preset" -S "$source_dir"
+fi
+# The plugin and the app it launches
+cmake --build "$build_dir" --target kortoisegitplugin kortoisegitproc
+
+if [[ ! -f "$plugin" ]]; then
+    echo "Plugin not found at $plugin" >&2
+    exit 1
+fi
+
+# Ask Dolphin to quit cleanly, then kill it if it is still running after 5 seconds
+if pgrep -x dolphin >/dev/null; then
+    echo "Quitting Dolphin..."
+    if command -v kquitapp6 >/dev/null; then
+        kquitapp6 dolphin >/dev/null 2>&1 || true
+    else
+        pkill -x dolphin || true
+    fi
+    for _ in {1..50}; do
+        pgrep -x dolphin >/dev/null || break
+        sleep 0.1
+    done
+    if pgrep -x dolphin >/dev/null; then
+        echo "Dolphin did not quit; killing it"
+        pkill -9 -x dolphin || true
+    fi
+fi
+
+echo "Starting Dolphin with $plugin"
+echo "In Configure Dolphin, enable KortoiseGit and disable Git in the version control plugins, if not done already."
+QT_PLUGIN_PATH="$build_dir/bin${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}" \
+    setsid dolphin "$@" >/dev/null 2>&1 </dev/null &
+disown

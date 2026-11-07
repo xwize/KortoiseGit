@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# Licence information for files that cannot carry a comment header (JSON)
+version = 1
+
+[[annotations]]
+path = ["CMakePresets.json", "src/plugin/kortoisegitplugin.json"]
+SPDX-FileCopyrightText = "2026 James Jones <this.verb@gmail.com>"
+SPDX-License-Identifier = "GPL-2.0-or-later"

@@ -1,0 +1,73 @@
+# SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# The rules GUIDELINES.md marks (clang-tidy). Run on every GCC build (KGT_CLANG_TIDY); any warning fails it.
+#
+# Disabled checks, and why:
+#   cppcoreguidelines-owning-memory: Qt's object model owns parented QObjects (new QWidget(this)), which this
+#       check rejects. GUIDELINES.md allows exactly that form of new.
+#   cppcoreguidelines-avoid-magic-numbers: Qt layout and sizing code (resize(600, 300), stretch factors,
+#       timeouts in tests) is full of values that gain nothing from a name.
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-avoid-magic-numbers,
+  google-explicit-constructor,
+  misc-const-correctness,
+  modernize-use-designated-initializers,
+  modernize-use-nodiscard,
+  readability-braces-around-statements,
+  readability-function-cognitive-complexity,
+  readability-function-size,
+  readability-identifier-length,
+  readability-identifier-naming,
+  readability-isolate-declaration,
+  readability-else-after-return,
+  readability-make-member-function-const,
+  readability-qualified-auto,
+  readability-container-size-empty
+WarningsAsErrors: '*'
+# Only our sources: Qt, KDE Frameworks, generated code (moc output, logging categories: all under build/) and system
+# headers are excluded. CMake does not lint AUTOMOC sources; other generated sources get SKIP_LINTING.
+HeaderFilterRegex: '.*/(src|tests)/.*\.hpp$'
+ExcludeHeaderFilterRegex: '(.*_autogen/.*|.*/build/.*)'
+CheckOptions:
+  readability-function-cognitive-complexity.Threshold: 25
+  readability-function-cognitive-complexity.IgnoreMacros: true
+  readability-function-size.NestingThreshold: 4
+  readability-function-size.ParameterThreshold: 6
+  readability-identifier-length.MinimumVariableNameLength: 3
+  readability-identifier-length.MinimumParameterNameLength: 3
+  readability-identifier-length.MinimumLoopCounterNameLength: 1
+  readability-identifier-length.MinimumExceptionNameLength: 1
+  readability-identifier-length.IgnoredVariableNames: '^(x|y|z|w|dx|dy|dz|dw|i|j|k|e|n)$'
+  readability-identifier-length.IgnoredParameterNames: '^(x|y|z|w|dx|dy|dz|dw|i|j|k|e|n)$'
+  readability-identifier-length.IgnoredLoopCounterNames: '^(x|y|z|w|dx|dy|dz|dw|i|j|k|e|n)$'
+  readability-identifier-naming.NamespaceCase: lower_case
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.TypeAliasCase: CamelCase
+  readability-identifier-naming.TypedefCase: CamelCase
+  readability-identifier-naming.TemplateParameterCase: CamelCase
+  readability-identifier-naming.EnumConstantCase: CamelCase
+  readability-identifier-naming.FunctionCase: camelBack
+  readability-identifier-naming.MethodCase: camelBack
+  readability-identifier-naming.VariableCase: camelBack
+  readability-identifier-naming.ParameterCase: camelBack
+  readability-identifier-naming.LocalConstantCase: camelBack
+  readability-identifier-naming.ConstexprVariableCase: camelBack
+  readability-identifier-naming.GlobalConstantCase: camelBack
+  readability-identifier-naming.MemberCase: camelBack
+  readability-identifier-naming.PrivateMemberPrefix: m_
+  readability-identifier-naming.ProtectedMemberPrefix: m_
+  readability-identifier-naming.PublicMemberCase: camelBack
+  readability-identifier-naming.StaticVariablePrefix: s_
+  readability-identifier-naming.StaticVariableCase: camelBack
+  readability-identifier-naming.GlobalVariablePrefix: s_
+  readability-identifier-naming.GlobalVariableCase: camelBack
+  readability-identifier-naming.ClassConstantCase: camelBack
+  readability-identifier-naming.StaticConstantCase: camelBack
+  modernize-use-nodiscard.ReplacementString: '[[nodiscard]]'
