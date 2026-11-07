@@ -14,6 +14,8 @@ target_sources(kgtgit PRIVATE
     gitnumstat.hpp
     gitstatus.cpp
     gitstatus.hpp
+    massivegittask.cpp
+    massivegittask.hpp
     tgitpath.cpp
     tgitpath.hpp
 )

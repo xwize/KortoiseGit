@@ -83,6 +83,7 @@ GitStatusListCtrl::GitStatusListCtrl(QWidget *parent)
     : QTreeView(parent)
     , m_model(new GitStatusListModel(this))
     , m_proxy(new QSortFilterProxyModel(this))
+    , m_emptyString(i18n("File list is empty"))
 {
     m_proxy->setSourceModel(m_model);
     m_proxy->setSortRole(GitStatusListModel::SortRole);
@@ -131,6 +132,12 @@ void GitStatusListCtrl::setShowFlags(GitStatusListModel::ShowFlags show, GitStat
     if (loadedBefore && show.testFlag(GitStatusListModel::Show::Ignored) && !m_hasIgnored) {
         reload();
     }
+}
+
+void GitStatusListCtrl::setEmptyString(const QString& text)
+{
+    m_emptyString = text;
+    viewport()->update();
 }
 
 void GitStatusListCtrl::reload()
@@ -244,7 +251,7 @@ void GitStatusListCtrl::paintEvent(QPaintEvent *event)
     } else if (!m_errorMessage.isEmpty()) {
         message = m_errorMessage;
     } else {
-        message = i18n("File list is empty");
+        message = m_emptyString;
     }
     QPainter painter(viewport());
     painter.setPen(palette().color(QPalette::PlaceholderText));

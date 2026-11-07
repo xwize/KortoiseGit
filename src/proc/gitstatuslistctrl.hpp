@@ -80,6 +80,12 @@ public:
     void setShowFlags(GitStatusListModel::ShowFlags show, GitStatusListModel::ShowFlags check);
 
     /**
+     * Sets what the list says when it is loaded and empty (CGitStatusListCtrl::SetEmptyString).
+     * @param text Translated text; "File list is empty" by default.
+     */
+    void setEmptyString(const QString& text);
+
+    /**
      * Runs git status and git diff --numstat in the background and refills the list when both are done
      * (CGitStatusListCtrl::GetStatus followed by Show). Any load still running is abandoned. F5 calls this.
      */
@@ -165,6 +171,7 @@ private:
     std::unique_ptr<GitCall> m_statusCall;
     std::unique_ptr<GitCall> m_numStatCall;
     QList<GitStatusEntry> m_pendingStatus; // The status of the running load, waiting for its line counts
+    QString m_emptyString; // Shown in the empty list after a successful load
     QString m_errorMessage; // Shown in the empty list after a failed load
     bool m_isInitialRepo = false; // No commit yet (CGit::IsInitRepos): there is no HEAD to compare with
     bool m_hasIgnored = false; // Whether the last load listed ignored files

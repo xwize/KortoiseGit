@@ -6,10 +6,15 @@
 
 #include <KFileItem>
 
+#include <QAction>
+#include <QDir>
+#include <QFileInfo>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUrl>
+
+#include <tuple>
 
 namespace
 {
@@ -23,6 +28,39 @@ using namespace kgt;
 KFileItem item(const QString& path)
 {
     return KFileItem(QUrl::fromLocalFile(path));
+}
+
+/**
+ * @param plugin The plugin, after a retrieval.
+ * @param items The selected items.
+ * @returns The texts of the context menu entries the plugin offers for them.
+ */
+QStringList menuTexts(const ShellExt& plugin, const KFileItemList& items)
+{
+    QStringList texts;
+    for (const QAction *action : plugin.versionControlActions(items)) {
+        texts.append(action->text());
+    }
+    return texts;
+}
+
+/**
+ * Asks the plugin about every item of a folder, as Dolphin does after each retrieval.
+ * @param plugin The plugin.
+ * @param directory The folder.
+ * @returns Whether the retrieval succeeded.
+ */
+bool retrieve(ShellExt& plugin, const QString& directory)
+{
+    if (!plugin.beginRetrieval(directory + QLatin1Char('/'))) {
+        return false;
+    }
+    const QFileInfoList entries = QDir(directory).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
+    for (const QFileInfo& entry : entries) {
+        std::ignore = plugin.itemVersion(item(entry.absoluteFilePath()));
+    }
+    plugin.endRetrieval();
+    return true;
 }
 
 } // namespace
@@ -68,6 +106,46 @@ private Q_SLOTS:
         const QTemporaryDir notARepo;
         QVERIFY(!plugin.beginRetrieval(notARepo.path() + QLatin1Char('/')));
         QCOMPARE(plugin.itemVersion(item(repo.filePath(QStringLiteral("a.txt")))), KVersionControlPlugin::UnversionedVersion);
+    }
+
+    void offersAddForUnversionedItems()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral(".gitignore"), "*.log\n");
+        repo.write(QStringLiteral("tracked.txt"), "a\n");
+        repo.write(QStringLiteral("clean/a.txt"), "a\n");
+        repo.write(QStringLiteral("withnew/a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        repo.write(QStringLiteral("new.txt"), "new\n");
+        repo.write(QStringLiteral("build.log"), "log\n");
+        repo.write(QStringLiteral("withnew/deeper/new.txt"), "new\n");
+        repo.write(QStringLiteral("untracked/b.txt"), "b\n");
+
+        ShellExt plugin(nullptr, {});
+        QVERIFY(retrieve(plugin, repo.path()));
+        const QString log = QStringLiteral("Show &log");
+        const QString add = QStringLiteral("&Add...");
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("tracked.txt")))}), QStringList{log});
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), QStringList{log});
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral(".git")))}), QStringList{log});
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{log, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("build.log")))}), (QStringList{log, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("withnew")))}), (QStringList{log, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("untracked")))}), (QStringList{log, add}));
+        // One addable item among others is enough, as in TortoiseGit
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("tracked.txt"))), item(repo.filePath(QStringLiteral("new.txt")))}),
+                 (QStringList{log, add}));
+        // Nothing selected: Dolphin asks about the folder it shows
+        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{log, add}));
+
+        // A folder that was looked into on its own: its own listing says whether it holds new files
+        QVERIFY(retrieve(plugin, repo.filePath(QStringLiteral("clean"))));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), QStringList{log});
+
+        // Once the files are added, the next retrieval forgets them
+        repo.run({QStringLiteral("add"), QStringLiteral("new.txt")});
+        QVERIFY(retrieve(plugin, repo.path()));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), QStringList{log});
     }
 
     void stagingRefreshesOverlays()

@@ -182,6 +182,11 @@ KVersionControlPlugin::ItemVersion GitFolderStatus::itemVersion(const QString& n
     return KVersionControlPlugin::IgnoredVersion;
 }
 
+bool GitFolderStatus::hasUnversioned(const QString& name) const
+{
+    return m_children.value(name).hasUntracked;
+}
+
 const QString& GitFolderStatus::indexFile() const
 {
     return m_indexFile;

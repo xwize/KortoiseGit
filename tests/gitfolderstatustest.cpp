@@ -205,6 +205,19 @@ private Q_SLOTS:
         QCOMPARE(status.itemVersion(QStringLiteral("srcfile.txt"), false), KVersionControlPlugin::NormalVersion);
     }
 
+    void knowsWhichFoldersHoldUnversionedFiles()
+    {
+        const GitFolderStatus status(QString(),
+                                     {ofKind(GitStatusKind::Untracked, QStringLiteral("tracked/deeper/new.txt")),
+                                      ofKind(GitStatusKind::Ignored, QStringLiteral("ignored/a.log")),
+                                      tracked(QStringLiteral("modified/a.txt"), FileState::Unmodified, FileState::Modified)},
+                                     {QStringLiteral("tracked"), QStringLiteral("modified")});
+        QVERIFY(status.hasUnversioned(QStringLiteral("tracked")));
+        QVERIFY(!status.hasUnversioned(QStringLiteral("ignored")));
+        QVERIFY(!status.hasUnversioned(QStringLiteral("modified")));
+        QVERIFY(!status.hasUnversioned(QStringLiteral("absent")));
+    }
+
     void insideAnIgnoredFolderEverythingIsIgnored()
     {
         const GitFolderStatus status(QStringLiteral("build/out/"), {ofKind(GitStatusKind::Ignored, QStringLiteral("build/"))}, {});

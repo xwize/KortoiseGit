@@ -41,8 +41,9 @@ public:
      * @param workingDirectory The directory git runs in.
      * @param arguments The arguments after "git".
      * @param mode Whether git may take the repository's optional locks.
+     * @param input What git reads on stdin, such as a --pathspec-from-file=- list; stdin is empty if this is.
      */
-    GitCall(const QString& workingDirectory, const QStringList& arguments, RunMode mode);
+    GitCall(const QString& workingDirectory, const QStringList& arguments, RunMode mode, const QByteArray& input = {});
     ~GitCall() override;
 
     GitCall(const GitCall&) = delete;

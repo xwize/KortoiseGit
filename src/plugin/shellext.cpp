@@ -13,11 +13,13 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QIcon>
+#include <QMutexLocker>
 #include <QProcess>
 #include <QStandardPaths>
 
 #include <dlfcn.h>
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 
@@ -90,10 +92,15 @@ namespace kgt
 ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     : KVersionControlPlugin(parent)
     , m_showLogAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"), this))
+    , m_addAction(new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("&Add..."), this))
 {
     Q_UNUSED(args)
     connect(m_showLogAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("log"), m_showLogAction);
+    });
+    m_addAction->setToolTip(i18n("Adds file(s) to Git control"));
+    connect(m_addAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("add"), m_addAction);
     });
 
     m_refreshTimer.setSingleShot(true);
@@ -113,6 +120,11 @@ QString ShellExt::fileName() const
 bool ShellExt::beginRetrieval(const QString& directory)
 {
     m_folderStatus.reset();
+    m_retrievalDirectory = QDir::cleanPath(directory);
+    {
+        const QMutexLocker locker(&m_addableMutex);
+        m_addable.remove(m_retrievalDirectory);
+    }
     try {
         m_folderStatus = GitFolderStatus::fetch(directory);
     } catch (const RuntimeError& e) {
@@ -141,7 +153,17 @@ KVersionControlPlugin::ItemVersion ShellExt::itemVersion(const KFileItem& item) 
     if (!m_folderStatus) {
         return UnversionedVersion;
     }
-    return m_folderStatus->itemVersion(item.name(), item.isDir());
+    const QString name = item.name();
+    const ItemVersion version = m_folderStatus->itemVersion(name, item.isDir());
+    const bool hasUnversioned = version == UnversionedVersion || (item.isDir() && m_folderStatus->hasUnversioned(name));
+    // ".git" is reported as unversioned so it gets no overlay, but there is nothing in it to add
+    if (name != QLatin1String(".git") && (hasUnversioned || version == IgnoredVersion)) {
+        const QMutexLocker locker(&m_addableMutex);
+        AddableItems& addable = m_addable.try_emplace(m_retrievalDirectory).first->second;
+        addable.names.insert(name);
+        addable.hasUnversioned = addable.hasUnversioned || hasUnversioned;
+    }
+    return version;
 }
 
 QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) const
@@ -151,13 +173,28 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
         return {};
     }
     m_showLogAction->setData(paths);
-    return {m_showLogAction};
+    if (!canAdd(items)) {
+        return {m_showLogAction};
+    }
+    m_addAction->setData(paths);
+    return {m_showLogAction, m_addAction};
 }
 
 QList<QAction *> ShellExt::outOfVersionControlActions(const KFileItemList& items) const
 {
     Q_UNUSED(items)
     return {};
+}
+
+bool ShellExt::canAdd(const KFileItemList& items) const
+{
+    const QMutexLocker locker(&m_addableMutex);
+    return std::ranges::any_of(items, [this](const KFileItem& item) {
+        const QString path = QDir::cleanPath(item.localPath());
+        const QFileInfo info(path);
+        // The item as a child of its folder, or a folder Dolphin shows (with nothing selected) that holds new files
+        return m_addable.value(info.absolutePath()).names.contains(info.fileName()) || (item.isDir() && m_addable.value(path).hasUnversioned);
+    });
 }
 
 void ShellExt::runCommand(const QString& command, const QAction *action)

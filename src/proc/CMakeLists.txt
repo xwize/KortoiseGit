@@ -20,8 +20,12 @@ add_library(kgtproc STATIC)
 
 target_sources(kgtproc PRIVATE
     ${kgtproc_logging}
+    adddlg.cpp
+    adddlg.hpp
     cmdlineargs.cpp
     cmdlineargs.hpp
+    commands/addcommand.cpp
+    commands/addcommand.hpp
     commands/command.cpp
     commands/command.hpp
     commands/logcommand.cpp

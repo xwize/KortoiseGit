@@ -63,6 +63,12 @@ public:
     [[nodiscard]] ItemVersion itemVersion(const QString& name, bool isDir) const;
 
     /**
+     * @param name A folder directly inside the folder.
+     * @returns Whether an untracked file lies somewhere below it, so there is something in it to add.
+     */
+    [[nodiscard]] bool hasUnversioned(const QString& name) const;
+
+    /**
      * @returns The repository's index file, whose changes (git add, commit) change the overlays. Empty unless
      *          built by fetch().
      */

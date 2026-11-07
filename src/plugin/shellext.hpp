@@ -14,6 +14,10 @@
 #include <Dolphin/KVersionControlPlugin>
 #include <KDirWatch>
 
+#include <QHash>
+#include <QMutex>
+#include <QSet>
+#include <QString>
 #include <QTimer>
 #include <QVariantList>
 
@@ -64,13 +68,15 @@ public:
 
     /**
      * @param item The item Dolphin draws, directly inside the folder given to beginRetrieval().
-     * @returns Its git state.
+     * @returns Its git state. Also remembers whether it can be added, for versionControlActions().
      */
     [[nodiscard]] ItemVersion itemVersion(const KFileItem& item) const override;
 
     /**
      * @param items The selected items, or the current directory when nothing is selected.
-     * @returns The context menu actions for items inside a git working tree.
+     * @returns The context menu actions for items inside a git working tree: Show log, and Add... if any item is
+     *          unversioned or ignored, or is a folder holding unversioned files (TortoiseGit's MenuInfo for Add).
+     *          Called on the main thread.
      */
     [[nodiscard]] QList<QAction *> versionControlActions(const KFileItemList& items) const override;
 
@@ -81,6 +87,20 @@ public:
     [[nodiscard]] QList<QAction *> outOfVersionControlActions(const KFileItemList& items) const override;
 
 private:
+    /**
+     * What itemVersion() found in one folder that Add can act on.
+     */
+    struct AddableItems {
+        QSet<QString> names; // Children that are unversioned, ignored, or folders with unversioned files below
+        bool hasUnversioned = false; // Whether an unversioned file lies somewhere in the folder
+    };
+
+    /**
+     * @param items The items a context menu is for.
+     * @returns Whether TortoiseGit would offer Add for them.
+     */
+    [[nodiscard]] bool canAdd(const KFileItemList& items) const;
+
     /**
      * Starts kortoisegitproc for the paths stored in @p action's data.
      * @param command TortoiseGit's command name, passed as --command.
@@ -96,7 +116,11 @@ private:
     void watchIndex(const QString& indexFile);
 
     QAction *m_showLogAction;
+    QAction *m_addAction;
     std::optional<GitFolderStatus> m_folderStatus; // Only touched on Dolphin's retrieval thread
+    QString m_retrievalDirectory; // The folder of the running retrieval, without a trailing '/'; retrieval thread only
+    mutable QMutex m_addableMutex; // Guards m_addable: written on the retrieval thread, read on the main thread
+    mutable QHash<QString, AddableItems> m_addable; // By folder, without a trailing '/'
     KDirWatch m_indexWatch;
     QString m_watchedIndex; // The file m_indexWatch watches, if any
     QTimer m_refreshTimer; // Collects the several index writes of one git command into one refresh
