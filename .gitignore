@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+/build/
+# IDEs (CLion, Qt Creator, VS Code)
+.idea/
+cmake-build-*/
+CMakeLists.txt.user*
+CMakeUserPresets.json
+.vscode/
+.cache/
+*~
