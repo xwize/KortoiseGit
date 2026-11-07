@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 set(kgt_tests
+    adddlgtest
     cmdlineargstest
     commitdlgtest
     gitadmindirtest
@@ -10,6 +11,7 @@ set(kgt_tests
     gitstatustest
     gittest
     logdlgtest
+    massivegittasktest
     proctest
     resulttest
 )

@@ -50,13 +50,15 @@ QProcessEnvironment gitEnvironment(kgt::RunMode mode)
 namespace kgt
 {
 
-GitCall::GitCall(const QString& workingDirectory, const QStringList& arguments, RunMode mode)
+GitCall::GitCall(const QString& workingDirectory, const QStringList& arguments, RunMode mode, const QByteArray& input)
 {
     m_process.setProgram(QLatin1String(gitProgram));
     m_process.setArguments(arguments);
     m_process.setWorkingDirectory(workingDirectory);
     m_process.setProcessEnvironment(gitEnvironment(mode));
-    m_process.setStandardInputFile(QProcess::nullDevice());
+    if (input.isEmpty()) {
+        m_process.setStandardInputFile(QProcess::nullDevice());
+    }
 
     connect(&m_process, &QProcess::finished, this, &GitCall::onProcessFinished);
     connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
@@ -71,6 +73,11 @@ GitCall::GitCall(const QString& workingDirectory, const QStringList& arguments, 
     });
 
     m_process.start();
+    if (!input.isEmpty() && m_process.state() != QProcess::NotRunning) {
+        // QProcess buffers it and writes it as git reads, from the event loop or from waitForFinished()
+        m_process.write(input);
+        m_process.closeWriteChannel();
+    }
 }
 
 GitCall::~GitCall()

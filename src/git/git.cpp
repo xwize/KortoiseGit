@@ -23,16 +23,16 @@ const QString& Git::workingDirectory() const
     return m_workingDirectory;
 }
 
-QByteArray Git::run(const QStringList& arguments, RunMode mode) const
+QByteArray Git::run(const QStringList& arguments, RunMode mode, const QByteArray& input) const
 {
-    GitCall call(m_workingDirectory, arguments, mode);
+    GitCall call(m_workingDirectory, arguments, mode, input);
     call.waitForFinished();
     return call.output();
 }
 
-std::unique_ptr<GitCall> Git::runAsync(const QStringList& arguments, RunMode mode) const
+std::unique_ptr<GitCall> Git::runAsync(const QStringList& arguments, RunMode mode, const QByteArray& input) const
 {
-    return std::make_unique<GitCall>(m_workingDirectory, arguments, mode);
+    return std::make_unique<GitCall>(m_workingDirectory, arguments, mode, input);
 }
 
 QString Git::workingTreeRoot(const QString& path)
