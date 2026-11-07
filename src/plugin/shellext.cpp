@@ -4,10 +4,10 @@
 #include "shellext.hpp"
 
 #include "kortoisegitplugin_debug.hpp"
+#include "utils/runtimeerror.hpp"
 
 #include <KFileItem>
 #include <KLocalizedString>
-#include <KPluginFactory>
 
 #include <QAction>
 #include <QDir>
@@ -18,8 +18,8 @@
 
 #include <dlfcn.h>
 
-// NOLINTNEXTLINE(readability-identifier-naming) KPluginFactory names its factory class after the plugin target
-K_PLUGIN_CLASS_WITH_JSON(kgt::ShellExt, "kortoisegitplugin.json")
+#include <chrono>
+#include <exception>
 
 namespace
 {
@@ -27,6 +27,9 @@ namespace
 using namespace Qt::StringLiterals;
 
 constexpr auto procName = "kortoisegitproc"_L1;
+// One git command gives several index events, KDirWatch reporting the replaced file about half a second after
+// it went: refresh once they have settled
+constexpr std::chrono::milliseconds refreshDelay{600};
 
 /**
  * The directory holding this plugin's .so, like TortoiseGit's CPathUtils::GetAppDirectory(g_hmodThisDll).
@@ -92,6 +95,14 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     connect(m_showLogAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("log"), m_showLogAction);
     });
+
+    m_refreshTimer.setSingleShot(true);
+    m_refreshTimer.setInterval(refreshDelay);
+    connect(&m_refreshTimer, &QTimer::timeout, this, &KVersionControlPlugin::itemVersionsChanged);
+    // git replaces the index by renaming index.lock over it, which KDirWatch may report as any of these
+    connect(&m_indexWatch, &KDirWatch::dirty, &m_refreshTimer, qOverload<>(&QTimer::start));
+    connect(&m_indexWatch, &KDirWatch::created, &m_refreshTimer, qOverload<>(&QTimer::start));
+    connect(&m_indexWatch, &KDirWatch::deleted, &m_refreshTimer, qOverload<>(&QTimer::start));
 }
 
 QString ShellExt::fileName() const
@@ -101,7 +112,23 @@ QString ShellExt::fileName() const
 
 bool ShellExt::beginRetrieval(const QString& directory)
 {
-    Q_UNUSED(directory)
+    m_folderStatus.reset();
+    try {
+        m_folderStatus = GitFolderStatus::fetch(directory);
+    } catch (const RuntimeError& e) {
+        // Every category means the same here: no overlays. Nothing may propagate into Dolphin
+        qCDebug(KGT_PLUGIN) << "No overlays for" << directory << ":" << e.error().message;
+        return false;
+    } catch (const std::exception& e) {
+        qCWarning(KGT_PLUGIN) << "No overlays for" << directory << ":" << e.what();
+        return false;
+    }
+    QMetaObject::invokeMethod(
+        this,
+        [this, indexFile = m_folderStatus->indexFile()] {
+            watchIndex(indexFile);
+        },
+        Qt::QueuedConnection);
     return true;
 }
 
@@ -111,8 +138,10 @@ void ShellExt::endRetrieval()
 
 KVersionControlPlugin::ItemVersion ShellExt::itemVersion(const KFileItem& item) const
 {
-    Q_UNUSED(item)
-    return UnversionedVersion;
+    if (!m_folderStatus) {
+        return UnversionedVersion;
+    }
+    return m_folderStatus->itemVersion(item.name(), item.isDir());
 }
 
 QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) const
@@ -159,6 +188,16 @@ void ShellExt::runCommand(const QString& command, const QAction *action)
     }
 }
 
-} // namespace kgt
+void ShellExt::watchIndex(const QString& indexFile)
+{
+    if (indexFile == m_watchedIndex) {
+        return;
+    }
+    if (!m_watchedIndex.isEmpty()) {
+        m_indexWatch.removeFile(m_watchedIndex);
+    }
+    m_indexWatch.addFile(indexFile);
+    m_watchedIndex = indexFile;
+}
 
-#include "shellext.moc"
+} // namespace kgt
