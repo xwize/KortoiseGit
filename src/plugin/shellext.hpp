@@ -71,7 +71,8 @@ public:
 
     /**
      * @param items The selected items, or the current directory when nothing is selected.
-     * @returns The context menu actions for items inside a git working tree: Push... (for one versioned folder),
+     * @returns The context menu actions for items inside a git working tree: Git Clone... (for one ignored
+     *          folder), Push... (for one versioned folder),
      *          Commit (for versioned items, showing the current branch), Show log, Revert... for changed files and
      *          versioned folders, and Add... if an item is unversioned or ignored, or is a folder holding
      *          unversioned files.
@@ -82,8 +83,8 @@ public:
      * Dolphin asks every enabled plugin for these when the folder it shows belongs to no version control system,
      * and lists all their answers. With nothing selected, @p items is the folder shown.
      * @param items The selected items, outside any git working tree.
-     * @returns "Git Create repository here..." for one folder that is in no repository (TortoiseGit's CreateRepo
-     *          entry), else nothing.
+     * @returns "Git Clone..." and "Git Create repository here..." for one folder that is in no repository
+     *          (TortoiseGit's Clone and CreateRepo entries), else nothing.
      */
     [[nodiscard]] QList<QAction *> outOfVersionControlActions(const KFileItemList& items) const override;
 
@@ -149,6 +150,13 @@ private:
     [[nodiscard]] bool hasAddableItem(const KFileItemList& items) const;
 
     /**
+     * Whether TortoiseGit's Clone entry applies inside a working tree (ITEMIS_FOLDER | ITEMIS_IGNORED).
+     * @param items The selected items.
+     * @returns True for one folder that git ignores.
+     */
+    [[nodiscard]] bool isIgnoredFolder(const KFileItemList& items) const;
+
+    /**
      * Ported from CShellExt::InsertGitMenu: the Commit entry shows the current branch, "Git Commit -> "main"...".
      * @param path A selected path.
      * @returns The entry's text.
@@ -161,6 +169,7 @@ private:
     QAction *m_revertAction;
     QAction *m_addAction;
     QAction *m_pushAction;
+    QAction *m_cloneAction;
     std::optional<GitFolderStatus> m_folderStatus; // Only touched on Dolphin's retrieval thread
     KDirWatch m_indexWatch;
     QString m_watchedIndex; // The file m_indexWatch watches, if any
