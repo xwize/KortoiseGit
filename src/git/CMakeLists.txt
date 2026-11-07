@@ -10,6 +10,8 @@ target_sources(kgtgit PRIVATE
     git.hpp
     gitcall.cpp
     gitcall.hpp
+    gitnumstat.cpp
+    gitnumstat.hpp
     gitstatus.cpp
     gitstatus.hpp
     tgitpath.cpp
