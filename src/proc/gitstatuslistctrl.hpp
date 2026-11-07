@@ -21,6 +21,8 @@
 #include <QStringList>
 #include <QTreeView>
 
+#include <QFlags>
+
 #include <memory>
 
 class QCheckBox;
@@ -31,18 +33,29 @@ namespace kgt
 {
 
 class GitCall;
+class RevertProgressCommand;
 
 /**
  * The changed-files list. The owning dialog sets the working tree and the show flags, places the Select all
  * checkbox and the counter label, calls reload() and acts on checkedEntries(). Double-clicking a file compares it
- * with HEAD in git difftool; the context menu offers Compare with base, Open, Open with... and Explore to; F5
- * reloads.
+ * with HEAD in git difftool; the context menu offers Compare with base, Revert..., Open, Open with... and Explore
+ * to; F5 reloads.
  */
 class GitStatusListCtrl : public QTreeView
 {
     Q_OBJECT
 
 public:
+    /**
+     * Context menu entries a dialog can turn off (TortoiseGit's GITSLC_POP*). Only those that are ported and that
+     * some dialog of TortoiseGit's turns off are listed; the others are always offered.
+     */
+    enum class ContextMenu : unsigned int {
+        Revert = 0x1, // GITSLC_POPREVERT
+        All = 0xFFFFFFFF, // GITSLC_POPALL
+    };
+    Q_DECLARE_FLAGS(ContextMenus, ContextMenu)
+
     /**
      * @param parent The parent widget.
      */
@@ -94,6 +107,12 @@ public:
     void setHasCheckboxes(bool hasCheckboxes);
 
     /**
+     * Picks the context menu entries offered (the dwContextMenus argument of CGitStatusListCtrl::Init).
+     * @param menus The entries; all of them by default.
+     */
+    void setContextMenus(ContextMenus menus);
+
+    /**
      * Makes the list show the files of a commit rather than the working tree (CGitStatusListCtrl::m_CurrentVersion).
      * Comparing a file then compares the commit with the parent the change is against, the context menu offers
      * only that, and reload() does nothing: the owner fills the list with updateWithGitPathList(). A merge's files
@@ -139,7 +158,7 @@ public:
     void reload();
 
     /**
-     * @returns Whether a load is running.
+     * @returns Whether a load, or a revert from the context menu, is running.
      */
     [[nodiscard]] bool isBusy() const;
 
@@ -195,6 +214,12 @@ Q_SIGNALS:
      */
     void checkedCountChanged();
 
+    /**
+     * A revert from the context menu has finished, and the list is reloading. If it failed, the error has been
+     * shown.
+     */
+    void reverted();
+
 protected:
     void keyPressEvent(QKeyEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
@@ -215,6 +240,9 @@ private:
     void open(const GitStatusListEntry& entry);
     void openWith(const GitStatusListEntry& entry);
     void explore(const GitStatusListEntry& entry) const;
+    void revertSelected();
+    void onRevertFinished();
+    [[nodiscard]] const GitStatusListEntry *focusedEntry() const;
     [[nodiscard]] QStringList pathSpec() const;
     [[nodiscard]] bool isInPathFilter(const GitStatusEntry& entry) const;
 
@@ -226,6 +254,7 @@ private:
     QStringList m_pathFilter;
     std::unique_ptr<GitCall> m_statusCall;
     std::unique_ptr<GitCall> m_numStatCall;
+    std::unique_ptr<RevertProgressCommand> m_revertCommand; // The running revert, if any
     QList<GitStatusEntry> m_pendingStatus; // The status of the running load, waiting for its line counts
     QString m_errorMessage; // Shown in the empty list after a failed load
     QString m_emptyString; // Shown in the empty list after a load that found nothing
@@ -236,6 +265,10 @@ private:
     bool m_hasIgnored = false; // Whether the last load listed ignored files
     bool m_includeStaged = false; // Whether staged changes outside m_pathFilter are listed too
     bool m_isBusy = false; // The owner is loading the entries (setBusy)
+    bool m_hasDirectFiles = false; // The direct files have been taken from the path filter (m_setDirectFiles)
+    ContextMenus m_contextMenus = ContextMenu::All; // TortoiseGit's m_dwContextMenus
 };
 
 } // namespace kgt
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(kgt::GitStatusListCtrl::ContextMenus)

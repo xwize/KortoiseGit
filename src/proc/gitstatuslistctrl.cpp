@@ -9,6 +9,7 @@
 
 #include "git/git.hpp"
 #include "git/gitcall.hpp"
+#include "progresscommands/revertprogresscommand.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KIO/ApplicationLauncherJob>
@@ -19,6 +20,8 @@
 
 #include <QCheckBox>
 #include <QContextMenuEvent>
+#include <QDir>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QIcon>
 #include <QKeyEvent>
@@ -170,6 +173,11 @@ void GitStatusListCtrl::setHasCheckboxes(bool hasCheckboxes)
     m_model->setHasCheckboxes(hasCheckboxes);
 }
 
+void GitStatusListCtrl::setContextMenus(ContextMenus menus)
+{
+    m_contextMenus = menus;
+}
+
 void GitStatusListCtrl::setCurrentVersion(const QString& revision, const QStringList& parents)
 {
     m_currentVersion = revision;
@@ -223,6 +231,16 @@ void GitStatusListCtrl::reload()
         return;
     }
     Q_ASSERT(!m_workingTree.isEmpty());
+    if (!m_hasDirectFiles) {
+        // CGitStatusListCtrl::GetStatus remembers the files the user picked, so they can be checked
+        QStringList directFiles;
+        const QDir root(m_workingTree);
+        std::ranges::copy_if(m_pathFilter, std::back_inserter(directFiles), [&root](const QString& path) {
+            return !QFileInfo(root.filePath(path)).isDir();
+        });
+        m_model->setDirectFiles(directFiles);
+        m_hasDirectFiles = true;
+    }
     m_numStatCall.reset();
     m_errorMessage.clear();
     m_hasIgnored = m_model->showFlags().testFlag(GitStatusListModel::Show::Ignored);
@@ -237,7 +255,7 @@ void GitStatusListCtrl::reload()
 
 bool GitStatusListCtrl::isBusy() const
 {
-    return m_isBusy || m_statusCall || m_numStatCall;
+    return m_isBusy || m_statusCall || m_numStatCall || m_revertCommand;
 }
 
 void GitStatusListCtrl::setSelectButton(QCheckBox *button)
@@ -296,6 +314,15 @@ void GitStatusListCtrl::contextMenuEvent(QContextMenuEvent *event)
             }
         });
         menu.setDefaultAction(compare);
+        menu.addSeparator();
+    }
+    // The entry the menu was opened on decides, as TortoiseGit's wcStatus does
+    const GitStatusListEntry *focused = focusedEntry();
+    if (focused && isTracked(*focused) && m_currentVersion.isEmpty() && m_contextMenus.testFlag(ContextMenu::Revert) && !m_revertCommand) {
+        menu.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Re&vert..."), this, [this] {
+            // After the menu has closed, so the confirmation isn't nested in it
+            QMetaObject::invokeMethod(this, &GitStatusListCtrl::revertSelected, Qt::QueuedConnection);
+        });
     }
     // Open and Explore act on the working tree's file, which is not what a commit's list shows
     if (selected.size() == 1 && m_currentVersion.isEmpty()) {
@@ -464,6 +491,19 @@ void GitStatusListCtrl::onDoubleClicked(const QModelIndex& index)
     startDiff(*entry);
 }
 
+const GitStatusListEntry *GitStatusListCtrl::focusedEntry() const
+{
+    // CGitStatusListCtrl::OnContextMenuList's selIndex: the selection mark, or else the first selected entry
+    const QModelIndex current = currentIndex();
+    if (current.isValid() && selectionModel()->isRowSelected(current.row(), current.parent())) {
+        if (const GitStatusListEntry *entry = m_model->entry(m_proxy->mapToSource(current))) {
+            return entry;
+        }
+    }
+    const QModelIndexList rows = selectionModel()->selectedRows();
+    return rows.isEmpty() ? nullptr : m_model->entry(m_proxy->mapToSource(rows.constFirst()));
+}
+
 QList<GitStatusListEntry> GitStatusListCtrl::selectedEntries() const
 {
     QList<GitStatusListEntry> entries;
@@ -508,7 +548,10 @@ QStringList GitStatusListCtrl::revisionDiffArguments(int parentNo) const
     if (parent.isEmpty()) {
         // A root commit is compared with the empty tree, whose hash depends on the repository's hash algorithm
         try {
-            parent = QString::fromLatin1(Git(m_workingTree).run({QStringLiteral("hash-object"), QStringLiteral("-t"), QStringLiteral("tree"), QStringLiteral("--stdin")}, RunMode::ReadOnly).trimmed());
+            parent = QString::fromLatin1(
+                Git(m_workingTree)
+                    .run({QStringLiteral("hash-object"), QStringLiteral("-t"), QStringLiteral("tree"), QStringLiteral("--stdin")}, RunMode::ReadOnly)
+                    .trimmed());
         } catch (const RuntimeError& e) {
             if (e.error().category != ErrorCategory::Git) {
                 throw;
@@ -539,6 +582,48 @@ void GitStatusListCtrl::openWith(const GitStatusListEntry& entry)
 void GitStatusListCtrl::explore(const GitStatusListEntry& entry) const
 {
     KIO::highlightInFileManager({QUrl::fromLocalFile(absolutePath(entry))});
+}
+
+void GitStatusListCtrl::revertSelected()
+{
+    const QList<GitStatusListEntry> selected = selectedEntries();
+    if (selected.isEmpty() || m_revertCommand) {
+        return;
+    }
+    // If at least one item is a modified file, ask first (IDGITLC_REVERT)
+    const bool confirm = std::ranges::any_of(selected, [this](const GitStatusListEntry& entry) {
+        return (entry.actions & Action::Modified) && !QFileInfo(absolutePath(entry)).isDir();
+    });
+    if (confirm) {
+        const QString question = i18n("Are you sure you want to revert %1 item(s)? You will lose ALL changes since the last update!", selected.size());
+        if (QMessageBox::question(this, i18n("KortoiseGit"), question, QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+            return;
+        }
+    }
+    // TortoiseGit reverts an amended commit's files to HEAD~1; the commit dialog has no amend yet
+    m_revertCommand = std::make_unique<RevertProgressCommand>();
+    m_revertCommand->setPathList(selected);
+    connect(m_revertCommand.get(), &RevertProgressCommand::finished, this, &GitStatusListCtrl::onRevertFinished);
+    setCursor(Qt::BusyCursor);
+    Q_EMIT checkedCountChanged();
+    m_revertCommand->run(m_workingTree);
+}
+
+void GitStatusListCtrl::onRevertFinished()
+{
+    // Deleted from the event loop: it is still emitting, maybe from inside run()
+    RevertProgressCommand *command = m_revertCommand.release();
+    command->deleteLater();
+    unsetCursor();
+    if (const std::optional<Error>& error = command->error()) {
+        // Window-modal without a nested event loop
+        auto *box = new QMessageBox(QMessageBox::Critical, i18n("KortoiseGit"), error->message, QMessageBox::Ok, this);
+        box->setAttribute(Qt::WA_DeleteOnClose);
+        box->open();
+    }
+    // TortoiseGit drops the reverted entries or refreshes the parent dialog; reloading does both
+    reload();
+    Q_EMIT reverted();
 }
 
 QStringList GitStatusListCtrl::pathSpec() const

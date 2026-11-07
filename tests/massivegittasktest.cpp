@@ -89,6 +89,20 @@ private Q_SLOTS:
         QCOMPARE(task.pathSpecFile(), QByteArray("a.txt\0dir/b c.txt\0", 18));
     }
 
+    void putsPathSpecOptionsBeforeEndOfOptions()
+    {
+        MassiveGitTask task({QStringLiteral("checkout"), QStringLiteral("-f"), QStringLiteral("--end-of-options"), QStringLiteral("HEAD")});
+        task.setPaths({QStringLiteral("a.txt")});
+        QCOMPARE(task.arguments(),
+                 (QStringList{QStringLiteral("--literal-pathspecs"),
+                              QStringLiteral("checkout"),
+                              QStringLiteral("-f"),
+                              QStringLiteral("--pathspec-from-file=-"),
+                              QStringLiteral("--pathspec-file-nul"),
+                              QStringLiteral("--end-of-options"),
+                              QStringLiteral("HEAD")}));
+    }
+
     void addsPathsLiterally()
     {
         const TestRepo repo;
