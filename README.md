@@ -13,12 +13,13 @@ can use it straight away.
 
 It has two parts, split the way TortoiseGit splits TortoiseShell and TortoiseGitProc:
 
-- `kortoisegitplugin`, a Dolphin version control plugin that adds the context menu entries. Each entry starts
+- `kortoisegitplugin`, a Dolphin version control plugin that shows each file's git status as an overlay and adds
+  the context menu entries. Each entry starts
   `kortoisegitproc` as a separate process, so no dialog ever runs inside Dolphin.
 - `kortoisegitproc`, the application that runs every dialog, such as `kortoisegitproc --command log --path <path>`.
   It can also be run from a terminal.
 
-Status: early skeleton. The only command is `log`, and it opens a placeholder window.
+Status: early. Dolphin shows status overlays; the only command is `log`, and it opens a placeholder window.
 
 ## Building on Arch Linux
 
