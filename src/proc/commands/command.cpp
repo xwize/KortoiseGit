@@ -14,6 +14,7 @@
 #include "commands/commitcommand.hpp"
 #include "commands/createrepositorycommand.hpp"
 #include "commands/logcommand.hpp"
+#include "commands/revertcommand.hpp"
 
 #include <KLocalizedString>
 
@@ -42,6 +43,7 @@ constexpr std::array commands{
     CommandEntry{.name = u"commit", .create = &create<kgt::CommitCommand>},
     CommandEntry{.name = u"log", .create = &create<kgt::LogCommand>},
     CommandEntry{.name = u"repocreate", .create = &create<kgt::CreateRepositoryCommand>},
+    CommandEntry{.name = u"revert", .create = &create<kgt::RevertCommand>},
 };
 
 } // namespace

@@ -16,6 +16,7 @@ set(kgt_tests
     massivegittasktest
     proctest
     resulttest
+    reverttest
 )
 
 foreach(test ${kgt_tests})
