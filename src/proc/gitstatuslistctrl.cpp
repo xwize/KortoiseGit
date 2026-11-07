@@ -84,6 +84,7 @@ GitStatusListCtrl::GitStatusListCtrl(QWidget *parent)
     , m_model(new GitStatusListModel(this))
     , m_proxy(new QSortFilterProxyModel(this))
     , m_emptyString(i18n("File list is empty"))
+    , m_busyString(i18n("Please wait..."))
 {
     m_proxy->setSourceModel(m_model);
     m_proxy->setSortRole(GitStatusListModel::SortRole);
@@ -139,8 +140,54 @@ void GitStatusListCtrl::setIncludeStaged(bool include)
     m_includeStaged = include;
 }
 
+void GitStatusListCtrl::setHasCheckboxes(bool hasCheckboxes)
+{
+    m_model->setHasCheckboxes(hasCheckboxes);
+}
+
+void GitStatusListCtrl::setCurrentVersion(const QString& revision, const QString& parent)
+{
+    m_currentVersion = revision;
+    m_parentVersion = parent;
+}
+
+const QString& GitStatusListCtrl::currentVersion() const
+{
+    return m_currentVersion;
+}
+
+void GitStatusListCtrl::updateWithGitPathList(const QList<GitStatusListEntry>& entries)
+{
+    m_statusCall.reset();
+    m_numStatCall.reset();
+    m_errorMessage.clear();
+    m_isBusy = false;
+    m_model->setEntries(entries);
+    viewport()->update();
+}
+
+void GitStatusListCtrl::clear()
+{
+    updateWithGitPathList({});
+}
+
+void GitStatusListCtrl::setBusy(bool busy)
+{
+    m_isBusy = busy;
+    viewport()->update();
+}
+
+void GitStatusListCtrl::setBusyString(const QString& text)
+{
+    m_busyString = text;
+    viewport()->update();
+}
+
 void GitStatusListCtrl::reload()
 {
+    if (!m_currentVersion.isEmpty()) {
+        return;
+    }
     Q_ASSERT(!m_workingTree.isEmpty());
     m_numStatCall.reset();
     m_errorMessage.clear();
@@ -156,7 +203,7 @@ void GitStatusListCtrl::reload()
 
 bool GitStatusListCtrl::isBusy() const
 {
-    return m_statusCall || m_numStatCall;
+    return m_isBusy || m_statusCall || m_numStatCall;
 }
 
 void GitStatusListCtrl::setSelectButton(QCheckBox *button)
@@ -216,7 +263,8 @@ void GitStatusListCtrl::contextMenuEvent(QContextMenuEvent *event)
         });
         menu.setDefaultAction(compare);
     }
-    if (selected.size() == 1) {
+    // Open and Explore act on the working tree's file, which is not what a commit's list shows
+    if (selected.size() == 1 && m_currentVersion.isEmpty()) {
         const GitStatusListEntry& entry = selected.constFirst();
         if (!isGone(entry)) {
             menu.addAction(QIcon::fromTheme(QStringLiteral("document-open")), i18n("&Open"), this, [this, entry] {
@@ -252,7 +300,7 @@ void GitStatusListCtrl::paintEvent(QPaintEvent *event)
     // TortoiseGit writes the list's state into the empty list (IDS_STATUSLIST_BUSYMSG, IDS_STATUSLIST_EMPTYMSG)
     QString message;
     if (isBusy()) {
-        message = i18n("Please wait...");
+        message = m_busyString;
     } else if (!m_errorMessage.isEmpty()) {
         message = m_errorMessage;
     } else {
@@ -387,7 +435,13 @@ void GitStatusListCtrl::startDiff(const GitStatusListEntry& entry)
 {
     // The working tree against HEAD, or against the index before the first commit (CGitStatusListCtrl::StartDiff)
     QStringList arguments{QStringLiteral("difftool"), QStringLiteral("--no-prompt")};
-    if (m_isInitialRepo) {
+    if (!m_currentVersion.isEmpty()) {
+        arguments.append(revisionDiffArguments());
+        if (arguments.size() == 2) {
+            QMessageBox::warning(this, i18n("Compare with base"), i18n("Could not start git difftool."));
+            return;
+        }
+    } else if (m_isInitialRepo) {
         arguments.append(QStringLiteral("--cached"));
     } else {
         arguments.append({QStringLiteral("-M"), QStringLiteral("HEAD")});
@@ -400,6 +454,23 @@ void GitStatusListCtrl::startDiff(const GitStatusListEntry& entry)
     if (!QProcess::startDetached(QStringLiteral("git"), arguments, m_workingTree)) {
         QMessageBox::warning(this, i18n("Compare with base"), i18n("Could not start git difftool."));
     }
+}
+
+QStringList GitStatusListCtrl::revisionDiffArguments() const
+{
+    QString parent = m_parentVersion;
+    if (parent.isEmpty()) {
+        // A root commit is compared with the empty tree, whose hash depends on the repository's hash algorithm
+        try {
+            parent = QString::fromLatin1(Git(m_workingTree).run({QStringLiteral("hash-object"), QStringLiteral("-t"), QStringLiteral("tree"), QStringLiteral("--stdin")}, RunMode::ReadOnly).trimmed());
+        } catch (const RuntimeError& e) {
+            if (e.error().category != ErrorCategory::Git) {
+                throw;
+            }
+            return {};
+        }
+    }
+    return {QStringLiteral("-M"), parent, m_currentVersion};
 }
 
 void GitStatusListCtrl::open(const GitStatusListEntry& entry)

@@ -159,6 +159,18 @@ public:
     void setAllChecked(bool checked);
 
     /**
+     * Turns the checkboxes on or off (the bHasCheckboxes argument of CGitStatusListCtrl::Init). They are on by
+     * default; the log dialog's list has none.
+     * @param hasCheckboxes Whether the Path column has a checkbox.
+     */
+    void setHasCheckboxes(bool hasCheckboxes);
+
+    /**
+     * @returns Whether the Path column has a checkbox.
+     */
+    [[nodiscard]] bool hasCheckboxes() const;
+
+    /**
      * @param actions What happened to a file.
      * @returns The Status column's text for it (CTGitPath::GetActionName).
      */
@@ -195,6 +207,7 @@ private:
     QHash<QString, bool> m_checkedByPath; // TortoiseGit's m_mapFilenameToChecked
     ShowFlags m_show;
     ShowFlags m_check;
+    bool m_hasCheckboxes = true;
 };
 
 } // namespace kgt

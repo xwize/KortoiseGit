@@ -8,6 +8,7 @@ set(kgt_tests
     createrepositorytest
     gitadmindirtest
     gitnumstattest
+    gitrevloglisttest
     gitstatuslistctrltest
     gitstatustest
     gittest

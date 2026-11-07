@@ -12,6 +12,7 @@
 #include <QProcessEnvironment>
 
 #include <algorithm>
+#include <utility>
 
 namespace
 {
@@ -61,6 +62,7 @@ GitCall::GitCall(const QString& workingDirectory, const QStringList& arguments, 
     }
 
     connect(&m_process, &QProcess::finished, this, &GitCall::onProcessFinished);
+    connect(&m_process, &QProcess::readyReadStandardOutput, this, &GitCall::outputAvailable);
     connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         // A crash is reported by finished() as well; only a failed start has no finished()
         if (error != QProcess::FailedToStart) {
@@ -100,6 +102,14 @@ void GitCall::waitForFinished()
 bool GitCall::isFinished() const
 {
     return m_isFinished;
+}
+
+QByteArray GitCall::takeAvailableOutput()
+{
+    if (m_isFinished) {
+        return std::exchange(m_stdout, {});
+    }
+    return m_process.readAllStandardOutput();
 }
 
 QByteArray GitCall::output() const

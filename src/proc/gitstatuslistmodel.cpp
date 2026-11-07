@@ -214,6 +214,18 @@ int GitStatusListModel::columnCount(const QModelIndex& parent) const
     return parent.isValid() ? 0 : ColumnCount;
 }
 
+void GitStatusListModel::setHasCheckboxes(bool hasCheckboxes)
+{
+    beginResetModel();
+    m_hasCheckboxes = hasCheckboxes;
+    endResetModel();
+}
+
+bool GitStatusListModel::hasCheckboxes() const
+{
+    return m_hasCheckboxes;
+}
+
 QVariant GitStatusListModel::data(const QModelIndex& index, int role) const
 {
     if (!checkIndex(index, CheckIndexOption::IndexIsValid)) {
@@ -224,7 +236,7 @@ QVariant GitStatusListModel::data(const QModelIndex& index, int role) const
     case Qt::DisplayRole:
         return displayData(rowEntry, index.column());
     case Qt::CheckStateRole:
-        if (index.column() == PathColumn) {
+        if (m_hasCheckboxes && index.column() == PathColumn) {
             return isChecked(rowEntry) ? Qt::Checked : Qt::Unchecked;
         }
         return {};
@@ -252,7 +264,7 @@ QVariant GitStatusListModel::data(const QModelIndex& index, int role) const
 
 bool GitStatusListModel::setData(const QModelIndex& index, const QVariant& value, int role)
 {
-    if (!checkIndex(index, CheckIndexOption::IndexIsValid) || index.column() != PathColumn || role != Qt::CheckStateRole) {
+    if (!m_hasCheckboxes || !checkIndex(index, CheckIndexOption::IndexIsValid) || index.column() != PathColumn || role != Qt::CheckStateRole) {
         return false;
     }
     const bool checked = value.value<Qt::CheckState>() == Qt::Checked;
@@ -268,7 +280,7 @@ Qt::ItemFlags GitStatusListModel::flags(const QModelIndex& index) const
         return Qt::NoItemFlags;
     }
     Qt::ItemFlags itemFlags = Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemNeverHasChildren;
-    if (index.column() == PathColumn) {
+    if (m_hasCheckboxes && index.column() == PathColumn) {
         itemFlags |= Qt::ItemIsUserCheckable;
     }
     return itemFlags;

@@ -38,6 +38,10 @@ target_sources(kgtproc PRIVATE
     commands/command.hpp
     commands/logcommand.cpp
     commands/logcommand.hpp
+    gitloglist.cpp
+    gitloglist.hpp
+    gitloglistmodel.cpp
+    gitloglistmodel.hpp
     gitstatuslistctrl.cpp
     gitstatuslistctrl.hpp
     gitstatuslistmodel.cpp
