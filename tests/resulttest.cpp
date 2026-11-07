@@ -17,7 +17,7 @@ using namespace kgt;
  * @param text Text to read as a positive number.
  * @returns The number, or a Parse error.
  */
-Result<int> parsePositive(const QString &text)
+Result<int> parsePositive(const QString& text)
 {
     bool isNumber = false;
     const int number = text.toInt(&isNumber);
@@ -82,7 +82,7 @@ private Q_SLOTS:
         try {
             [[maybe_unused]] const int number = getOrThrow(parsePositive(QStringLiteral("x")));
             QFAIL("getOrThrow did not throw");
-        } catch (const RuntimeError &e) {
+        } catch (const RuntimeError& e) {
             QCOMPARE(e.error().category, ErrorCategory::Parse);
             QCOMPARE(QString::fromStdString(e.what()), e.error().message);
         }

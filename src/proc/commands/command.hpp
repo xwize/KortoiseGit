@@ -41,10 +41,10 @@ class Command
 {
 public:
     virtual ~Command() = default;
-    Command(const Command &) = delete;
-    Command &operator=(const Command &) = delete;
-    Command(Command &&) = delete;
-    Command &operator=(Command &&) = delete;
+    Command(const Command&) = delete;
+    Command& operator=(const Command&) = delete;
+    Command(Command&&) = delete;
+    Command& operator=(Command&&) = delete;
 
     /**
      * Runs the command, usually by showing its dialog until the user closes it.
@@ -65,12 +65,12 @@ public:
     /**
      * @param paths The absolute paths from --path, in the order given.
      */
-    void setPaths(const QStringList &paths);
+    void setPaths(const QStringList& paths);
 
     /**
      * @returns The paths set with setPaths().
      */
-    [[nodiscard]] const QStringList &paths() const;
+    [[nodiscard]] const QStringList& paths() const;
 
 protected:
     /**
@@ -95,7 +95,7 @@ public:
      * @param name TortoiseGit's command name, such as "log".
      * @returns A new command, or a CommandLine error if no command has that name.
      */
-    [[nodiscard]] static Result<std::unique_ptr<Command>> command(const QString &name);
+    [[nodiscard]] static Result<std::unique_ptr<Command>> command(const QString& name);
 };
 
 } // namespace kgt

@@ -14,7 +14,7 @@
 namespace kgt
 {
 
-LogDlg::LogDlg(const QStringList &paths, QWidget *parent)
+LogDlg::LogDlg(const QStringList& paths, QWidget *parent)
     : QDialog(parent)
     , m_pathList(new QListView(this))
 {

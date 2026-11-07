@@ -18,7 +18,7 @@ using namespace kgt;
  * @param arguments The arguments after the program name.
  * @returns What parseCmdLine() makes of them.
  */
-Result<CmdLineArgs> parse(const QStringList &arguments)
+Result<CmdLineArgs> parse(const QStringList& arguments)
 {
     QCommandLineParser parser;
     addCmdLineOptions(parser);

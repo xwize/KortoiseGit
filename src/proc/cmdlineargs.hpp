@@ -32,7 +32,7 @@ struct CmdLineArgs {
  * Adds --command and --path to @p parser. --help and --version come from KAboutData::setupCommandLine().
  * @param[in,out] parser The parser to add the options to.
  */
-void addCmdLineOptions(QCommandLineParser &parser);
+void addCmdLineOptions(QCommandLineParser& parser);
 
 /**
  * Reads the options added by addCmdLineOptions() from a parser that has already parsed the command line.
@@ -40,6 +40,6 @@ void addCmdLineOptions(QCommandLineParser &parser);
  * @param parser The parser, after QCommandLineParser::process() or parse().
  * @returns The command and its paths, or a CommandLine error if --command is missing or empty.
  */
-[[nodiscard]] Result<CmdLineArgs> parseCmdLine(const QCommandLineParser &parser);
+[[nodiscard]] Result<CmdLineArgs> parseCmdLine(const QCommandLineParser& parser);
 
 } // namespace kgt

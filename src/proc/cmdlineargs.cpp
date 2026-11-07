@@ -22,14 +22,14 @@ constexpr auto pathOption = "path"_L1;
 namespace kgt
 {
 
-void addCmdLineOptions(QCommandLineParser &parser)
+void addCmdLineOptions(QCommandLineParser& parser)
 {
     parser.addOption(QCommandLineOption(commandOption, i18n("The command to run, such as log."), i18nc("@info:shell", "name")));
     parser.addOption(
         QCommandLineOption(pathOption, i18n("A file or folder to run the command on. Can be given more than once."), i18nc("@info:shell", "path")));
 }
 
-Result<CmdLineArgs> parseCmdLine(const QCommandLineParser &parser)
+Result<CmdLineArgs> parseCmdLine(const QCommandLineParser& parser)
 {
     const QString command = parser.value(commandOption);
     if (command.isEmpty()) {
@@ -38,7 +38,7 @@ Result<CmdLineArgs> parseCmdLine(const QCommandLineParser &parser)
 
     QStringList paths;
     const QDir current = QDir::current();
-    for (const QString &path : parser.values(pathOption)) {
+    for (const QString& path : parser.values(pathOption)) {
         paths.append(QDir::cleanPath(current.absoluteFilePath(path)));
     }
     return CmdLineArgs{.command = command, .paths = paths};

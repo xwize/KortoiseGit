@@ -14,7 +14,7 @@ RuntimeError::RuntimeError(Error error)
 {
 }
 
-const Error &RuntimeError::error() const noexcept
+const Error& RuntimeError::error() const noexcept
 {
     return m_error;
 }

@@ -58,19 +58,19 @@ bool Command::mayTakePath() const
     return m_pathRequirement >= PathRequirement::MayTakePath;
 }
 
-void Command::setPaths(const QStringList &paths)
+void Command::setPaths(const QStringList& paths)
 {
     m_paths = paths;
 }
 
-const QStringList &Command::paths() const
+const QStringList& Command::paths() const
 {
     return m_paths;
 }
 
-Result<std::unique_ptr<Command>> CommandServer::command(const QString &name)
+Result<std::unique_ptr<Command>> CommandServer::command(const QString& name)
 {
-    for (const CommandEntry &entry : commands) {
+    for (const CommandEntry& entry : commands) {
         if (entry.name == name) {
             return entry.create();
         }

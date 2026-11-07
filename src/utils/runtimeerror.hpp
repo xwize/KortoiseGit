@@ -25,7 +25,7 @@ public:
     /**
      * @returns The failure this exception reports, for a catch that switches on its category.
      */
-    [[nodiscard]] const Error &error() const noexcept;
+    [[nodiscard]] const Error& error() const noexcept;
 
 private:
     Error m_error;

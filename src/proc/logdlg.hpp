@@ -29,7 +29,7 @@ public:
      * @param paths The paths the log was requested for.
      * @param parent Parent widget, or nullptr for a top-level dialog.
      */
-    explicit LogDlg(const QStringList &paths, QWidget *parent = nullptr);
+    explicit LogDlg(const QStringList& paths, QWidget *parent = nullptr);
 
     /**
      * @returns The paths shown, in the order given.

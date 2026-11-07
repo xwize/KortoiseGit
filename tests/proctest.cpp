@@ -20,7 +20,7 @@ struct ProcRun {
  * @param arguments Its arguments.
  * @returns How it exited and what it printed.
  */
-ProcRun runProc(const QStringList &arguments)
+ProcRun runProc(const QStringList& arguments)
 {
     QProcess process;
     process.setProcessChannelMode(QProcess::MergedChannels);

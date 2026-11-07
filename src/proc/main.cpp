@@ -35,7 +35,7 @@ constexpr int exitFailure = 1;
  * Prints an error for the user who started kortoisegitproc from a terminal.
  * @param message Translated text.
  */
-void printError(const QString &message)
+void printError(const QString& message)
 {
     std::fputs(qPrintable(QStringLiteral("kortoisegitproc: %1\n").arg(message)), stderr);
 }
@@ -45,7 +45,7 @@ void printError(const QString &message)
  * @param args The parsed command line.
  * @returns The command, ready to execute, or a CommandLine error.
  */
-Result<std::unique_ptr<Command>> createCommand(const CmdLineArgs &args)
+Result<std::unique_ptr<Command>> createCommand(const CmdLineArgs& args)
 {
     return CommandServer::command(args.command).map([&args](std::unique_ptr<Command> command) {
         QStringList paths = command->mayTakePath() ? args.paths : QStringList();
@@ -63,7 +63,7 @@ Result<std::unique_ptr<Command>> createCommand(const CmdLineArgs &args)
  * @param parser The processed command line.
  * @returns The process exit code.
  */
-int run(const QCommandLineParser &parser)
+int run(const QCommandLineParser& parser)
 {
     const Result<std::unique_ptr<Command>> command = parseCmdLine(parser).and_then(createCommand);
     if (!command) {
@@ -72,7 +72,7 @@ int run(const QCommandLineParser &parser)
     }
     try {
         return (*command)->execute() ? 0 : exitFailure;
-    } catch (const RuntimeError &e) {
+    } catch (const RuntimeError& e) {
         qCCritical(KGT_PROC) << "Command" << parser.value(QStringLiteral("command")) << "failed:" << e.error().message;
         printError(e.error().message);
         return exitFailure;

@@ -54,7 +54,7 @@ QString procPath()
         pluginDir.isEmpty() ? QString() : QDir(pluginDir).absoluteFilePath(QStringLiteral("../../") + procName),
         QDir(QStringLiteral(KGT_INSTALL_BINDIR)).absoluteFilePath(procName),
     };
-    for (const QString &candidate : candidates) {
+    for (const QString& candidate : candidates) {
         const QFileInfo info(candidate);
         if (!candidate.isEmpty() && info.isFile() && info.isExecutable()) {
             return info.canonicalFilePath();
@@ -67,10 +67,10 @@ QString procPath()
  * @param items Items from Dolphin's selection.
  * @returns The local paths of @p items; items without one (remote URLs) are left out.
  */
-QStringList localPaths(const KFileItemList &items)
+QStringList localPaths(const KFileItemList& items)
 {
     QStringList paths;
-    for (const KFileItem &item : items) {
+    for (const KFileItem& item : items) {
         const QString path = item.localPath();
         if (!path.isEmpty()) {
             paths.append(path);
@@ -84,7 +84,7 @@ QStringList localPaths(const KFileItemList &items)
 namespace kgt
 {
 
-ShellExt::ShellExt(QObject *parent, const QVariantList &args)
+ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     : KVersionControlPlugin(parent)
     , m_showLogAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"), this))
 {
@@ -99,7 +99,7 @@ QString ShellExt::fileName() const
     return QStringLiteral(".git");
 }
 
-bool ShellExt::beginRetrieval(const QString &directory)
+bool ShellExt::beginRetrieval(const QString& directory)
 {
     Q_UNUSED(directory)
     return true;
@@ -109,13 +109,13 @@ void ShellExt::endRetrieval()
 {
 }
 
-KVersionControlPlugin::ItemVersion ShellExt::itemVersion(const KFileItem &item) const
+KVersionControlPlugin::ItemVersion ShellExt::itemVersion(const KFileItem& item) const
 {
     Q_UNUSED(item)
     return UnversionedVersion;
 }
 
-QList<QAction *> ShellExt::versionControlActions(const KFileItemList &items) const
+QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) const
 {
     const QStringList paths = localPaths(items);
     if (paths.isEmpty()) {
@@ -125,13 +125,13 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList &items) con
     return {m_showLogAction};
 }
 
-QList<QAction *> ShellExt::outOfVersionControlActions(const KFileItemList &items) const
+QList<QAction *> ShellExt::outOfVersionControlActions(const KFileItemList& items) const
 {
     Q_UNUSED(items)
     return {};
 }
 
-void ShellExt::runCommand(const QString &command, const QAction *action)
+void ShellExt::runCommand(const QString& command, const QAction *action)
 {
     const QStringList paths = action->data().toStringList();
     Q_ASSERT(!paths.isEmpty());
@@ -144,7 +144,7 @@ void ShellExt::runCommand(const QString &command, const QAction *action)
     }
 
     QStringList arguments{QStringLiteral("--command"), command};
-    for (const QString &path : paths) {
+    for (const QString& path : paths) {
         arguments << QStringLiteral("--path") << path;
     }
 
