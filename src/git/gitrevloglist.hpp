@@ -49,18 +49,29 @@ struct GitRef {
 };
 
 /**
- * The files a commit changed against its first parent: their status from the raw diff, and their line counts.
+ * The files a commit changed against one of its parents: their status from the raw diff, and their line counts.
  */
 struct GitRevFiles {
     QList<GitStatusEntry> status; // One entry per file, in git's order, with its TGitPath actions
     QList<NumStatEntry> numStat; // The line counts, matched to status by path
+
+    bool operator==(const GitRevFiles&) const = default;
 };
 
 /**
- * One commit of the log. TortoiseGit loads the files and actions of a commit later and on demand; so does the
- * log dialog, which sets actions once it has them.
+ * One commit of the log. As in TortoiseGit, its files and actions are loaded later, in the background
+ * (GitRevLoglist::GetFiles and CGitLogListBase::AsyncDiffThread).
  */
 struct GitRevLoglist {
+    /**
+     * Whether the commit's files are known (GitRevLoglist::m_IsDiffFiles).
+     */
+    enum class FilesState {
+        NotLoaded, // Not fetched yet
+        Loaded, // files and actions are set
+        Failed, // git diff-tree failed
+    };
+
     QString hash; // The full commit hash
     QStringList parents; // The parents' hashes, first parent first; empty for a root commit
     QString authorName; // GitRev::m_AuthorName
@@ -70,6 +81,8 @@ struct GitRevLoglist {
     QString body; // GitRev::m_Body: the rest of the message, without trailing newlines
     QList<GitRef> refs; // The refs pointing at the commit, in git's order
     TGitPath::Actions actions; // GitRevLoglist::m_Action: what the commit did to its files; empty until known
+    QList<GitRevFiles> files; // GitRevLoglist::m_Files: the changes against each parent, in parent order
+    FilesState filesState = FilesState::NotLoaded; // Whether files and actions are known
 
     bool operator==(const GitRevLoglist&) const = default;
 
@@ -96,11 +109,18 @@ struct GitRevLoglist {
     [[nodiscard]] static QList<GitRef> parseRefs(const QString& decoration);
 
     /**
-     * @param rev A commit.
-     * @returns The arguments after "git" for a diff-tree of the commit against its first parent (or against
-     *          nothing for a root commit) that parseFiles() reads.
+     * @returns How many diffs make up the commit's files: one per parent, and one for a root commit
+     *          (GitRevLoglist::SafeFetchFullInfo diffs a merge against each of its parents).
      */
-    [[nodiscard]] static QStringList filesArguments(const GitRevLoglist& rev);
+    [[nodiscard]] qsizetype diffCount() const;
+
+    /**
+     * @param rev A commit.
+     * @param parentNo Which parent to compare with, counting from 0 (TortoiseGit's m_ParentNo); ignored for a
+     *                 root commit, which is compared with nothing.
+     * @returns The arguments after "git" for a diff-tree that parseFiles() reads.
+     */
+    [[nodiscard]] static QStringList filesArguments(const GitRevLoglist& rev, qsizetype parentNo);
 
     /**
      * @param output The stdout of git with filesArguments().

@@ -36,11 +36,12 @@ QList<GitRevLoglist> parseLog(const TestRepo& repo, const QStringList& paths = {
 /**
  * @param repo The repository.
  * @param rev A commit.
+ * @param parentNo The parent to compare with.
  * @returns Its changed files.
  */
-GitRevFiles parseFiles(const TestRepo& repo, const GitRevLoglist& rev)
+GitRevFiles parseFiles(const TestRepo& repo, const GitRevLoglist& rev, qsizetype parentNo = 0)
 {
-    const Result<GitRevFiles> files = GitRevLoglist::parseFiles(repo.git().run(GitRevLoglist::filesArguments(rev)));
+    const Result<GitRevFiles> files = GitRevLoglist::parseFiles(repo.git().run(GitRevLoglist::filesArguments(rev, parentNo)));
     if (!files) {
         qWarning() << files.error().message;
         return {};
@@ -283,7 +284,7 @@ private Q_SLOTS:
         QCOMPARE(stats.value(QStringLiteral("new name.txt")).origPath, QStringLiteral("old name.txt"));
     }
 
-    void parsesMergeAgainstFirstParent()
+    void parsesMergeAgainstEachParent()
     {
         const TestRepo repo;
         repo.write(QStringLiteral("a.txt"), "a\n");
@@ -296,9 +297,14 @@ private Q_SLOTS:
         repo.commitAll(QStringLiteral("Main"));
         repo.run({QStringLiteral("merge"), QStringLiteral("--quiet"), QStringLiteral("--no-ff"), QStringLiteral("-m"), QStringLiteral("Merge"), QStringLiteral("side")});
 
-        const GitRevFiles files = parseFiles(repo, parseLog(repo).constFirst());
-        QCOMPARE(files.status.size(), 1);
-        QCOMPARE(files.status.constFirst().path, QStringLiteral("side.txt"));
+        const GitRevLoglist merge = parseLog(repo).constFirst();
+        QCOMPARE(merge.diffCount(), 2);
+        const GitRevFiles first = parseFiles(repo, merge, 0);
+        QCOMPARE(first.status.size(), 1);
+        QCOMPARE(first.status.constFirst().path, QStringLiteral("side.txt"));
+        const GitRevFiles second = parseFiles(repo, merge, 1);
+        QCOMPARE(second.status.size(), 1);
+        QCOMPARE(second.status.constFirst().path, QStringLiteral("main.txt"));
     }
 };
 

@@ -74,6 +74,31 @@ bool isGone(const GitStatusListEntry& entry)
     return (entry.actions & (Action::Deleted | Action::Missing)) != 0;
 }
 
+/**
+ * Sorts the list, keeping the groups of a merge's files in parent order whichever way it is sorted, as the
+ * Windows list view keeps its groups.
+ */
+class GitStatusListProxy : public QSortFilterProxyModel
+{
+public:
+    using QSortFilterProxyModel::QSortFilterProxyModel;
+
+protected:
+    [[nodiscard]] bool lessThan(const QModelIndex& left, const QModelIndex& right) const override
+    {
+        const auto *model = qobject_cast<const GitStatusListModel *>(sourceModel());
+        if (model && model->hasGroups() && !left.parent().isValid()) {
+            return (sortOrder() == Qt::AscendingOrder) == (left.row() < right.row());
+        }
+        return QSortFilterProxyModel::lessThan(left, right);
+    }
+};
+
+/**
+ * The length of a hash in a group header (CGit::GetShortHASHLength).
+ */
+constexpr qsizetype shortHashLength = 8;
+
 } // namespace
 
 namespace kgt
@@ -82,7 +107,7 @@ namespace kgt
 GitStatusListCtrl::GitStatusListCtrl(QWidget *parent)
     : QTreeView(parent)
     , m_model(new GitStatusListModel(this))
-    , m_proxy(new QSortFilterProxyModel(this))
+    , m_proxy(new GitStatusListProxy(this))
     , m_emptyString(i18n("File list is empty"))
     , m_busyString(i18n("Please wait..."))
 {
@@ -145,10 +170,18 @@ void GitStatusListCtrl::setHasCheckboxes(bool hasCheckboxes)
     m_model->setHasCheckboxes(hasCheckboxes);
 }
 
-void GitStatusListCtrl::setCurrentVersion(const QString& revision, const QString& parent)
+void GitStatusListCtrl::setCurrentVersion(const QString& revision, const QStringList& parents)
 {
     m_currentVersion = revision;
-    m_parentVersion = parent;
+    m_parentVersions = parents;
+    // PrepareGroups' header for each parent: "Diff with parent 1: <short hash>"
+    QStringList headers;
+    if (parents.size() > 1) {
+        for (qsizetype i = 0; i < parents.size(); ++i) {
+            headers.append(i18n("Diff with parent %1", i + 1) + QStringLiteral(": ") + parents.at(i).left(shortHashLength));
+        }
+    }
+    m_model->setParentHeaders(headers);
 }
 
 const QString& GitStatusListCtrl::currentVersion() const
@@ -163,6 +196,7 @@ void GitStatusListCtrl::updateWithGitPathList(const QList<GitStatusListEntry>& e
     m_errorMessage.clear();
     m_isBusy = false;
     m_model->setEntries(entries);
+    showGroups();
     viewport()->update();
 }
 
@@ -382,7 +416,7 @@ void GitStatusListCtrl::failLoad(const Error& error)
 void GitStatusListCtrl::updateCheckedCount()
 {
     const int checked = m_model->checkedCount();
-    const int total = m_model->rowCount();
+    const int total = m_model->listedCount();
     if (m_statLabel) {
         m_statLabel->setText(i18n("%1 files selected, %2 files total", checked, total));
     }
@@ -408,17 +442,26 @@ void GitStatusListCtrl::onSelectButtonClicked()
     m_model->setAllChecked(m_model->checkedCount() == 0);
 }
 
+void GitStatusListCtrl::showGroups()
+{
+    // Group headers span the row, and every group is open
+    if (!m_model->hasGroups()) {
+        return;
+    }
+    for (int row = 0; row < m_proxy->rowCount(); ++row) {
+        setFirstColumnSpanned(row, {}, true);
+    }
+    expandAll();
+}
+
 void GitStatusListCtrl::onDoubleClicked(const QModelIndex& index)
 {
-    if (!index.isValid()) {
-        return;
-    }
-    const GitStatusListEntry& entry = m_model->entry(m_proxy->mapToSource(index).row());
+    const GitStatusListEntry *entry = m_model->entry(m_proxy->mapToSource(index));
     // TortoiseGit edits conflicts and diffs unversioned files against nothing here; neither is ported yet
-    if (!isTracked(entry) || (entry.actions & Action::Unmerged)) {
+    if (!entry || !isTracked(*entry) || (entry->actions & Action::Unmerged)) {
         return;
     }
-    startDiff(entry);
+    startDiff(*entry);
 }
 
 QList<GitStatusListEntry> GitStatusListCtrl::selectedEntries() const
@@ -426,7 +469,9 @@ QList<GitStatusListEntry> GitStatusListCtrl::selectedEntries() const
     QList<GitStatusListEntry> entries;
     const QModelIndexList rows = selectionModel()->selectedRows();
     for (const QModelIndex& row : rows) {
-        entries.append(m_model->entry(m_proxy->mapToSource(row).row()));
+        if (const GitStatusListEntry *entry = m_model->entry(m_proxy->mapToSource(row))) {
+            entries.append(*entry);
+        }
     }
     return entries;
 }
@@ -436,7 +481,7 @@ void GitStatusListCtrl::startDiff(const GitStatusListEntry& entry)
     // The working tree against HEAD, or against the index before the first commit (CGitStatusListCtrl::StartDiff)
     QStringList arguments{QStringLiteral("difftool"), QStringLiteral("--no-prompt")};
     if (!m_currentVersion.isEmpty()) {
-        arguments.append(revisionDiffArguments());
+        arguments.append(revisionDiffArguments(entry.parentNo));
         if (arguments.size() == 2) {
             QMessageBox::warning(this, i18n("Compare with base"), i18n("Could not start git difftool."));
             return;
@@ -456,9 +501,10 @@ void GitStatusListCtrl::startDiff(const GitStatusListEntry& entry)
     }
 }
 
-QStringList GitStatusListCtrl::revisionDiffArguments() const
+QStringList GitStatusListCtrl::revisionDiffArguments(int parentNo) const
 {
-    QString parent = m_parentVersion;
+    // The commit against the parent the change is against (m_CurrentVersion^N in CGitStatusListCtrl::StartDiff)
+    QString parent = m_parentVersions.value(parentNo);
     if (parent.isEmpty()) {
         // A root commit is compared with the empty tree, whose hash depends on the repository's hash algorithm
         try {

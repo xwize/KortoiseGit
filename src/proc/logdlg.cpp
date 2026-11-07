@@ -11,7 +11,6 @@
 #include "gitstatuslistctrl.hpp"
 
 #include "git/git.hpp"
-#include "git/gitcall.hpp"
 #include "git/gitrevloglist.hpp"
 #include "utils/runtimeerror.hpp"
 
@@ -25,8 +24,6 @@
 #include <QTextCursor>
 #include <QTextEdit>
 #include <QVBoxLayout>
-
-#include <numeric>
 
 namespace
 {
@@ -166,14 +163,13 @@ void LogDlg::createWidgets()
 
     connect(m_logList, &GitLogList::selectedRevChanged, this, &LogDlg::onSelectedRevChanged);
     connect(m_logList->logModel(), &QAbstractItemModel::modelReset, this, &LogDlg::onSelectedRevChanged);
+    connect(m_logList, &GitLogList::filesLoaded, this, &LogDlg::onFilesLoaded);
     resize(initialSize);
 }
 
 void LogDlg::onSelectedRevChanged()
 {
     // CLogDlg::FillLogMessageCtrl
-    m_filesCall.reset();
-    m_filesHash.clear();
     m_changedFileList->setCurrentVersion({}, {});
     m_changedFileList->clear();
     const int row = m_logList->selectedRow();
@@ -183,12 +179,10 @@ void LogDlg::onSelectedRevChanged()
     }
     const GitRevLoglist& rev = m_logList->logModel()->rev(row);
     fillLogMessage(rev);
-
-    m_filesHash = rev.hash;
-    m_changedFileList->setBusyString(i18n("Fetching changed files..."));
-    m_changedFileList->setBusy(true);
-    m_filesCall = Git(m_workingTree).runAsync(GitRevLoglist::filesArguments(rev), RunMode::ReadOnly);
-    connect(m_filesCall.get(), &GitCall::finished, this, &LogDlg::onFilesFinished);
+    showFiles(rev);
+    if (rev.filesState == GitRevLoglist::FilesState::NotLoaded) {
+        m_logList->requestFiles(row);
+    }
 }
 
 void LogDlg::fillLogMessage(const GitRevLoglist& rev)
@@ -206,46 +200,39 @@ void LogDlg::fillLogMessage(const GitRevLoglist& rev)
     m_msgView->moveCursor(QTextCursor::Start);
 }
 
-void LogDlg::onFilesFinished()
+void LogDlg::onFilesLoaded(int row)
 {
-    // Deleted from the event loop: it is still emitting
-    GitCall *call = m_filesCall.release();
-    Q_ASSERT(call);
-    call->deleteLater();
-    QByteArray output;
-    try {
-        output = call->output();
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        failFiles();
-        return;
+    if (row == m_logList->selectedRow()) {
+        showFiles(m_logList->logModel()->rev(row));
     }
-    const Result<GitRevFiles> files = GitRevLoglist::parseFiles(output);
-    if (!files) {
-        failFiles();
-        return;
-    }
-    const int row = m_logList->selectedRow();
-    GitLogListModel *model = m_logList->logModel();
-    if (row < 0 || model->rev(row).hash != m_filesHash) {
-        return;
-    }
-    const QList<GitStatusListEntry> entries = GitStatusListModel::makeEntries(files->status, files->numStat);
-    m_changedFileList->setCurrentVersion(m_filesHash, model->rev(row).parents.value(0));
-    m_changedFileList->updateWithGitPathList(entries);
-    const TGitPath::Actions actions = std::accumulate(entries.cbegin(), entries.cend(), TGitPath::Actions(), [](TGitPath::Actions all, const GitStatusListEntry& entry) {
-        return all | entry.actions;
-    });
-    model->setActions(row, actions);
 }
 
-void LogDlg::failFiles()
+void LogDlg::showFiles(const GitRevLoglist& rev)
 {
-    // TortoiseGit leaves the list busy with this message (GitRevLoglist::m_IsDiffFiles == 2)
-    m_changedFileList->setBusyString(i18n("Could not fetch commit or calculate diff."));
-    m_changedFileList->setBusy(true);
+    switch (rev.filesState) {
+    case GitRevLoglist::FilesState::NotLoaded:
+        m_changedFileList->setBusyString(i18n("Fetching changed files..."));
+        m_changedFileList->setBusy(true);
+        return;
+    case GitRevLoglist::FilesState::Failed:
+        // TortoiseGit leaves the list busy with this message (GitRevLoglist::m_IsDiffFiles == 2)
+        m_changedFileList->setBusyString(i18n("Could not fetch commit or calculate diff."));
+        m_changedFileList->setBusy(true);
+        return;
+    case GitRevLoglist::FilesState::Loaded:
+        break;
+    }
+    QList<GitStatusListEntry> entries;
+    for (qsizetype parentNo = 0; parentNo < rev.files.size(); ++parentNo) {
+        const GitRevFiles& diff = rev.files.at(parentNo);
+        QList<GitStatusListEntry> parentEntries = GitStatusListModel::makeEntries(diff.status, diff.numStat);
+        for (GitStatusListEntry& entry : parentEntries) {
+            entry.parentNo = static_cast<int>(parentNo);
+        }
+        entries.append(parentEntries);
+    }
+    m_changedFileList->setCurrentVersion(rev.hash, rev.parents);
+    m_changedFileList->updateWithGitPathList(entries);
 }
 
 } // namespace kgt

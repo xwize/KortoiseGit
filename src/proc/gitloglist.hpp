@@ -77,6 +77,14 @@ public:
     [[nodiscard]] GitLogListModel *logModel() const;
 
     /**
+     * Asks for a commit's files in the background, ahead of earlier requests (CGitLogListBase's AsyncDiffThread
+     * takes the newest request first). filesLoaded() follows; nothing happens if they are already known. The list
+     * asks for the commits it draws by itself.
+     * @param row A row of the model.
+     */
+    void requestFiles(int row);
+
+    /**
      * @returns The row of the one selected commit, or -1 when none or several are selected.
      */
     [[nodiscard]] int selectedRow() const;
@@ -94,6 +102,12 @@ Q_SIGNALS:
     void loadFailed(const kgt::Error& error);
 
     /**
+     * A commit's files have been fetched, or could not be: its filesState says which.
+     * @param row The commit's row.
+     */
+    void filesLoaded(int row);
+
+    /**
      * The selection has changed: a different commit, several or none are selected.
      */
     void selectedRevChanged();
@@ -107,6 +121,11 @@ private:
     void onLogFinished();
     [[nodiscard]] bool takeRecords();
     void failLoad(const Error& error);
+    void requestVisibleFiles();
+    void startNextFiles();
+    void startFilesCall();
+    void onFilesFinished();
+    void finishFiles(bool succeeded);
 
     GitLogListModel *m_model;
     QString m_workingTree;
@@ -114,6 +133,10 @@ private:
     std::unique_ptr<GitCall> m_logCall;
     QByteArray m_pending; // Output of git log that doesn't make a whole record yet
     QString m_errorMessage; // Shown in the empty list after a failed load
+    QList<int> m_filesQueue; // TortoiseGit's m_AsynDiffList: rows waiting for their files, newest last
+    std::unique_ptr<GitCall> m_filesCall; // The diff-tree running for m_filesRow
+    int m_filesRow = -1; // The row whose files are being fetched, or -1
+    QList<GitRevFiles> m_filesDone; // Its diffs fetched so far, one per parent
 };
 
 } // namespace kgt

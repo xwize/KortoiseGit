@@ -266,8 +266,14 @@ QList<GitRef> GitRevLoglist::parseRefs(const QString& decoration)
     return refs;
 }
 
-QStringList GitRevLoglist::filesArguments(const GitRevLoglist& rev)
+qsizetype GitRevLoglist::diffCount() const
 {
+    return std::max<qsizetype>(parents.size(), 1);
+}
+
+QStringList GitRevLoglist::filesArguments(const GitRevLoglist& rev, qsizetype parentNo)
+{
+    Q_ASSERT(parentNo >= 0 && parentNo < rev.diffCount());
     // CGit::GetGitDiff's command line, with TortoiseGit's default similarity index (50%) for renames and copies
     QStringList arguments{
         QStringLiteral("diff-tree"),
@@ -283,7 +289,7 @@ QStringList GitRevLoglist::filesArguments(const GitRevLoglist& rev)
     if (rev.parents.isEmpty()) {
         arguments.insert(1, QStringLiteral("--root"));
     } else {
-        arguments.append(rev.parents.constFirst());
+        arguments.append(rev.parents.at(parentNo));
     }
     arguments.append({rev.hash, QStringLiteral("--")});
     return arguments;

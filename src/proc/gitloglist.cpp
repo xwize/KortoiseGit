@@ -222,6 +222,9 @@ void GitLogList::reload()
 {
     Q_ASSERT(!m_workingTree.isEmpty());
     m_logCall.reset();
+    m_filesCall.reset();
+    m_filesQueue.clear();
+    m_filesRow = -1;
     m_pending.clear();
     m_errorMessage.clear();
     m_model->clear();
@@ -256,10 +259,22 @@ void GitLogList::keyPressEvent(QKeyEvent *event)
     QTreeView::keyPressEvent(event);
 }
 
+void GitLogList::requestFiles(int row)
+{
+    Q_ASSERT(row >= 0 && row < m_model->rowCount());
+    if (row == m_filesRow || m_model->rev(row).filesState != GitRevLoglist::FilesState::NotLoaded) {
+        return;
+    }
+    m_filesQueue.removeOne(row);
+    m_filesQueue.append(row);
+    startNextFiles();
+}
+
 void GitLogList::paintEvent(QPaintEvent *event)
 {
     QTreeView::paintEvent(event);
     if (m_model->rowCount() > 0) {
+        requestVisibleFiles();
         return;
     }
     QString message;
@@ -304,6 +319,82 @@ void GitLogList::onLogFinished()
     }
     viewport()->update();
     Q_EMIT loaded();
+}
+
+void GitLogList::requestVisibleFiles()
+{
+    // GitRevLoglist::GetFiles queues a commit's files when its row is drawn
+    const int first = indexAt(viewport()->rect().topLeft()).row();
+    if (first < 0) {
+        return;
+    }
+    int last = indexAt(viewport()->rect().bottomLeft()).row();
+    if (last < 0) {
+        last = m_model->rowCount() - 1;
+    }
+    // Bottom to top, so the topmost row, asked for last, is fetched first
+    for (int row = last; row >= first; --row) {
+        requestFiles(row);
+    }
+}
+
+void GitLogList::startNextFiles()
+{
+    if (m_filesCall || m_filesQueue.isEmpty()) {
+        return;
+    }
+    m_filesRow = m_filesQueue.takeLast();
+    m_filesDone.clear();
+    startFilesCall();
+}
+
+void GitLogList::startFilesCall()
+{
+    const GitRevLoglist& rev = m_model->rev(m_filesRow);
+    m_filesCall = Git(m_workingTree).runAsync(GitRevLoglist::filesArguments(rev, m_filesDone.size()), RunMode::ReadOnly);
+    connect(m_filesCall.get(), &GitCall::finished, this, &GitLogList::onFilesFinished);
+}
+
+void GitLogList::onFilesFinished()
+{
+    // Deleted from the event loop: it is still emitting
+    GitCall *call = m_filesCall.release();
+    Q_ASSERT(call);
+    call->deleteLater();
+    QByteArray output;
+    try {
+        output = call->output();
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        finishFiles(false);
+        return;
+    }
+    Result<GitRevFiles> files = GitRevLoglist::parseFiles(output);
+    if (!files) {
+        finishFiles(false);
+        return;
+    }
+    m_filesDone.append(std::move(*files));
+    if (m_filesDone.size() < m_model->rev(m_filesRow).diffCount()) {
+        startFilesCall();
+        return;
+    }
+    finishFiles(true);
+}
+
+void GitLogList::finishFiles(bool succeeded)
+{
+    const int row = std::exchange(m_filesRow, -1);
+    if (succeeded) {
+        m_model->setFiles(row, std::exchange(m_filesDone, {}));
+    } else {
+        m_filesDone.clear();
+        m_model->setFilesFailed(row);
+    }
+    Q_EMIT filesLoaded(row);
+    startNextFiles();
 }
 
 bool GitLogList::takeRecords()

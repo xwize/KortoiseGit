@@ -63,11 +63,17 @@ public:
     [[nodiscard]] const GitRevLoglist& rev(int row) const;
 
     /**
-     * Records what a commit did to its files, once they are known, for the Actions column.
+     * Records a commit's files once they are fetched, and with them its actions for the Actions column.
      * @param row A row of this model.
-     * @param actions The union of the actions of the commit's files.
+     * @param files The changes against each parent, in parent order (one for a root commit).
      */
-    void setActions(int row, TGitPath::Actions actions);
+    void setFiles(int row, const QList<GitRevFiles>& files);
+
+    /**
+     * Records that a commit's files could not be fetched.
+     * @param row A row of this model.
+     */
+    void setFilesFailed(int row);
 
     /**
      * @returns The actions the Actions column shows, in TortoiseGit's order (CGitLogListBase::DrawItem's

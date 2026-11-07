@@ -16,21 +16,18 @@
 #include <QString>
 #include <QStringList>
 
-#include <memory>
-
 class QTextEdit;
 
 namespace kgt
 {
 
-class GitCall;
 class GitLogList;
 class GitStatusListCtrl;
 struct GitRevLoglist;
 
 /**
  * The log dialog: the history of HEAD, limited to the paths it was opened for when they are a file or a
- * subfolder. Selecting one commit shows its full message and the files it changed against its first parent;
+ * subfolder. Selecting one commit shows its full message and the files it changed against each of its parents;
  * double-clicking a file compares it in git difftool.
  */
 class LogDlg : public QDialog
@@ -80,16 +77,14 @@ private:
     void createWidgets();
     void onSelectedRevChanged();
     void fillLogMessage(const GitRevLoglist& rev);
-    void onFilesFinished();
-    void failFiles();
+    void onFilesLoaded(int row);
+    void showFiles(const GitRevLoglist& rev);
 
     QString m_workingTree;
     QStringList m_pathFilter;
     GitLogList *m_logList = nullptr;
     QTextEdit *m_msgView = nullptr;
     GitStatusListCtrl *m_changedFileList = nullptr;
-    std::unique_ptr<GitCall> m_filesCall; // Fetches the changed files of m_filesHash
-    QString m_filesHash; // The commit whose files are fetched or shown
 };
 
 } // namespace kgt

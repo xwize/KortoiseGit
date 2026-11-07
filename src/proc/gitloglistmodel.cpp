@@ -55,12 +55,27 @@ const GitRevLoglist& GitLogListModel::rev(int row) const
     return m_revs.at(row);
 }
 
-void GitLogListModel::setActions(int row, TGitPath::Actions actions)
+void GitLogListModel::setFiles(int row, const QList<GitRevFiles>& files)
 {
     Q_ASSERT(row >= 0 && row < m_revs.size());
-    std::next(m_revs.begin(), row)->actions = actions;
+    GitRevLoglist& rev = *std::next(m_revs.begin(), row);
+    rev.files = files;
+    rev.filesState = GitRevLoglist::FilesState::Loaded;
+    // GitRevLoglist::m_Action: everything done to any file, against any parent
+    rev.actions = {};
+    for (const GitRevFiles& diff : files) {
+        for (const GitStatusEntry& entry : diff.status) {
+            rev.actions |= entry.actions;
+        }
+    }
     const QModelIndex cell = index(row, ActionsColumn);
     Q_EMIT dataChanged(cell, cell);
+}
+
+void GitLogListModel::setFilesFailed(int row)
+{
+    Q_ASSERT(row >= 0 && row < m_revs.size());
+    std::next(m_revs.begin(), row)->filesState = GitRevLoglist::FilesState::Failed;
 }
 
 QList<TGitPath::Action> GitLogListModel::shownActions()

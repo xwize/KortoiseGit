@@ -95,12 +95,13 @@ public:
 
     /**
      * Makes the list show the files of a commit rather than the working tree (CGitStatusListCtrl::m_CurrentVersion).
-     * Comparing a file then compares the commit with its parent, the context menu offers only that, and reload()
-     * does nothing: the owner fills the list with updateWithGitPathList().
+     * Comparing a file then compares the commit with the parent the change is against, the context menu offers
+     * only that, and reload() does nothing: the owner fills the list with updateWithGitPathList(). A merge's files
+     * are grouped by parent, under "Diff with parent N" (CGitStatusListCtrl::PrepareGroups).
      * @param revision The commit's hash, or empty for the working tree.
-     * @param parent The commit compared with, or empty when the commit is a root commit.
+     * @param parents The commit's parents, first parent first; empty for a root commit.
      */
-    void setCurrentVersion(const QString& revision, const QString& parent);
+    void setCurrentVersion(const QString& revision, const QStringList& parents);
 
     /**
      * @returns The commit whose files are shown, or empty for the working tree.
@@ -209,7 +210,8 @@ private:
     void onDoubleClicked(const QModelIndex& index);
     [[nodiscard]] QList<GitStatusListEntry> selectedEntries() const;
     void startDiff(const GitStatusListEntry& entry);
-    [[nodiscard]] QStringList revisionDiffArguments() const;
+    [[nodiscard]] QStringList revisionDiffArguments(int parentNo) const;
+    void showGroups();
     void open(const GitStatusListEntry& entry);
     void openWith(const GitStatusListEntry& entry);
     void explore(const GitStatusListEntry& entry) const;
@@ -229,7 +231,7 @@ private:
     QString m_emptyString; // Shown in the empty list after a load that found nothing
     QString m_busyString; // Shown in the empty list while busy
     QString m_currentVersion; // The commit whose files are listed; empty for the working tree
-    QString m_parentVersion; // What m_currentVersion is compared with; empty for a root commit
+    QStringList m_parentVersions; // The parents of m_currentVersion; empty for a root commit
     bool m_isInitialRepo = false; // No commit yet (CGit::IsInitRepos): there is no HEAD to compare with
     bool m_hasIgnored = false; // Whether the last load listed ignored files
     bool m_includeStaged = false; // Whether staged changes outside m_pathFilter are listed too
