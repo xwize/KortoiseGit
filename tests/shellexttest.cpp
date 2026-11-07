@@ -223,9 +223,11 @@ private Q_SLOTS:
         const ShellExt plugin(nullptr, {});
         const QTemporaryDir plain;
         const QList<QAction *> actions = plugin.outOfVersionControlActions({item(plain.path())});
-        QCOMPARE(actions.size(), 1);
-        QCOMPARE(actions.constFirst()->text(), QStringLiteral("Git Create repositor&y here..."));
-        QCOMPARE(actions.constFirst()->data().toStringList(), QStringList{plain.path()});
+        QCOMPARE(actions.size(), 2);
+        QCOMPARE(actions.at(0)->text(), QStringLiteral("Git Clone..."));
+        QCOMPARE(actions.at(0)->data().toStringList(), QStringList{plain.path()});
+        QCOMPARE(actions.at(1)->text(), QStringLiteral("Git Create repositor&y here..."));
+        QCOMPARE(actions.at(1)->data().toStringList(), QStringList{plain.path()});
 
         // Not for a file, several items, a working tree or a bare repository
         const QString file = plain.filePath(QStringLiteral("file.txt"));
@@ -238,6 +240,26 @@ private Q_SLOTS:
         const QString bare = plain.filePath(QStringLiteral("bare.git"));
         repo.run({QStringLiteral("init"), QStringLiteral("--quiet"), QStringLiteral("--bare"), bare});
         QVERIFY(plugin.outOfVersionControlActions({item(bare)}).isEmpty());
+    }
+
+    void cloneEntryForIgnoredFolders()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral(".gitignore"), "vendor/\n");
+        repo.write(QStringLiteral("src/a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        repo.write(QStringLiteral("vendor/lib.txt"), "lib\n");
+
+        ShellExt plugin(nullptr, {});
+        QVERIFY(retrieve(plugin, repo.path()));
+        // TortoiseGit offers Clone inside a working tree only on an ignored folder, where a nested clone belongs
+        const QList<QAction *> actions = plugin.versionControlActions({item(repo.filePath(QStringLiteral("vendor")))});
+        QVERIFY(!actions.isEmpty());
+        QCOMPARE(actions.constFirst()->text(), QStringLiteral("Git Clone..."));
+        QCOMPARE(actions.constFirst()->data().toStringList(), QStringList{repo.filePath(QStringLiteral("vendor"))});
+        for (const QString& path : {repo.filePath(QStringLiteral("src")), repo.filePath(QStringLiteral(".gitignore"))}) {
+            QVERIFY(!menuTexts(plugin, {item(path)}).contains(QStringLiteral("Git Clone...")));
+        }
     }
 
     void newRepositoryRefreshesDolphin()

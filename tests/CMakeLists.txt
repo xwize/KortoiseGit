@@ -3,6 +3,7 @@
 
 set(kgt_tests
     adddlgtest
+    clonetest
     cmdlineargstest
     commitdlgtest
     createrepositorytest

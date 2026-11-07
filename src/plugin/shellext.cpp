@@ -101,6 +101,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_revertAction(new QAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Re&vert..."), this))
     , m_addAction(new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("&Add..."), this))
     , m_pushAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-push")), i18n("Pus&h..."), this))
+    , m_cloneAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-download")), i18n("Git Clone..."), this))
 {
     Q_UNUSED(args)
     connect(m_createRepoAction, &QAction::triggered, this, [this] {
@@ -112,6 +113,10 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     });
     connect(m_showLogAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("log"), m_showLogAction);
+    });
+    m_cloneAction->setToolTip(i18n("Clone a repository"));
+    connect(m_cloneAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("clone"), m_cloneAction);
     });
     m_pushAction->setToolTip(i18n("Push commits to a remote repository."));
     connect(m_pushAction, &QAction::triggered, this, [this] {
@@ -184,6 +189,11 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
         return {};
     }
     QList<QAction *> actions;
+    // TortoiseGit's Clone inside a working tree: one ignored folder
+    if (isIgnoredFolder(items)) {
+        m_cloneAction->setData(paths);
+        actions.append(m_cloneAction);
+    }
     // TortoiseGit's Push: one folder in the working tree, or the folder shown when nothing is selected
     if (items.size() == 1 && items.constFirst().isDir() && hasVersionedItem(items)) {
         m_pushAction->setData(paths);
@@ -196,7 +206,7 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
     }
     m_showLogAction->setData(paths);
     actions.append(m_showLogAction);
-    // TortoiseGit's menu order: Push, Commit, Show log, ..., Revert, ..., Add
+    // TortoiseGit's menu order: Clone, Push, Commit, Show log, ..., Revert, ..., Add
     if (hasRevertableItem(items)) {
         m_revertAction->setData(paths);
         actions.append(m_revertAction);
@@ -210,7 +220,7 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
 
 QList<QAction *> ShellExt::outOfVersionControlActions(const KFileItemList& items) const
 {
-    // TortoiseGit's CreateRepo: one folder, not in a working tree, not a bare repository, and accessible
+    // TortoiseGit's Clone and CreateRepo: one folder, not in a working tree, not a bare repository, and accessible
     if (items.size() != 1 || !items.constFirst().isDir()) {
         return {};
     }
@@ -218,8 +228,9 @@ QList<QAction *> ShellExt::outOfVersionControlActions(const KFileItemList& items
     if (folder.isEmpty() || !QFileInfo(folder).isReadable() || !GitAdminDir::worktreeAdminDirPath(folder).isEmpty() || GitAdminDir::isBareRepo(folder)) {
         return {};
     }
+    m_cloneAction->setData(QStringList{folder});
     m_createRepoAction->setData(QStringList{folder});
-    return {m_createRepoAction};
+    return {m_cloneAction, m_createRepoAction};
 }
 
 void ShellExt::watchForNewRepository(const QString& folder)
@@ -338,6 +349,16 @@ bool ShellExt::hasAddableItem(const KFileItemList& items) const
         const ItemVersion version = status->itemVersion(info.fileName(), item.isDir());
         return version == UnversionedVersion || version == IgnoredVersion || (item.isDir() && status->hasUnversioned(info.fileName()));
     });
+}
+
+bool ShellExt::isIgnoredFolder(const KFileItemList& items) const
+{
+    if (items.size() != 1 || !items.constFirst().isDir()) {
+        return false;
+    }
+    const QFileInfo info(QDir::cleanPath(items.constFirst().localPath()));
+    const GitFolderStatus *status = menuStatus(info.absolutePath());
+    return status && status->itemVersion(info.fileName(), true) == IgnoredVersion;
 }
 
 QString ShellExt::commitMenuText(const QString& path)

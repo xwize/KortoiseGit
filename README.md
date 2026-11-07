@@ -20,7 +20,7 @@ It has two parts, split the way TortoiseGit splits TortoiseShell and TortoiseGit
   It can also be run from a terminal.
 
 Status: early. Dolphin shows status overlays. The commands are `add`, `commit`, `revert` and `push` (TortoiseGit's
-Add, Commit, Revert and Push dialogs, also in Dolphin's context menu), `repocreate` and `log`. Push asks for passwords and host keys
+Add, Commit, Revert and Push dialogs, also in Dolphin's context menu), `clone`, `repocreate` and `log`. Push asks for passwords and host keys
 through ksshaskpass, or your own `SSH_ASKPASS`/`GIT_ASKPASS`, and never on a terminal.
 
 ## Building on Arch Linux

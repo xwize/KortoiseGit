@@ -22,6 +22,10 @@ target_sources(kgtproc PRIVATE
     ${kgtproc_logging}
     adddlg.cpp
     adddlg.hpp
+    apputils.cpp
+    apputils.hpp
+    clonedlg.cpp
+    clonedlg.hpp
     cmdlineargs.cpp
     cmdlineargs.hpp
     commitdlg.cpp
@@ -30,6 +34,8 @@ target_sources(kgtproc PRIVATE
     createrepodlg.hpp
     commands/addcommand.cpp
     commands/addcommand.hpp
+    commands/clonecommand.cpp
+    commands/clonecommand.hpp
     commands/commitcommand.cpp
     commands/commitcommand.hpp
     commands/createrepositorycommand.cpp
