@@ -30,7 +30,13 @@ QStringList MassiveGitTask::arguments() const
 {
     QStringList arguments{QStringLiteral("--literal-pathspecs")};
     arguments.append(m_params);
-    arguments.append({QStringLiteral("--pathspec-from-file=-"), QStringLiteral("--pathspec-file-nul")});
+    // Options must come before --end-of-options, as in CMassiveGitTaskBase::ExecuteWithPathSpecFile
+    qsizetype position = arguments.indexOf(QStringLiteral("--end-of-options"));
+    if (position == -1) {
+        position = arguments.size();
+    }
+    arguments.insert(position, QStringLiteral("--pathspec-file-nul"));
+    arguments.insert(position, QStringLiteral("--pathspec-from-file=-"));
     return arguments;
 }
 

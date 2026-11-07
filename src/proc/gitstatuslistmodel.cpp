@@ -373,6 +373,11 @@ QVariant GitStatusListModel::headerData(int section, Qt::Orientation orientation
     }
 }
 
+void GitStatusListModel::setDirectFiles(const QStringList& paths)
+{
+    m_directFiles = QSet<QString>(paths.cbegin(), paths.cend());
+}
+
 void GitStatusListModel::rebuildRows()
 {
     m_rows.clear();
@@ -381,9 +386,11 @@ void GitStatusListModel::rebuildRows()
     for (qsizetype index = 0; index < m_entries.size(); ++index) {
         const GitStatusListEntry& listEntry = m_entries.at(index);
         const unsigned int actions = listEntry.actions.toInt();
-        // A path seen for the first time gets its check state from the check flags (CGitStatusListCtrl::Show)
+        // A path seen for the first time gets its check state from the check flags, or is checked because the
+        // user picked it directly (CGitStatusListCtrl::Show)
         if (!m_checkedByPath.contains(listEntry.path)) {
-            m_checkedByPath.insert(listEntry.path, (actions & check) != 0);
+            const bool direct = m_show.testFlag(Show::DirectFiles) && m_directFiles.contains(listEntry.path);
+            m_checkedByPath.insert(listEntry.path, (actions & check) != 0 || direct);
         }
         if ((actions & show) != 0) {
             m_rows.append(index);

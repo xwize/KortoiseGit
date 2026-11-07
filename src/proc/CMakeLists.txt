@@ -40,6 +40,8 @@ target_sources(kgtproc PRIVATE
     commands/logcommand.hpp
     commands/pushcommand.cpp
     commands/pushcommand.hpp
+    commands/revertcommand.cpp
+    commands/revertcommand.hpp
     gitclioutputparser.cpp
     gitclioutputparser.hpp
     gitloglist.cpp
@@ -52,10 +54,14 @@ target_sources(kgtproc PRIVATE
     gitstatuslistmodel.hpp
     logdlg.cpp
     logdlg.hpp
+    progresscommands/revertprogresscommand.cpp
+    progresscommands/revertprogresscommand.hpp
     progressdlg.cpp
     progressdlg.hpp
     pushdlg.cpp
     pushdlg.hpp
+    revertdlg.cpp
+    revertdlg.hpp
 )
 
 target_include_directories(kgtproc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})

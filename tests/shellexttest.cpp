@@ -129,32 +129,62 @@ private Q_SLOTS:
         const QString log = QStringLiteral("Show &log");
         const QString add = QStringLiteral("&Add...");
         const QString push = QStringLiteral("Pus&h...");
+        // TortoiseGit offers Revert on every versioned folder
+        const QString revert = QStringLiteral("Re&vert...");
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("tracked.txt")))}), (QStringList{commit, log}));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{push, commit, log}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{push, commit, log, revert}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral(".git")))}), QStringList{log});
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{log, add}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("build.log")))}), (QStringList{log, add}));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("withnew")))}), (QStringList{push, commit, log, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("withnew")))}), (QStringList{push, commit, log, revert, add}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("untracked")))}), (QStringList{log, add}));
         // One addable item among others is enough, as in TortoiseGit
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("tracked.txt"))), item(repo.filePath(QStringLiteral("new.txt")))}),
                  (QStringList{commit, log, add}));
         // Nothing selected: Dolphin asks about the folder it shows
-        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{push, commit, log, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{push, commit, log, revert, add}));
         // Push is for one folder only, as TortoiseGit's ITEMIS_ONLYONE
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean"))), item(repo.filePath(QStringLiteral("withnew")))}),
-                 (QStringList{commit, log, add}));
+                 (QStringList{commit, log, revert, add}));
 
         // An expanded folder is read too; the items of the first folder keep their entries
         QVERIFY(retrieve(plugin, repo.filePath(QStringLiteral("clean"))));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean/a.txt")))}), (QStringList{commit, log}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{log, add}));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{push, commit, log}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{push, commit, log, revert}));
 
         // Once the file is added, the next retrieval no longer offers it
         repo.run({QStringLiteral("add"), QStringLiteral("new.txt")});
         QVERIFY(retrieve(plugin, repo.path()));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{commit, log}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{commit, log, revert}));
+    }
+
+    void offersRevertForChangedFiles()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("clean.txt"), "a\n");
+        repo.write(QStringLiteral("modified.txt"), "a\n");
+        repo.write(QStringLiteral("staged.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        repo.write(QStringLiteral("modified.txt"), "changed\n");
+        repo.write(QStringLiteral("staged.txt"), "changed\n");
+        repo.run({QStringLiteral("add"), QStringLiteral("staged.txt")});
+        repo.write(QStringLiteral("new.txt"), "new\n");
+
+        ShellExt plugin(nullptr, {});
+        QVERIFY(retrieve(plugin, repo.path()));
+        const auto offersRevert = [&plugin, &repo](const QStringList& names) {
+            KFileItemList items;
+            for (const QString& name : names) {
+                items.append(item(repo.filePath(name)));
+            }
+            return menuTexts(plugin, items).contains(QStringLiteral("Re&vert..."));
+        };
+        QVERIFY(offersRevert({QStringLiteral("modified.txt")}));
+        QVERIFY(offersRevert({QStringLiteral("staged.txt")}));
+        QVERIFY(!offersRevert({QStringLiteral("clean.txt")}));
+        QVERIFY(!offersRevert({QStringLiteral("new.txt")}));
+        QVERIFY(offersRevert({QStringLiteral("clean.txt"), QStringLiteral("modified.txt")}));
     }
 
     void commitEntryShowsBranch()
@@ -182,7 +212,7 @@ private Q_SLOTS:
 
         // The folder shown, when nothing is selected
         actions = plugin.versionControlActions({item(repo.path())});
-        QCOMPARE(actions.size(), 4); // Push, Commit, Show log, and Add for new.txt
+        QCOMPARE(actions.size(), 5); // Push, Commit, Show log, Revert, and Add for new.txt
         QCOMPARE(actions.at(0)->text(), QStringLiteral("Pus&h..."));
         QCOMPARE(actions.at(0)->data().toStringList(), QStringList{repo.path()});
         QCOMPARE(actions.at(1)->text(), QStringLiteral("Git &Commit -> \"main\"..."));

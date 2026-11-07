@@ -20,6 +20,7 @@
 #include <QFlags>
 #include <QHash>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -92,6 +93,7 @@ public:
         Ignored = 0x40000000, // GITSLC_SHOWIGNORED
         AssumeValid = 0x00000200, // GITSLC_SHOWASSUMEVALID
         SkipWorktree = 0x00000400, // GITSLC_SHOWSKIPWORKTREE
+        DirectFiles = 0x04000000, // GITSLC_SHOWDIRECTFILES: the files set with setDirectFiles() start checked
         /**
          * GITSLC_SHOWVERSIONED. TortoiseGit's also holds GITSLC_SHOWIGNORED, to no effect: it loads ignored files
          * only when a dialog asks for them separately. Here asking to show them is that request, so it is left out.
@@ -129,6 +131,13 @@ public:
      *              dialog checks tracked changes and leaves unversioned files unchecked.
      */
     void setShowFlags(ShowFlags show, ShowFlags check);
+
+    /**
+     * Names the files the user picked directly, rather than through a folder (CGitStatusListCtrl::m_setDirectFiles).
+     * They start checked when the show flags hold Show::DirectFiles.
+     * @param paths Paths relative to the working tree root.
+     */
+    void setDirectFiles(const QStringList& paths);
 
     /**
      * @returns The kinds of entries that are listed.
@@ -240,6 +249,7 @@ private:
     QStringList m_parentHeaders; // The header of each parent's group
     QList<QList<qsizetype>> m_groups; // When grouped: the index in m_rows of each entry, per parent
     QHash<QString, bool> m_checkedByPath; // TortoiseGit's m_mapFilenameToChecked
+    QSet<QString> m_directFiles; // TortoiseGit's m_setDirectFiles
     ShowFlags m_show;
     ShowFlags m_check;
     bool m_hasCheckboxes = true;

@@ -19,8 +19,8 @@ It has two parts, split the way TortoiseGit splits TortoiseShell and TortoiseGit
 - `kortoisegitproc`, the application that runs every dialog, such as `kortoisegitproc --command log --path <path>`.
   It can also be run from a terminal.
 
-Status: early. Dolphin shows status overlays. The commands are `add`, `commit` and `push` (TortoiseGit's Add, Commit
-and Push dialogs, also in Dolphin's context menu), `repocreate` and `log`. Push asks for passwords and host keys
+Status: early. Dolphin shows status overlays. The commands are `add`, `commit`, `revert` and `push` (TortoiseGit's
+Add, Commit, Revert and Push dialogs, also in Dolphin's context menu), `repocreate` and `log`. Push asks for passwords and host keys
 through ksshaskpass, or your own `SSH_ASKPASS`/`GIT_ASKPASS`, and never on a terminal.
 
 ## Building on Arch Linux

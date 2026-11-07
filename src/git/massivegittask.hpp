@@ -36,7 +36,8 @@ class MassiveGitTask
 {
 public:
     /**
-     * @param params The command and its options, such as {"add", "-f"}.
+     * @param params The command and its options, such as {"add", "-f"}. If they hold "--end-of-options", the
+     *               pathspec options go before it, so a revision may follow it.
      */
     explicit MassiveGitTask(const QStringList& params);
 

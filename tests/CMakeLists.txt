@@ -19,6 +19,7 @@ set(kgt_tests
     progressdlgtest
     pushdlgtest
     resulttest
+    reverttest
 )
 
 foreach(test ${kgt_tests})

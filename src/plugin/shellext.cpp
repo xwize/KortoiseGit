@@ -98,6 +98,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_commitAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-commit")), i18n("Git &Commit..."), this))
     , m_createRepoAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-git")), i18n("Git Create repositor&y here..."), this))
     , m_showLogAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"), this))
+    , m_revertAction(new QAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Re&vert..."), this))
     , m_addAction(new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("&Add..."), this))
     , m_pushAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-push")), i18n("Pus&h..."), this))
 {
@@ -115,6 +116,10 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_pushAction->setToolTip(i18n("Push commits to a remote repository."));
     connect(m_pushAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("push"), m_pushAction);
+    });
+    m_revertAction->setToolTip(i18n("Reverts all changes you made since the last update"));
+    connect(m_revertAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("revert"), m_revertAction);
     });
     m_addAction->setToolTip(i18n("Adds file(s) to Git control"));
     connect(m_addAction, &QAction::triggered, this, [this] {
@@ -191,7 +196,11 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
     }
     m_showLogAction->setData(paths);
     actions.append(m_showLogAction);
-    // TortoiseGit's menu order: Push, Commit, Show log, ..., Add
+    // TortoiseGit's menu order: Push, Commit, Show log, ..., Revert, ..., Add
+    if (hasRevertableItem(items)) {
+        m_revertAction->setData(paths);
+        actions.append(m_revertAction);
+    }
     if (hasAddableItem(items)) {
         m_addAction->setData(paths);
         actions.append(m_addAction);
@@ -288,6 +297,27 @@ bool ShellExt::hasVersionedItem(const KFileItemList& items) const
         }
         const ItemVersion version = status->itemVersion(info.fileName(), item.isDir());
         return version != UnversionedVersion && version != IgnoredVersion;
+    });
+}
+
+bool ShellExt::hasRevertableItem(const KFileItemList& items) const
+{
+    // TortoiseGit's Revert entry: a versioned file that is not unchanged, or a folder in a working tree
+    return std::ranges::any_of(items, [this](const KFileItem& item) {
+        const QFileInfo info(QDir::cleanPath(item.localPath()));
+        if (info.fileName() == QLatin1String(".git")) {
+            return false;
+        }
+        const GitFolderStatus *status = menuStatus(info.absolutePath());
+        if (!status) {
+            // Not listed yet, such as the folder Dolphin shows when nothing is selected
+            return item.isDir();
+        }
+        const ItemVersion version = status->itemVersion(info.fileName(), item.isDir());
+        if (version == UnversionedVersion || version == IgnoredVersion) {
+            return false;
+        }
+        return item.isDir() || version != NormalVersion;
     });
 }
 
