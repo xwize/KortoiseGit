@@ -28,5 +28,6 @@ target_link_libraries(kortoisegitplugin PRIVATE
     KF6::I18n
     KF6::KIOCore
     DolphinVcs
+    kgtgit
     ${CMAKE_DL_LIBS}
 )

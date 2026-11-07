@@ -32,6 +32,7 @@ target_sources(kgtproc PRIVATE
 
 target_include_directories(kgtproc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(kgtproc PUBLIC
+    kgtgit
     kgtutils
     Qt6::Core
     Qt6::Widgets
