@@ -6,6 +6,7 @@
 
 #include <KFileItem>
 
+#include <QAction>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -68,6 +69,34 @@ private Q_SLOTS:
         const QTemporaryDir notARepo;
         QVERIFY(!plugin.beginRetrieval(notARepo.path() + QLatin1Char('/')));
         QCOMPARE(plugin.itemVersion(item(repo.filePath(QStringLiteral("a.txt")))), KVersionControlPlugin::UnversionedVersion);
+    }
+
+    void commitEntryShowsBranch()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        repo.write(QStringLiteral("new.txt"), "new\n");
+
+        ShellExt plugin(nullptr, {});
+        QVERIFY(plugin.beginRetrieval(repo.path() + QLatin1Char('/')));
+        plugin.endRetrieval();
+        // Let the folder's state reach the main thread
+        QCoreApplication::processEvents();
+
+        QList<QAction *> actions = plugin.versionControlActions({item(repo.filePath(QStringLiteral("a.txt")))});
+        QCOMPARE(actions.size(), 2);
+        QCOMPARE(actions.constFirst()->text(), QStringLiteral("Git &Commit -> \"main\"..."));
+        QCOMPARE(actions.constFirst()->data().toStringList(), QStringList{repo.filePath(QStringLiteral("a.txt"))});
+
+        // An unversioned file can't be committed from its menu, as in TortoiseGit
+        actions = plugin.versionControlActions({item(repo.filePath(QStringLiteral("new.txt")))});
+        QCOMPARE(actions.size(), 1);
+        QVERIFY(!actions.constFirst()->text().contains(QStringLiteral("Commit")));
+
+        // The folder shown, when nothing is selected
+        actions = plugin.versionControlActions({item(repo.path())});
+        QCOMPARE(actions.size(), 2);
     }
 
     void stagingRefreshesOverlays()

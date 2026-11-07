@@ -22,6 +22,10 @@ target_sources(kgtproc PRIVATE
     ${kgtproc_logging}
     cmdlineargs.cpp
     cmdlineargs.hpp
+    commitdlg.cpp
+    commitdlg.hpp
+    commands/commitcommand.cpp
+    commands/commitcommand.hpp
     commands/command.cpp
     commands/command.hpp
     commands/logcommand.cpp
@@ -44,6 +48,7 @@ target_link_libraries(kgtproc PUBLIC
     KF6::I18n
     KF6::KIOGui
     KF6::KIOWidgets
+    KF6::WidgetsAddons
 )
 
 add_executable(kortoisegitproc main.cpp)
