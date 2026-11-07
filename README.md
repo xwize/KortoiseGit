@@ -19,8 +19,8 @@ It has two parts, split the way TortoiseGit splits TortoiseShell and TortoiseGit
 - `kortoisegitproc`, the application that runs every dialog, such as `kortoisegitproc --command log --path <path>`.
   It can also be run from a terminal.
 
-Status: early. Dolphin shows status overlays. The commands are `add` (TortoiseGit's Add dialog, also in Dolphin's
-context menu for unversioned items) and `log`, which opens a placeholder window.
+Status: early. Dolphin shows status overlays. The commands are `add` and `commit` (TortoiseGit's Add and Commit
+dialogs, also in Dolphin's context menu) and `log`, which opens a placeholder window.
 
 ## Building on Arch Linux
 

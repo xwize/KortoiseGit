@@ -11,6 +11,7 @@
 #include "commands/command.hpp"
 
 #include "commands/addcommand.hpp"
+#include "commands/commitcommand.hpp"
 #include "commands/logcommand.hpp"
 
 #include <KLocalizedString>
@@ -37,6 +38,7 @@ std::unique_ptr<kgt::Command> create()
 
 constexpr std::array commands{
     CommandEntry{.name = u"add", .create = &create<kgt::AddCommand>},
+    CommandEntry{.name = u"commit", .create = &create<kgt::CommitCommand>},
     CommandEntry{.name = u"log", .create = &create<kgt::LogCommand>},
 };
 

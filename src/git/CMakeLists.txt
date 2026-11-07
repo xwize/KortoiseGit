@@ -8,6 +8,8 @@ add_library(kgtgit STATIC)
 target_sources(kgtgit PRIVATE
     git.cpp
     git.hpp
+    gitadmindir.cpp
+    gitadmindir.hpp
     gitcall.cpp
     gitcall.hpp
     gitnumstat.cpp

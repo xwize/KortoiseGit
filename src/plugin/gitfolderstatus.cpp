@@ -187,6 +187,11 @@ bool GitFolderStatus::hasUnversioned(const QString& name) const
     return m_children.value(name).hasUntracked;
 }
 
+bool GitFolderStatus::hasUnversioned() const
+{
+    return m_hasUnversioned;
+}
+
 const QString& GitFolderStatus::indexFile() const
 {
     return m_indexFile;
@@ -229,11 +234,13 @@ void GitFolderStatus::addEntry(const QString& path, ItemVersion version)
     // An ignored or untracked folder ("build/") that holds this whole folder
     if (path.endsWith(QLatin1Char('/')) && m_prefix.startsWith(path)) {
         m_wholeFolder = version;
+        m_hasUnversioned = version == KVersionControlPlugin::UnversionedVersion;
         return;
     }
     if (!path.startsWith(m_prefix) || path.size() == m_prefix.size()) {
         return;
     }
+    m_hasUnversioned = m_hasUnversioned || version == KVersionControlPlugin::UnversionedVersion;
     const QString relative = path.mid(m_prefix.size());
     const qsizetype slash = relative.indexOf(QLatin1Char('/'));
     // A file, or a folder git reports as a whole ("build/" when ignored, "nested/" for an untracked repository)

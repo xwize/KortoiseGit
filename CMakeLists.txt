@@ -29,7 +29,7 @@ include(KDEGitCommitHooks)
 kde_enable_exceptions()
 
 find_package(Qt6 ${QT_MIN_VERSION} REQUIRED COMPONENTS Core Gui Widgets Test)
-find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS CoreAddons I18n KIO)
+find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS CoreAddons I18n KIO WidgetsAddons)
 find_package(DolphinVcs REQUIRED)
 find_package(tl-expected REQUIRED)
 

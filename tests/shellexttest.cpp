@@ -60,6 +60,8 @@ bool retrieve(ShellExt& plugin, const QString& directory)
         std::ignore = plugin.itemVersion(item(entry.absoluteFilePath()));
     }
     plugin.endRetrieval();
+    // Let the folder's state reach the main thread, where the context menu reads it
+    QCoreApplication::processEvents();
     return true;
 }
 
@@ -123,29 +125,61 @@ private Q_SLOTS:
 
         ShellExt plugin(nullptr, {});
         QVERIFY(retrieve(plugin, repo.path()));
+        const QString commit = QStringLiteral("Git &Commit -> \"main\"...");
         const QString log = QStringLiteral("Show &log");
         const QString add = QStringLiteral("&Add...");
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("tracked.txt")))}), QStringList{log});
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), QStringList{log});
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("tracked.txt")))}), (QStringList{commit, log}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{commit, log}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral(".git")))}), QStringList{log});
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{log, add}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("build.log")))}), (QStringList{log, add}));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("withnew")))}), (QStringList{log, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("withnew")))}), (QStringList{commit, log, add}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("untracked")))}), (QStringList{log, add}));
         // One addable item among others is enough, as in TortoiseGit
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("tracked.txt"))), item(repo.filePath(QStringLiteral("new.txt")))}),
-                 (QStringList{log, add}));
+                 (QStringList{commit, log, add}));
         // Nothing selected: Dolphin asks about the folder it shows
-        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{log, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{commit, log, add}));
 
-        // A folder that was looked into on its own: its own listing says whether it holds new files
+        // An expanded folder is read too; the items of the first folder keep their entries
         QVERIFY(retrieve(plugin, repo.filePath(QStringLiteral("clean"))));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), QStringList{log});
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean/a.txt")))}), (QStringList{commit, log}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{log, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{commit, log}));
 
-        // Once the files are added, the next retrieval forgets them
+        // Once the file is added, the next retrieval no longer offers it
         repo.run({QStringLiteral("add"), QStringLiteral("new.txt")});
         QVERIFY(retrieve(plugin, repo.path()));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), QStringList{log});
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{commit, log}));
+    }
+
+    void commitEntryShowsBranch()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        repo.write(QStringLiteral("new.txt"), "new\n");
+
+        ShellExt plugin(nullptr, {});
+        QVERIFY(plugin.beginRetrieval(repo.path() + QLatin1Char('/')));
+        plugin.endRetrieval();
+        // Let the folder's state reach the main thread
+        QCoreApplication::processEvents();
+
+        QList<QAction *> actions = plugin.versionControlActions({item(repo.filePath(QStringLiteral("a.txt")))});
+        QCOMPARE(actions.size(), 2);
+        QCOMPARE(actions.constFirst()->text(), QStringLiteral("Git &Commit -> \"main\"..."));
+        QCOMPARE(actions.constFirst()->data().toStringList(), QStringList{repo.filePath(QStringLiteral("a.txt"))});
+
+        // An unversioned file can't be committed from its menu, as in TortoiseGit
+        actions = plugin.versionControlActions({item(repo.filePath(QStringLiteral("new.txt")))});
+        QCOMPARE(actions.size(), 2); // Show log and Add
+        QVERIFY(!actions.constFirst()->text().contains(QStringLiteral("Commit")));
+
+        // The folder shown, when nothing is selected
+        actions = plugin.versionControlActions({item(repo.path())});
+        QCOMPARE(actions.size(), 3); // Commit, Show log, and Add for new.txt
+        QCOMPARE(actions.constFirst()->text(), QStringLiteral("Git &Commit -> \"main\"..."));
     }
 
     void stagingRefreshesOverlays()

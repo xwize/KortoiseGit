@@ -3,6 +3,7 @@
 
 #include "shellext.hpp"
 
+#include "git/gitadmindir.hpp"
 #include "kortoisegitplugin_debug.hpp"
 #include "utils/runtimeerror.hpp"
 
@@ -13,7 +14,6 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QIcon>
-#include <QMutexLocker>
 #include <QProcess>
 #include <QStandardPaths>
 
@@ -32,6 +32,10 @@ constexpr auto procName = "kortoisegitproc"_L1;
 // One git command gives several index events, KDirWatch reporting the replaced file about half a second after
 // it went: refresh once they have settled
 constexpr std::chrono::milliseconds refreshDelay{600};
+// CShellExt::InsertGitMenu's limit on the branch name in the Commit entry
+constexpr qsizetype maxMenuBranchLength = 64;
+// How many folders' states the context menu keeps: those Dolphin shows at once, expanded ones included
+constexpr qsizetype maxMenuFolders = 64;
 
 /**
  * The directory holding this plugin's .so, like TortoiseGit's CPathUtils::GetAppDirectory(g_hmodThisDll).
@@ -91,10 +95,14 @@ namespace kgt
 
 ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     : KVersionControlPlugin(parent)
+    , m_commitAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-commit")), i18n("Git &Commit..."), this))
     , m_showLogAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"), this))
     , m_addAction(new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("&Add..."), this))
 {
     Q_UNUSED(args)
+    connect(m_commitAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("commit"), m_commitAction);
+    });
     connect(m_showLogAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("log"), m_showLogAction);
     });
@@ -120,11 +128,6 @@ QString ShellExt::fileName() const
 bool ShellExt::beginRetrieval(const QString& directory)
 {
     m_folderStatus.reset();
-    m_retrievalDirectory = QDir::cleanPath(directory);
-    {
-        const QMutexLocker locker(&m_addableMutex);
-        m_addable.remove(m_retrievalDirectory);
-    }
     try {
         m_folderStatus = GitFolderStatus::fetch(directory);
     } catch (const RuntimeError& e) {
@@ -137,8 +140,9 @@ bool ShellExt::beginRetrieval(const QString& directory)
     }
     QMetaObject::invokeMethod(
         this,
-        [this, indexFile = m_folderStatus->indexFile()] {
-            watchIndex(indexFile);
+        [this, directory, status = *m_folderStatus] {
+            watchIndex(status.indexFile());
+            setMenuStatus(directory, status);
         },
         Qt::QueuedConnection);
     return true;
@@ -153,17 +157,7 @@ KVersionControlPlugin::ItemVersion ShellExt::itemVersion(const KFileItem& item) 
     if (!m_folderStatus) {
         return UnversionedVersion;
     }
-    const QString name = item.name();
-    const ItemVersion version = m_folderStatus->itemVersion(name, item.isDir());
-    const bool hasUnversioned = version == UnversionedVersion || (item.isDir() && m_folderStatus->hasUnversioned(name));
-    // ".git" is reported as unversioned so it gets no overlay, but there is nothing in it to add
-    if (name != QLatin1String(".git") && (hasUnversioned || version == IgnoredVersion)) {
-        const QMutexLocker locker(&m_addableMutex);
-        AddableItems& addable = m_addable.try_emplace(m_retrievalDirectory).first->second;
-        addable.names.insert(name);
-        addable.hasUnversioned = addable.hasUnversioned || hasUnversioned;
-    }
-    return version;
+    return m_folderStatus->itemVersion(item.name(), item.isDir());
 }
 
 QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) const
@@ -172,29 +166,26 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
     if (paths.isEmpty()) {
         return {};
     }
-    m_showLogAction->setData(paths);
-    if (!canAdd(items)) {
-        return {m_showLogAction};
+    QList<QAction *> actions;
+    if (hasVersionedItem(items)) {
+        m_commitAction->setText(commitMenuText(paths.constFirst()));
+        m_commitAction->setData(paths);
+        actions.append(m_commitAction);
     }
-    m_addAction->setData(paths);
-    return {m_showLogAction, m_addAction};
+    m_showLogAction->setData(paths);
+    actions.append(m_showLogAction);
+    // TortoiseGit's menu order: Commit, Show log, ..., Add
+    if (hasAddableItem(items)) {
+        m_addAction->setData(paths);
+        actions.append(m_addAction);
+    }
+    return actions;
 }
 
 QList<QAction *> ShellExt::outOfVersionControlActions(const KFileItemList& items) const
 {
     Q_UNUSED(items)
     return {};
-}
-
-bool ShellExt::canAdd(const KFileItemList& items) const
-{
-    const QMutexLocker locker(&m_addableMutex);
-    return std::ranges::any_of(items, [this](const KFileItem& item) {
-        const QString path = QDir::cleanPath(item.localPath());
-        const QFileInfo info(path);
-        // The item as a child of its folder, or a folder Dolphin shows (with nothing selected) that holds new files
-        return m_addable.value(info.absolutePath()).names.contains(info.fileName()) || (item.isDir() && m_addable.value(path).hasUnversioned);
-    });
 }
 
 void ShellExt::runCommand(const QString& command, const QAction *action)
@@ -235,6 +226,68 @@ void ShellExt::watchIndex(const QString& indexFile)
     }
     m_indexWatch.addFile(indexFile);
     m_watchedIndex = indexFile;
+}
+
+void ShellExt::setMenuStatus(const QString& directory, const GitFolderStatus& status)
+{
+    const QString key = QDir::cleanPath(directory);
+    // Forget the folders browsed long ago rather than grow without bound
+    if (m_menuStatus.size() >= maxMenuFolders && !m_menuStatus.contains(key)) {
+        m_menuStatus.clear();
+    }
+    m_menuStatus.insert_or_assign(key, status);
+}
+
+const GitFolderStatus *ShellExt::menuStatus(const QString& directory) const
+{
+    const auto found = m_menuStatus.constFind(directory);
+    return found == m_menuStatus.cend() ? nullptr : &found.value();
+}
+
+bool ShellExt::hasVersionedItem(const KFileItemList& items) const
+{
+    return std::ranges::any_of(items, [this](const KFileItem& item) {
+        const QFileInfo info(QDir::cleanPath(item.localPath()));
+        const GitFolderStatus *status = menuStatus(info.absolutePath());
+        if (!status) {
+            return true;
+        }
+        const ItemVersion version = status->itemVersion(info.fileName(), item.isDir());
+        return version != UnversionedVersion && version != IgnoredVersion;
+    });
+}
+
+bool ShellExt::hasAddableItem(const KFileItemList& items) const
+{
+    return std::ranges::any_of(items, [this](const KFileItem& item) {
+        const QString path = QDir::cleanPath(item.localPath());
+        // The folder Dolphin shows, when nothing is selected, is judged by its own listing
+        if (const GitFolderStatus *own = item.isDir() ? menuStatus(path) : nullptr; own && own->hasUnversioned()) {
+            return true;
+        }
+        const QFileInfo info(path);
+        const GitFolderStatus *status = menuStatus(info.absolutePath());
+        // ".git" is reported as unversioned so it gets no overlay, but there is nothing in it to add
+        if (!status || info.fileName() == QLatin1String(".git")) {
+            return false;
+        }
+        const ItemVersion version = status->itemVersion(info.fileName(), item.isDir());
+        return version == UnversionedVersion || version == IgnoredVersion || (item.isDir() && status->hasUnversioned(info.fileName()));
+    });
+}
+
+QString ShellExt::commitMenuText(const QString& path)
+{
+    QString branch = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(path));
+    if (branch.isEmpty()) {
+        return i18n("Git &Commit...");
+    }
+    if (branch.size() > maxMenuBranchLength) {
+        branch = branch.left(maxMenuBranchLength) + QStringLiteral("...");
+    }
+    // EscapeAccellerators: a '&' in the branch name is not a shortcut
+    branch.replace(QLatin1Char('&'), QStringLiteral("&&"));
+    return i18nc("@action:inmenu %1 is the current branch", "Git &Commit -> \"%1\"...", branch);
 }
 
 } // namespace kgt

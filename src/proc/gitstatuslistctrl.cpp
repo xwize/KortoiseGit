@@ -134,10 +134,9 @@ void GitStatusListCtrl::setShowFlags(GitStatusListModel::ShowFlags show, GitStat
     }
 }
 
-void GitStatusListCtrl::setEmptyString(const QString& text)
+void GitStatusListCtrl::setIncludeStaged(bool include)
 {
-    m_emptyString = text;
-    viewport()->update();
+    m_includeStaged = include;
 }
 
 void GitStatusListCtrl::reload()
@@ -238,6 +237,12 @@ void GitStatusListCtrl::contextMenuEvent(QContextMenuEvent *event)
     }
 }
 
+void GitStatusListCtrl::setEmptyString(const QString& text)
+{
+    m_emptyString = text;
+    viewport()->update();
+}
+
 void GitStatusListCtrl::paintEvent(QPaintEvent *event)
 {
     QTreeView::paintEvent(event);
@@ -274,13 +279,20 @@ void GitStatusListCtrl::onStatusFinished()
         return;
     }
     m_pendingStatus = std::move(*status);
+    if (m_includeStaged) {
+        // The status covered the whole working tree: keep what the filter selects, and everything staged
+        m_pendingStatus.removeIf([this](const GitStatusEntry& entry) {
+            return !isInPathFilter(entry) && entry.index == FileState::Unmodified;
+        });
+    }
     m_isInitialRepo = output.startsWith(initialBranchHeader);
     if (m_isInitialRepo) {
         // Nothing to count lines against; TortoiseGit lists an initial commit's files without counts too
         finishLoad({});
         return;
     }
-    m_numStatCall = Git(m_workingTree).runAsync(GitNumStat::arguments(QStringLiteral("HEAD"), m_pathFilter), RunMode::ReadOnly);
+    const QStringList numStatPaths = m_includeStaged ? QStringList() : m_pathFilter;
+    m_numStatCall = Git(m_workingTree).runAsync(GitNumStat::arguments(QStringLiteral("HEAD"), numStatPaths), RunMode::ReadOnly);
     connect(m_numStatCall.get(), &GitCall::finished, this, &GitStatusListCtrl::onNumStatFinished);
 }
 
@@ -414,10 +426,23 @@ void GitStatusListCtrl::explore(const GitStatusListEntry& entry) const
 
 QStringList GitStatusListCtrl::pathSpec() const
 {
-    if (m_pathFilter.isEmpty()) {
+    if (m_pathFilter.isEmpty() || m_includeStaged) {
         return {};
     }
     return QStringList{QStringLiteral("--")} + m_pathFilter;
+}
+
+bool GitStatusListCtrl::isInPathFilter(const GitStatusEntry& entry) const
+{
+    if (m_pathFilter.isEmpty()) {
+        return true;
+    }
+    return std::ranges::any_of(m_pathFilter, [&entry](const QString& filter) {
+        const auto isUnder = [&filter](const QString& path) {
+            return !path.isEmpty() && (path == filter || path.startsWith(filter + QLatin1Char('/')));
+        };
+        return isUnder(entry.path) || isUnder(entry.origPath);
+    });
 }
 
 } // namespace kgt

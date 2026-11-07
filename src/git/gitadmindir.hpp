@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: 2008-2026 TortoiseGit
+// SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+/**
+ * @file
+ * Ported from TortoiseGit src/Git/GitAdminDir.h: finds a working tree's administrative directory (.git) by looking
+ * at the file system, without running git, so the plugin can use it while building a context menu.
+ */
+
+#pragma once
+
+#include <QString>
+
+namespace kgt
+{
+
+/**
+ * Locates .git directories, following a "gitdir:" file as linked worktrees and submodules have.
+ */
+class GitAdminDir
+{
+public:
+    GitAdminDir() = delete;
+
+    /**
+     * Ported from GitAdminDir::GetWorktreeAdminDirPath: walks up from @p path to the nearest .git.
+     * @param path A file or directory, possibly inside a working tree.
+     * @returns The admin directory of the working tree holding @p path (for a linked worktree, its own one under
+     *          the main repository's worktrees/), or an empty string if @p path is in none.
+     */
+    [[nodiscard]] static QString worktreeAdminDirPath(const QString& path);
+
+    /**
+     * Ported from CGit::GetCurrentBranchFromFile: reads HEAD directly, as git-gui does.
+     * @param adminDir A working tree's admin directory, from worktreeAdminDirPath().
+     * @returns The current branch's name (it may not exist yet, in a repository without commits), "HEAD" when
+     *          HEAD is detached, or an empty string if HEAD can't be read.
+     */
+    [[nodiscard]] static QString currentBranchFromFile(const QString& adminDir);
+};
+
+} // namespace kgt

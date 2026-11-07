@@ -216,6 +216,12 @@ private Q_SLOTS:
         QVERIFY(!status.hasUnversioned(QStringLiteral("ignored")));
         QVERIFY(!status.hasUnversioned(QStringLiteral("modified")));
         QVERIFY(!status.hasUnversioned(QStringLiteral("absent")));
+        QVERIFY(status.hasUnversioned());
+
+        // Only below its own prefix, and everything inside an untracked folder
+        QVERIFY(!GitFolderStatus(QStringLiteral("modified/"), {ofKind(GitStatusKind::Untracked, QStringLiteral("tracked/new.txt"))}, {}).hasUnversioned());
+        QVERIFY(!GitFolderStatus(QStringLiteral("build/"), {ofKind(GitStatusKind::Ignored, QStringLiteral("build/"))}, {}).hasUnversioned());
+        QVERIFY(GitFolderStatus(QStringLiteral("new/sub/"), {ofKind(GitStatusKind::Untracked, QStringLiteral("new/"))}, {}).hasUnversioned());
     }
 
     void insideAnIgnoredFolderEverythingIsIgnored()
