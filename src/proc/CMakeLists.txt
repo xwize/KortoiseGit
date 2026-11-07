@@ -26,6 +26,10 @@ target_sources(kgtproc PRIVATE
     commands/command.hpp
     commands/logcommand.cpp
     commands/logcommand.hpp
+    gitstatuslistctrl.cpp
+    gitstatuslistctrl.hpp
+    gitstatuslistmodel.cpp
+    gitstatuslistmodel.hpp
     logdlg.cpp
     logdlg.hpp
 )
@@ -38,6 +42,8 @@ target_link_libraries(kgtproc PUBLIC
     Qt6::Widgets
     KF6::CoreAddons
     KF6::I18n
+    KF6::KIOGui
+    KF6::KIOWidgets
 )
 
 add_executable(kortoisegitproc main.cpp)

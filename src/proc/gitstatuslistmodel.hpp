@@ -1,0 +1,202 @@
+// SPDX-FileCopyrightText: 2003-2008 TortoiseSVN
+// SPDX-FileCopyrightText: 2008-2026 TortoiseGit
+// SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+/**
+ * @file
+ * The data half of TortoiseGit src/Git/GitStatusListCtrl.h (CGitStatusListCtrl): its entries, their check
+ * state, the show flags (GITSLC_SHOW*) that pick which of them are listed, and the cell texts of its columns.
+ * GitStatusListCtrl is the view over it.
+ */
+
+#pragma once
+
+#include "git/gitnumstat.hpp"
+#include "git/gitstatus.hpp"
+#include "git/tgitpath.hpp"
+
+#include <QAbstractTableModel>
+#include <QFlags>
+#include <QHash>
+#include <QList>
+#include <QString>
+#include <QStringList>
+
+namespace kgt
+{
+
+/**
+ * One file the status list knows about, listed or not: its status and its line counts against HEAD.
+ */
+struct GitStatusListEntry {
+    QString path; // Relative to the working tree root, '/'-separated
+    QString origPath; // The rename or copy source; empty otherwise
+    TGitPath::Actions actions; // TortoiseGit's m_Action: what happened to the file, Missing included
+    QString linesAdded; // TortoiseGit's m_StatAdd: a number, "-" for a binary file, empty if unknown
+    QString linesRemoved; // TortoiseGit's m_StatDel
+
+    bool operator==(const GitStatusListEntry&) const = default;
+};
+
+/**
+ * The status list's rows: the entries the show flags let through, each with a checkbox. The check state of every
+ * path is remembered across reloads and changes of the show flags, as TortoiseGit's m_mapFilenameToChecked does.
+ */
+class GitStatusListModel : public QAbstractTableModel
+{
+    Q_OBJECT
+
+public:
+    /**
+     * The columns, in TortoiseGit's order (eCol). TortoiseGit's optional Filename, modification date, size and LFS
+     * lock columns are not ported yet.
+     */
+    // NOLINTNEXTLINE(cppcoreguidelines-use-enum-class): Qt's model API takes columns as int
+    enum Column {
+        PathColumn, // eCol_Name: "Path", with the checkbox
+        ExtensionColumn, // eCol_Extension
+        StatusColumn, // eCol_Status
+        LinesAddedColumn, // eCol_Add
+        LinesRemovedColumn, // eCol_Del
+        ColumnCount,
+    };
+
+    /**
+     * Extra item data roles.
+     */
+    // NOLINTNEXTLINE(cppcoreguidelines-use-enum-class): Qt's model API takes roles as int
+    enum Role {
+        SortRole = Qt::UserRole + 1, // What a column sorts by: numbers for the line counts, text otherwise
+        PathRole, // The entry's path, relative to the working tree root
+        ActionsRole, // The entry's TGitPath::Actions, as unsigned int
+    };
+
+    /**
+     * Which kinds of entries are listed (TortoiseGit's GITSLC_SHOW*, with the same values). An entry is listed if
+     * any of its actions is in the flags. TortoiseGit's flags that are zero (normal, missing, obstructed, ...) and
+     * those for features not ported yet (direct files, LFS locks, submodules) are left out.
+     */
+    enum class Show : unsigned int {
+        Unversioned = 0x80000000, // GITSLC_SHOWUNVERSIONED
+        Modified = 0x00000002, // GITSLC_SHOWMODIFIED
+        Added = 0x00000041, // GITSLC_SHOWADDED: added or copied
+        Removed = 0x00000008, // GITSLC_SHOWREMOVED, which takes in missing files too
+        Conflicted = 0x00000010, // GITSLC_SHOWCONFLICTED
+        Replaced = 0x00000004, // GITSLC_SHOWREPLACED: renamed
+        Merged = 0x00000080, // GITSLC_SHOWMERGED
+        Ignored = 0x40000000, // GITSLC_SHOWIGNORED
+        AssumeValid = 0x00000200, // GITSLC_SHOWASSUMEVALID
+        SkipWorktree = 0x00000400, // GITSLC_SHOWSKIPWORKTREE
+        /**
+         * GITSLC_SHOWVERSIONED. TortoiseGit's also holds GITSLC_SHOWIGNORED, to no effect: it loads ignored files
+         * only when a dialog asks for them separately. Here asking to show them is that request, so it is left out.
+         */
+        Versioned = Modified | Added | Removed | Conflicted | Replaced | Merged,
+        VersionedButNormal = Versioned, // GITSLC_SHOWVERSIONEDBUTNORMAL: git status never lists unchanged files
+        All = Versioned | Unversioned, // GITSLC_SHOWALL
+    };
+    Q_DECLARE_FLAGS(ShowFlags, Show)
+
+    /**
+     * @param parent The owning object.
+     */
+    explicit GitStatusListModel(QObject *parent = nullptr);
+
+    /**
+     * Combines a status with its line counts into the list's entries, as CGit::GetWorkingTreeChanges does: a file
+     * deleted from the working tree is also Missing.
+     * @param status The working tree's status.
+     * @param numStat The line counts against HEAD, matched to the status by path.
+     * @returns An entry per status entry, in the same order.
+     */
+    [[nodiscard]] static QList<GitStatusListEntry> makeEntries(const QList<GitStatusEntry>& status, const QList<NumStatEntry>& numStat);
+
+    /**
+     * Replaces every entry, keeping the remembered check state of paths seen before.
+     * @param entries All entries, listed or not.
+     */
+    void setEntries(const QList<GitStatusListEntry>& entries);
+
+    /**
+     * Picks which entries are listed and which new ones start checked (CGitStatusListCtrl::Show).
+     * @param show The kinds of entries to list.
+     * @param check The kinds of entries that start checked the first time they are seen. TortoiseGit's commit
+     *              dialog checks tracked changes and leaves unversioned files unchecked.
+     */
+    void setShowFlags(ShowFlags show, ShowFlags check);
+
+    /**
+     * @returns The kinds of entries that are listed.
+     */
+    [[nodiscard]] ShowFlags showFlags() const;
+
+    /**
+     * @returns Every entry, listed or not, in the order given to setEntries().
+     */
+    [[nodiscard]] const QList<GitStatusListEntry>& allEntries() const;
+
+    /**
+     * @param row A row of this model.
+     * @returns The entry shown in that row.
+     */
+    [[nodiscard]] const GitStatusListEntry& entry(int row) const;
+
+    /**
+     * @returns The listed entries that are checked, in row order.
+     */
+    [[nodiscard]] QList<GitStatusListEntry> checkedEntries() const;
+
+    /**
+     * @returns How many listed entries are checked (TortoiseGit's m_nSelected).
+     */
+    [[nodiscard]] int checkedCount() const;
+
+    /**
+     * Checks or unchecks every listed entry (CGitStatusListCtrl::SelectAll).
+     * @param checked The new state.
+     */
+    void setAllChecked(bool checked);
+
+    /**
+     * @param actions What happened to a file.
+     * @returns The Status column's text for it (CTGitPath::GetActionName).
+     */
+    [[nodiscard]] static QString actionName(TGitPath::Actions actions);
+
+    /**
+     * @param path A path relative to the working tree root.
+     * @returns The Extension column's text: from the last dot in the file name on, or empty
+     *          (CTGitPath::GetFileExtension).
+     */
+    [[nodiscard]] static QString fileExtension(const QString& path);
+
+    [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
+    [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;
+    [[nodiscard]] QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
+    bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
+    [[nodiscard]] Qt::ItemFlags flags(const QModelIndex& index) const override;
+    [[nodiscard]] QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
+
+Q_SIGNALS:
+    /**
+     * The number of checked listed entries, or the number of listed entries, may have changed.
+     */
+    void checkedCountChanged();
+
+private:
+    void rebuildRows();
+    [[nodiscard]] bool isChecked(const GitStatusListEntry& entry) const;
+    [[nodiscard]] QVariant displayData(const GitStatusListEntry& entry, int column) const;
+    [[nodiscard]] static QVariant sortData(const GitStatusListEntry& entry, int column);
+
+    QList<GitStatusListEntry> m_entries;
+    QList<qsizetype> m_rows; // TortoiseGit's m_arListArray: the index in m_entries of each listed row
+    QHash<QString, bool> m_checkedByPath; // TortoiseGit's m_mapFilenameToChecked
+    ShowFlags m_show;
+    ShowFlags m_check;
+};
+
+} // namespace kgt
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(kgt::GitStatusListModel::ShowFlags)
