@@ -36,7 +36,7 @@ constexpr int iconSpacing = 2; // Between two action icons
 constexpr int graphColumnWidth = 40;
 constexpr int authorColumnWidth = 150;
 constexpr int dateColumnWidth = 140;
-constexpr int maxLabelBrightness = 128; // Labels darker than this get white text
+constexpr int maxLabelBrightness = 128; // Labels with a lightness below this get white text
 
 /**
  * @param ref A ref.
@@ -166,7 +166,7 @@ private:
             painter->setPen(color.darker());
             painter->setBrush(color);
             painter->drawRect(label.adjusted(0, 0, -1, -1));
-            painter->setPen(color.value() < maxLabelBrightness ? Qt::white : Qt::black);
+            painter->setPen(color.lightness() < maxLabelBrightness ? Qt::white : Qt::black);
             painter->drawText(label, Qt::AlignCenter | Qt::TextSingleLine, ref.name);
             rest.setLeft(label.right() + 1 + labelSpacing);
         }

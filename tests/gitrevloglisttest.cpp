@@ -6,6 +6,8 @@
 
 #include <QTest>
 
+#include <algorithm>
+
 namespace
 {
 
@@ -46,6 +48,53 @@ GitRevFiles parseFiles(const TestRepo& repo, const GitRevLoglist& rev)
     return *files;
 }
 
+/**
+ * Builds a history with a merge, tags and odd messages: several paragraphs, Unicode and tabs, and an empty one.
+ * @param repo An empty repository.
+ */
+void makeOddHistory(const TestRepo& repo)
+{
+    repo.write(QStringLiteral("a.txt"), "a\n");
+    repo.commitAll(QStringLiteral("First"));
+    repo.write(QStringLiteral("a.txt"), "b\n");
+    repo.commitAll(QStringLiteral("Subject line\n\nBody paragraph one.\n\nBody, \"quoted\" & <tagged>.\n\n\n"));
+    repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("side")});
+    repo.write(QStringLiteral("side.txt"), "side\n");
+    repo.commitAll(QStringLiteral("Ünïcödé 日本語 \t tabs"));
+    repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("main")});
+    repo.run({QStringLiteral("commit"),
+              QStringLiteral("--quiet"),
+              QStringLiteral("--allow-empty"),
+              QStringLiteral("--allow-empty-message"),
+              QStringLiteral("-m"),
+              QString()});
+    repo.run({QStringLiteral("merge"),
+              QStringLiteral("--quiet"),
+              QStringLiteral("--no-ff"),
+              QStringLiteral("-m"),
+              QStringLiteral("Merge side"),
+              QStringLiteral("side")});
+    repo.run({QStringLiteral("tag"), QStringLiteral("-a"), QStringLiteral("v1.0"), QStringLiteral("-m"), QStringLiteral("Release")});
+    repo.run({QStringLiteral("tag"), QStringLiteral("light"), QStringLiteral("HEAD~1")});
+}
+
+/**
+ * @param revs Commits in log order.
+ * @returns Whether every commit comes before its parents.
+ */
+bool isTopological(const QList<GitRevLoglist>& revs)
+{
+    for (qsizetype i = 0; i < revs.size(); ++i) {
+        const bool parentsLater = std::ranges::all_of(revs.at(i).parents, [&revs, i](const QString& parent) {
+            return std::ranges::find(revs, parent, &GitRevLoglist::hash) - revs.cbegin() > i;
+        });
+        if (!parentsLater) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 /**
@@ -61,22 +110,10 @@ private Q_SLOTS:
         TestRepo::isolateGit();
     }
 
-    void parsesHistoryWithMergesAndOddMessages()
+    void parsesMergeAndTopologicalOrder()
     {
-        TestRepo repo;
-        repo.write(QStringLiteral("a.txt"), "a\n");
-        repo.commitAll(QStringLiteral("First"));
-        repo.write(QStringLiteral("a.txt"), "b\n");
-        repo.commitAll(QStringLiteral("Subject line\n\nBody paragraph one.\n\nBody, \"quoted\" & <tagged>.\n\n\n"));
-        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("side")});
-        repo.write(QStringLiteral("side.txt"), "side\n");
-        repo.commitAll(QStringLiteral("Ünïcödé 日本語 \t tabs"));
-        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("main")});
-        repo.run({QStringLiteral("commit"), QStringLiteral("--quiet"), QStringLiteral("--allow-empty"), QStringLiteral("--allow-empty-message"), QStringLiteral("-m"), QString()});
-        repo.run({QStringLiteral("merge"), QStringLiteral("--quiet"), QStringLiteral("--no-ff"), QStringLiteral("-m"), QStringLiteral("Merge side"), QStringLiteral("side")});
-        repo.run({QStringLiteral("tag"), QStringLiteral("-a"), QStringLiteral("v1.0"), QStringLiteral("-m"), QStringLiteral("Release")});
-        repo.run({QStringLiteral("tag"), QStringLiteral("light"), QStringLiteral("HEAD~1")});
-
+        const TestRepo repo;
+        makeOddHistory(repo);
         const QList<GitRevLoglist> revs = parseLog(repo);
         QCOMPARE(revs.size(), 5);
 
@@ -93,18 +130,22 @@ private Q_SLOTS:
                      {.type = GitRef::Type::Tag, .name = QStringLiteral("v1.0"), .isCurrent = false},
                  }));
 
-        // Topological order: every commit comes before its parents
-        for (qsizetype i = 0; i < revs.size(); ++i) {
-            for (const QString& parent : revs.at(i).parents) {
-                const auto parentIndex = std::ranges::find(revs, parent, &GitRevLoglist::hash) - revs.cbegin();
-                QVERIFY(parentIndex > i);
-            }
-        }
+        QVERIFY(isTopological(revs));
+    }
+
+    void parsesOddMessages()
+    {
+        const TestRepo repo;
+        makeOddHistory(repo);
+        const QList<GitRevLoglist> revs = parseLog(repo);
+        QCOMPARE(revs.size(), 5);
 
         const auto find = [&revs](const QString& subject) {
-            return *std::ranges::find(revs, subject, &GitRevLoglist::subject);
+            const auto found = std::ranges::find(revs, subject, &GitRevLoglist::subject);
+            return found == revs.cend() ? GitRevLoglist() : *found;
         };
         const GitRevLoglist empty = find(QString());
+        QVERIFY(!empty.hash.isEmpty());
         QVERIFY(empty.body.isEmpty());
         QCOMPARE(empty.refs, (QList<GitRef>{{.type = GitRef::Type::Tag, .name = QStringLiteral("light"), .isCurrent = false}}));
         const GitRevLoglist unicode = find(QStringLiteral("Ünïcödé 日本語 \t tabs"));
@@ -118,7 +159,7 @@ private Q_SLOTS:
 
     void parsesOutputInPieces()
     {
-        TestRepo repo;
+        const TestRepo repo;
         for (int i = 0; i < 20; ++i) {
             repo.write(QStringLiteral("f.txt"), QByteArray::number(i));
             repo.commitAll(QStringLiteral("Commit %1\n\nBody %1").arg(i));
@@ -143,7 +184,7 @@ private Q_SLOTS:
 
     void limitsToPath()
     {
-        TestRepo repo;
+        const TestRepo repo;
         repo.write(QStringLiteral("dir/a.txt"), "1");
         repo.commitAll(QStringLiteral("Add a"));
         repo.write(QStringLiteral("b.txt"), "1");
@@ -164,6 +205,7 @@ private Q_SLOTS:
         QVERIFY(!GitRevLoglist::takeRecords(buffer));
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
     void parsesRefs_data()
     {
         QTest::addColumn<QString>("decoration");
@@ -190,14 +232,14 @@ private Q_SLOTS:
 
     void parsesRefs()
     {
-        QFETCH(QString, decoration);
-        QFETCH(QList<GitRef>, refs);
+        QFETCH(const QString, decoration);
+        QFETCH(const QList<GitRef>, refs);
         QCOMPARE(GitRevLoglist::parseRefs(decoration), refs);
     }
 
     void parsesChangedFiles()
     {
-        TestRepo repo;
+        const TestRepo repo;
         repo.write(QStringLiteral("keep.txt"), "one\ntwo\nthree\n");
         repo.write(QStringLiteral("gone.txt"), "gone\n");
         repo.write(QStringLiteral("old name.txt"), "a long enough line to be found as a rename\nand another one\n");
@@ -243,7 +285,7 @@ private Q_SLOTS:
 
     void parsesMergeAgainstFirstParent()
     {
-        TestRepo repo;
+        const TestRepo repo;
         repo.write(QStringLiteral("a.txt"), "a\n");
         repo.commitAll(QStringLiteral("Root"));
         repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("side")});
