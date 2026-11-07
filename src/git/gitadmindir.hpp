@@ -32,6 +32,13 @@ public:
     [[nodiscard]] static QString worktreeAdminDirPath(const QString& path);
 
     /**
+     * Ported from GitAdminDir::IsBareRepo: whether a folder is a bare repository's top, by its files.
+     * @param path A folder.
+     * @returns True if it holds HEAD, config, objects/ and refs/heads/.
+     */
+    [[nodiscard]] static bool isBareRepo(const QString& path);
+
+    /**
      * Ported from CGit::GetCurrentBranchFromFile: reads HEAD directly, as git-gui does.
      * @param adminDir A working tree's admin directory, from worktreeAdminDirPath().
      * @returns The current branch's name (it may not exist yet, in a repository without commits), "HEAD" when

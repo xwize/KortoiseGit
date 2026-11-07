@@ -96,10 +96,15 @@ namespace kgt
 ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     : KVersionControlPlugin(parent)
     , m_commitAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-commit")), i18n("Git &Commit..."), this))
+    , m_createRepoAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-git")), i18n("Git Create repositor&y here..."), this))
     , m_showLogAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"), this))
     , m_addAction(new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("&Add..."), this))
 {
     Q_UNUSED(args)
+    connect(m_createRepoAction, &QAction::triggered, this, [this] {
+        watchForNewRepository(m_createRepoAction->data().toStringList().constFirst());
+        runCommand(QStringLiteral("repocreate"), m_createRepoAction);
+    });
     connect(m_commitAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("commit"), m_commitAction);
     });
@@ -118,6 +123,8 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     connect(&m_indexWatch, &KDirWatch::dirty, &m_refreshTimer, qOverload<>(&QTimer::start));
     connect(&m_indexWatch, &KDirWatch::created, &m_refreshTimer, qOverload<>(&QTimer::start));
     connect(&m_indexWatch, &KDirWatch::deleted, &m_refreshTimer, qOverload<>(&QTimer::start));
+    // Dolphin looks for a plugin again on itemVersionsChanged(), finding the new repository
+    connect(&m_newRepoWatch, &KDirWatch::created, &m_refreshTimer, qOverload<>(&QTimer::start));
 }
 
 QString ShellExt::fileName() const
@@ -184,8 +191,25 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
 
 QList<QAction *> ShellExt::outOfVersionControlActions(const KFileItemList& items) const
 {
-    Q_UNUSED(items)
-    return {};
+    // TortoiseGit's CreateRepo: one folder, not in a working tree, not a bare repository, and accessible
+    if (items.size() != 1 || !items.constFirst().isDir()) {
+        return {};
+    }
+    const QString folder = items.constFirst().localPath();
+    if (folder.isEmpty() || !QFileInfo(folder).isReadable() || !GitAdminDir::worktreeAdminDirPath(folder).isEmpty() || GitAdminDir::isBareRepo(folder)) {
+        return {};
+    }
+    m_createRepoAction->setData(QStringList{folder});
+    return {m_createRepoAction};
+}
+
+void ShellExt::watchForNewRepository(const QString& folder)
+{
+    if (!m_watchedNewRepo.isEmpty()) {
+        m_newRepoWatch.removeDir(m_watchedNewRepo);
+    }
+    m_watchedNewRepo = QDir(folder).filePath(QStringLiteral(".git"));
+    m_newRepoWatch.addDir(m_watchedNewRepo);
 }
 
 void ShellExt::runCommand(const QString& command, const QAction *action)

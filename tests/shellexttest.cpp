@@ -182,6 +182,41 @@ private Q_SLOTS:
         QCOMPARE(actions.constFirst()->text(), QStringLiteral("Git &Commit -> \"main\"..."));
     }
 
+    void createRepositoryEntryOutsideRepositories()
+    {
+        const ShellExt plugin(nullptr, {});
+        const QTemporaryDir plain;
+        const QList<QAction *> actions = plugin.outOfVersionControlActions({item(plain.path())});
+        QCOMPARE(actions.size(), 1);
+        QCOMPARE(actions.constFirst()->text(), QStringLiteral("Git Create repositor&y here..."));
+        QCOMPARE(actions.constFirst()->data().toStringList(), QStringList{plain.path()});
+
+        // Not for a file, several items, a working tree or a bare repository
+        const QString file = plain.filePath(QStringLiteral("file.txt"));
+        QFile created(file);
+        QVERIFY(created.open(QIODevice::WriteOnly));
+        QVERIFY(plugin.outOfVersionControlActions({item(file)}).isEmpty());
+        QVERIFY(plugin.outOfVersionControlActions({item(plain.path()), item(file)}).isEmpty());
+        const TestRepo repo;
+        QVERIFY(plugin.outOfVersionControlActions({item(repo.path())}).isEmpty());
+        const QString bare = plain.filePath(QStringLiteral("bare.git"));
+        repo.run({QStringLiteral("init"), QStringLiteral("--quiet"), QStringLiteral("--bare"), bare});
+        QVERIFY(plugin.outOfVersionControlActions({item(bare)}).isEmpty());
+    }
+
+    void newRepositoryRefreshesDolphin()
+    {
+        ShellExt plugin(nullptr, {});
+        QSignalSpy changed(&plugin, &KVersionControlPlugin::itemVersionsChanged);
+        const QTemporaryDir folder;
+        plugin.watchForNewRepository(folder.path());
+        QVERIFY(!changed.wait(1000));
+
+        const TestRepo helper;
+        helper.run({QStringLiteral("init"), QStringLiteral("--quiet"), folder.path()});
+        QVERIFY(changed.wait(5000));
+    }
+
     void stagingRefreshesOverlays()
     {
         const TestRepo repo;
