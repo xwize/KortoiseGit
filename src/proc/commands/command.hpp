@@ -109,6 +109,14 @@ protected:
      */
     [[nodiscard]] static QString repositoryRoot(const QString& path);
 
+    /**
+     * Ported from CTGitPath::GetGitPathString.
+     * @param path A file in a working tree, absolute.
+     * @returns The file relative to the working tree's root, '/'-separated.
+     * @throws RuntimeError (category Git) if the file is not in a working tree.
+     */
+    [[nodiscard]] static QString gitPath(const QString& path);
+
 private:
     PathRequirement m_pathRequirement;
     QStringList m_paths;

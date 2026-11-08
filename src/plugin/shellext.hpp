@@ -126,6 +126,8 @@ private:
 
     QAction *m_commitAction;
     QAction *m_createRepoAction;
+    QAction *m_diffAction;
+    QAction *m_prevDiffAction;
     QAction *m_showLogAction;
     QAction *m_revertAction;
     QAction *m_addAction;

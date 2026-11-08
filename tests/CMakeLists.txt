@@ -8,6 +8,7 @@ set(kgt_tests
     cmdlineargstest
     commitdlgtest
     createrepositorytest
+    difftest
     gitadmindirtest
     gitclioutputparsertest
     gitnumstattest

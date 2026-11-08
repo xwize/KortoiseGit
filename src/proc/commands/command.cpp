@@ -14,9 +14,11 @@
 #include "commands/clonecommand.hpp"
 #include "commands/commitcommand.hpp"
 #include "commands/createrepositorycommand.hpp"
+#include "commands/diffcommand.hpp"
 #include "commands/fetchcommand.hpp"
 #include "commands/logcommand.hpp"
 #include "commands/mergecommand.hpp"
+#include "commands/prevdiffcommand.hpp"
 #include "commands/pullcommand.hpp"
 #include "commands/pushcommand.hpp"
 #include "commands/rebasecommand.hpp"
@@ -55,9 +57,11 @@ constexpr std::array commands{
     CommandEntry{.name = u"add", .create = &create<kgt::AddCommand>},
     CommandEntry{.name = u"clone", .create = &create<kgt::CloneCommand>},
     CommandEntry{.name = u"commit", .create = &create<kgt::CommitCommand>},
+    CommandEntry{.name = u"diff", .create = &create<kgt::DiffCommand>},
     CommandEntry{.name = u"fetch", .create = &create<kgt::FetchCommand>},
     CommandEntry{.name = u"log", .create = &create<kgt::LogCommand>},
     CommandEntry{.name = u"merge", .create = &create<kgt::MergeCommand>},
+    CommandEntry{.name = u"prevdiff", .create = &create<kgt::PrevDiffCommand>},
     CommandEntry{.name = u"pull", .create = &create<kgt::PullCommand>},
     CommandEntry{.name = u"push", .create = &create<kgt::PushCommand>},
     CommandEntry{.name = u"rebase", .create = &create<kgt::RebaseCommand>},
@@ -128,6 +132,18 @@ QString Command::repositoryRoot(const QString& path)
         const QFileInfo info(path);
         return info.isDir() ? info.absoluteFilePath() : info.absolutePath();
     }
+}
+
+QString Command::gitPath(const QString& path)
+{
+    // Asked of git, which resolves symlinks in the folder as it does for the working tree root
+    const QFileInfo info(path);
+    QByteArray prefix = Git(info.absolutePath()).run({QStringLiteral("rev-parse"), QStringLiteral("--show-prefix")}, RunMode::ReadOnly);
+    // Only the newline git ends with: a folder's name may end in a space
+    if (prefix.endsWith('\n')) {
+        prefix.chop(1);
+    }
+    return QString::fromUtf8(prefix) + info.fileName();
 }
 
 Result<std::unique_ptr<Command>> CommandServer::command(const QString& name)

@@ -10,6 +10,7 @@
 #include "git/git.hpp"
 #include "git/gitcall.hpp"
 #include "git/massivegittask.hpp"
+#include "gitdiff.hpp"
 #include "progresscommands/revertprogresscommand.hpp"
 #include "utils/runtimeerror.hpp"
 
@@ -654,49 +655,43 @@ QList<GitStatusListEntry> GitStatusListCtrl::selectedEntries() const
 
 void GitStatusListCtrl::startDiff(const GitStatusListEntry& entry)
 {
-    // The working tree against HEAD (HEAD~1 when amending), or against the index before the first commit
-    // (CGitStatusListCtrl::StartDiff)
-    QStringList arguments{QStringLiteral("difftool"), QStringLiteral("--no-prompt")};
+    // Ported from CGitStatusListCtrl::StartDiff: a rename or copy is compared with its source
+    const QString path2 = entry.origPath.isEmpty() ? entry.path : entry.origPath;
+    QStringList arguments;
     if (!m_currentVersion.isEmpty()) {
-        arguments.append(revisionDiffArguments(entry.parentNo));
-        if (arguments.size() == 2) {
-            QMessageBox::warning(this, i18n("Compare with base"), i18n("Could not start git difftool."));
+        const QString parent = parentRevision(entry.parentNo);
+        if (parent.isEmpty()) {
+            QMessageBox::warning(this, i18n("KortoiseGit"), i18n("Could not start git difftool."));
             return;
         }
-    } else if (m_isInitialRepo) {
-        arguments.append(QStringLiteral("--cached"));
+        arguments = GitDiff::diffArguments(entry.path, path2, m_currentVersion, parent);
+    } else if (m_isInitialRepo || entry.actions.testFlag(TGitPath::Action::Added)) {
+        arguments = GitDiff::diffNullArguments(entry.path);
     } else {
-        arguments.append({QStringLiteral("-M"), baseRevision()});
+        arguments = GitDiff::diffArguments(entry.path, path2, {}, baseRevision());
     }
-    arguments.append(QStringLiteral("--"));
-    if (!entry.origPath.isEmpty()) {
-        arguments.append(entry.origPath);
-    }
-    arguments.append(entry.path);
-    if (!QProcess::startDetached(QStringLiteral("git"), arguments, m_workingTree)) {
-        QMessageBox::warning(this, i18n("Compare with base"), i18n("Could not start git difftool."));
-    }
+    std::ignore = GitDiff::start(this, {.workingDirectory = m_workingTree, .arguments = arguments});
 }
 
-QStringList GitStatusListCtrl::revisionDiffArguments(int parentNo) const
+QString GitStatusListCtrl::parentRevision(int parentNo) const
 {
-    // The commit against the parent the change is against (m_CurrentVersion^N in CGitStatusListCtrl::StartDiff)
-    QString parent = m_parentVersions.value(parentNo);
-    if (parent.isEmpty()) {
-        // A root commit is compared with the empty tree, whose hash depends on the repository's hash algorithm
-        try {
-            parent = QString::fromLatin1(
-                Git(m_workingTree)
-                    .run({QStringLiteral("hash-object"), QStringLiteral("-t"), QStringLiteral("tree"), QStringLiteral("--stdin")}, RunMode::ReadOnly)
-                    .trimmed());
-        } catch (const RuntimeError& e) {
-            if (e.error().category != ErrorCategory::Git) {
-                throw;
-            }
-            return {};
-        }
+    // The parent the change is against (m_CurrentVersion^N in CGitStatusListCtrl::StartDiff)
+    const QString parent = m_parentVersions.value(parentNo);
+    if (!parent.isEmpty()) {
+        return parent;
     }
-    return {QStringLiteral("-M"), parent, m_currentVersion};
+    // A root commit is compared with the empty tree, whose hash depends on the repository's hash algorithm
+    try {
+        return QString::fromLatin1(
+            Git(m_workingTree)
+                .run({QStringLiteral("hash-object"), QStringLiteral("-t"), QStringLiteral("tree"), QStringLiteral("--stdin")}, RunMode::ReadOnly)
+                .trimmed());
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        return {};
+    }
 }
 
 void GitStatusListCtrl::open(const GitStatusListEntry& entry)

@@ -83,6 +83,8 @@ struct MenuTexts {
     QString mergeAbort = QStringLiteral("Abort &Merge");
     QString switchTo = QStringLiteral("S&witch/Checkout...");
     QString rebase = QStringLiteral("Rebase...");
+    QString diff = QStringLiteral("&Diff");
+    QString prevDiff = QStringLiteral("&Diff with previous version");
 };
 
 } // namespace
@@ -132,7 +134,7 @@ private Q_SLOTS:
 
     void menuForItemKinds()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
         const TestRepo repo;
         repo.write(QStringLiteral(".gitignore"), "*.log\nvendor/\n");
         repo.write(QStringLiteral("tracked.txt"), "a\n");
@@ -165,10 +167,10 @@ private Q_SLOTS:
         QCOMPARE(menu({QStringLiteral("vendor")}),
                  (QStringList{clone, pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, createRepo, add}));
 
-        QCOMPARE(menu({QStringLiteral("tracked.txt")}), (QStringList{commit, log}));
-        QCOMPARE(menu({QStringLiteral("modified.txt")}), (QStringList{commit, log, revert}));
+        QCOMPARE(menu({QStringLiteral("tracked.txt")}), (QStringList{commit, diff, prevDiff, log}));
+        QCOMPARE(menu({QStringLiteral("modified.txt")}), (QStringList{commit, diff, prevDiff, log, revert}));
         // An added file has no history yet
-        QCOMPARE(menu({QStringLiteral("staged.txt")}), (QStringList{commit, revert}));
+        QCOMPARE(menu({QStringLiteral("staged.txt")}), (QStringList{commit, diff, revert}));
         QCOMPARE(menu({QStringLiteral("new.txt")}), QStringList{add});
         QCOMPARE(menu({QStringLiteral("build.log")}), QStringList{add});
 
@@ -177,21 +179,24 @@ private Q_SLOTS:
         QVERIFY(menu({QStringLiteral(".git/config")}).isEmpty());
 
         // Several items: the first one decides, and Push and Show log are for one item only
-        QCOMPARE(menu({QStringLiteral("tracked.txt"), QStringLiteral("new.txt")}), QStringList{commit});
-        QCOMPARE(menu({QStringLiteral("new.txt"), QStringLiteral("tracked.txt")}), QStringList{add});
-        QCOMPARE(menu({QStringLiteral("modified.txt"), QStringLiteral("tracked.txt")}), (QStringList{commit, revert}));
+        QCOMPARE(menu({QStringLiteral("tracked.txt"), QStringLiteral("new.txt")}), (QStringList{commit, diff}));
+        QCOMPARE(menu({QStringLiteral("new.txt"), QStringLiteral("tracked.txt")}), (QStringList{diff, add}));
+        QCOMPARE(menu({QStringLiteral("modified.txt"), QStringLiteral("tracked.txt")}), (QStringList{commit, diff, revert}));
+        // Diff takes exactly two files, and no folder
+        QCOMPARE(menu({QStringLiteral("tracked.txt"), QStringLiteral("modified.txt"), QStringLiteral("staged.txt")}), QStringList{commit});
+        QCOMPARE(menu({QStringLiteral("tracked.txt"), QStringLiteral("clean")}), QStringList{commit});
         QCOMPARE(menu({QStringLiteral("clean"), QStringLiteral("untracked")}), (QStringList{commit, revert, add}));
         // Except the working tree root, which keeps Pull, Fetch and Push
         QCOMPARE(menu({QString(), QStringLiteral("clean")}), (QStringList{pull, fetch, push, commit, revert, add}));
 
         // The state is read afresh: once added, the file is no longer offered for Add
         repo.run({QStringLiteral("add"), QStringLiteral("new.txt")});
-        QCOMPARE(menu({QStringLiteral("new.txt")}), (QStringList{commit, revert}));
+        QCOMPARE(menu({QStringLiteral("new.txt")}), (QStringList{commit, diff, revert}));
     }
 
     void menuFollowsRepositoryMovedIntoNewFolder()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
         // The repository is browsed while a new folder sits in it, then everything, .git included, is moved into
         // that folder: the folder is now a working tree's root, and the old root is in no repository
         const TestRepo repo;
@@ -214,7 +219,7 @@ private Q_SLOTS:
         QCOMPARE(menuTexts(plugin, {item(moved)}), root);
         QCOMPARE(plugin.outOfVersionControlActions({item(moved)}).size(), root.size());
         QCOMPARE(plugin.outOfVersionControlActions({item(moved)}).at(3)->text(), commit);
-        QCOMPARE(menuTexts(plugin, {item(QDir(moved).filePath(QStringLiteral("a.txt")))}), (QStringList{commit, log}));
+        QCOMPARE(menuTexts(plugin, {item(QDir(moved).filePath(QStringLiteral("a.txt")))}), (QStringList{commit, diff, prevDiff, log}));
         QCOMPARE(menuTexts(plugin, {item(QDir(moved).filePath(QStringLiteral("dir")))}),
                  (QStringList{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, add}));
         // The old root is a plain folder now
@@ -258,7 +263,7 @@ private Q_SLOTS:
 
     void commitEntryShowsBranch()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
         const TestRepo repo;
         repo.write(QStringLiteral("a.txt"), "a\n");
         repo.commitAll(QStringLiteral("initial"));
@@ -271,7 +276,7 @@ private Q_SLOTS:
         QCoreApplication::processEvents();
 
         QList<QAction *> actions = plugin.versionControlActions({item(repo.filePath(QStringLiteral("a.txt")))});
-        QCOMPARE(actions.size(), 2);
+        QCOMPARE(actions.size(), 4);
         QCOMPARE(actions.constFirst()->text(), QStringLiteral("Git &Commit -> \"main\"..."));
         QCOMPARE(actions.constFirst()->data().toStringList(), QStringList{repo.filePath(QStringLiteral("a.txt"))});
 
@@ -292,7 +297,7 @@ private Q_SLOTS:
 
     void createRepositoryEntryOutsideRepositories()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
         const ShellExt plugin(nullptr, {});
         const QTemporaryDir plain;
         const QList<QAction *> actions = plugin.outOfVersionControlActions({item(plain.path())});
@@ -325,7 +330,7 @@ private Q_SLOTS:
 
     void noPullDuringMergeOrBisect()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
         const TestRepo repo;
         repo.write(QStringLiteral("a.txt"), "a\n");
         repo.commitAll(QStringLiteral("initial"));
@@ -344,7 +349,7 @@ private Q_SLOTS:
 
     void mergeEntries()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
         const TestRepo repo;
         repo.write(QStringLiteral("a.txt"), "a\n");
         repo.write(QStringLiteral("dir/b.txt"), "b\n");
@@ -367,7 +372,7 @@ private Q_SLOTS:
         // While a merge awaits its commit: Abort Merge, before Revert, for versioned files and folders, and no Merge
         repo.write(QStringLiteral(".git/MERGE_HEAD"), "x\n");
         QCOMPARE(menu({}), (QStringList{fetch, push, commit, log, refs, mergeAbort, revert, switchTo, add}));
-        QCOMPARE(menu(QStringLiteral("a.txt")), (QStringList{commit, log, mergeAbort}));
+        QCOMPARE(menu(QStringLiteral("a.txt")), (QStringList{commit, diff, prevDiff, log, mergeAbort}));
         repo.remove(QStringLiteral(".git/MERGE_HEAD"));
 
         // And no Merge or Rebase during a bisect; Switch/Checkout stays
