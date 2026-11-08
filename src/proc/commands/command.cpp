@@ -26,6 +26,7 @@
 #include "commands/refbrowsecommand.hpp"
 #include "commands/revertcommand.hpp"
 #include "commands/switchcommand.hpp"
+#include "commands/tagcommand.hpp"
 
 #include "git/git.hpp"
 #include "utils/runtimeerror.hpp"
@@ -71,6 +72,7 @@ constexpr std::array commands{
     CommandEntry{.name = u"repocreate", .create = &create<kgt::CreateRepositoryCommand>},
     CommandEntry{.name = u"revert", .create = &create<kgt::RevertCommand>},
     CommandEntry{.name = u"switch", .create = &create<kgt::SwitchCommand>},
+    CommandEntry{.name = u"tag", .create = &create<kgt::TagCommand>},
 };
 
 } // namespace

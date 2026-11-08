@@ -47,9 +47,11 @@ public:
      * Reads the branches and remotes; this runs git, quickly, on the calling thread.
      * @param workingTree The working tree's root.
      * @param parent Parent widget, or nullptr for a top-level dialog.
+     * @param selectLocalBranch m_BranchSourceName: what to show as the local branch, such as refs/tags/v1; empty for
+     *                          the current branch.
      * @throws RuntimeError (category Git) if the branches or remotes can't be read.
      */
-    explicit PushDlg(const QString& workingTree, QWidget *parent = nullptr);
+    explicit PushDlg(const QString& workingTree, QWidget *parent = nullptr, const QString& selectLocalBranch = {});
 
     /**
      * @returns What the dialog shows now.
@@ -65,8 +67,9 @@ public:
 private:
     /**
      * Ported from CPushDlg::Refresh: fills the lists and selects the defaults.
+     * @param selectLocalBranch What to show as the local branch; empty for the current branch.
      */
-    void refresh();
+    void refresh(const QString& selectLocalBranch);
 
     /**
      * Ported from CPushDlg::GetRemoteBranch: selects the remote and remote branch to push the local branch to.

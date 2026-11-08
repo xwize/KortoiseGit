@@ -76,6 +76,8 @@ target_sources(kgtproc PRIVATE
     commands/revertcommand.hpp
     commands/switchcommand.cpp
     commands/switchcommand.hpp
+    commands/tagcommand.cpp
+    commands/tagcommand.hpp
     gitclioutputparser.cpp
     gitclioutputparser.hpp
     gitdiff.cpp
