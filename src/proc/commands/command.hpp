@@ -72,6 +72,18 @@ public:
      */
     [[nodiscard]] const QStringList& paths() const;
 
+    /**
+     * @param switches The switches given on the command line, such as "abort".
+     */
+    void setSwitches(const QStringList& switches);
+
+    /**
+     * Ported from CCmdLineParser::HasKey, for switches.
+     * @param name A switch's name, such as "abort".
+     * @returns Whether it was given.
+     */
+    [[nodiscard]] bool hasKey(const QString& name) const;
+
 protected:
     /**
      * @param requirement What the command needs as its --path.
@@ -87,6 +99,7 @@ protected:
 private:
     PathRequirement m_pathRequirement;
     QStringList m_paths;
+    QStringList m_switches;
 };
 
 /**

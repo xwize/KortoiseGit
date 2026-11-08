@@ -17,6 +17,7 @@ set(kgt_tests
     gittest
     logdlgtest
     massivegittasktest
+    mergetest
     proctest
     progressdlgtest
     pullfetchtest

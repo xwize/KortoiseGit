@@ -8,6 +8,8 @@
 #include "apputils.hpp"
 
 #include "git/gitadmindir.hpp"
+#include "mergeabortdlg.hpp"
+#include "progressdlg.hpp"
 
 #include <KGuiItem>
 #include <KLocalizedString>
@@ -111,6 +113,54 @@ bool AppUtils::isTGitRebaseActive(const QString& workingTree, QWidget *parent)
     // RemoveDirectory: only an empty directory goes
     std::ignore = lock.rmdir(lock.absolutePath());
     return false;
+}
+
+void AppUtils::showMergeConflictsHint(QWidget *parent)
+{
+    KMessageBox::information(
+        parent,
+        i18n("While merging, i.e. integrating changes of another (remote) branch into your local branch, a conflict in at least one file "
+             "occurred. This means that you need to resolve this manually (i.e., you need to integrate your changes into a file which was "
+             "also modified on another branch).\n\nAfter resolving all files, you need to perform a commit in order to complete the "
+             "merge.\n\nIf you want to abort the merge, do a hard reset on HEAD or select abort merge on the context menu.\n\nSee help for "
+             "more information."),
+        QString(),
+        QStringLiteral("MergeConflictsNeedsCommit"));
+}
+
+QStringList AppUtils::resetArguments(ResetType type, const QString& resetTo)
+{
+    QString typeOption;
+    switch (type) {
+    case ResetType::Soft:
+        typeOption = QStringLiteral("--soft");
+        break;
+    case ResetType::Mixed:
+        typeOption = QStringLiteral("--mixed");
+        break;
+    case ResetType::Hard:
+        typeOption = QStringLiteral("--hard");
+        break;
+    case ResetType::Merge:
+        return {QStringLiteral("reset"), QStringLiteral("--merge")};
+    }
+    return {QStringLiteral("reset"), typeOption, QStringLiteral("--end-of-options"), resetTo, QStringLiteral("--")};
+}
+
+bool AppUtils::reset(const QString& workingTree, ResetType type, const QString& resetTo, QWidget *parent)
+{
+    ProgressDlg progress(workingTree, parent);
+    progress.addGitCmd(resetArguments(type, resetTo));
+    return progress.exec() == QDialog::Accepted && progress.gitStatus() == 0;
+}
+
+bool AppUtils::mergeAbort(const QString& workingTree, QWidget *parent)
+{
+    MergeAbortDlg dlg(workingTree, parent);
+    if (dlg.exec() != QDialog::Accepted) {
+        return false;
+    }
+    return reset(workingTree, dlg.resetType(), QStringLiteral("HEAD"), parent);
 }
 
 } // namespace kgt
