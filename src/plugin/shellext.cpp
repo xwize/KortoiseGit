@@ -234,6 +234,7 @@ struct MenuEntries {
     bool revert = false;
     bool switchTo = false;
     bool merge = false;
+    bool branch = false;
     bool createRepo = false;
     bool add = false;
 };
@@ -262,6 +263,7 @@ MenuEntries menuEntries(const MenuState& state)
     const bool outsideRepository = state.folder && !state.inGit && !state.folderInGit && !state.bareRepo && !state.inaccessible;
     const bool ignoredFolder = state.folder && state.ignored;
     const auto [mergeAbort, merge] = mergeEntries(state);
+    const bool oneFolderInGit = state.folderInGit && state.onlyOne;
     return {
         .clone = outsideRepository || ignoredFolder,
         .pull = ((state.folderInGit && state.onlyOne) || state.wcRoot) && !state.bisect && !state.mergeActive,
@@ -274,8 +276,9 @@ MenuEntries menuEntries(const MenuState& state)
         .rebase = state.folderInGit && state.onlyOne && !state.bisect && !state.mergeActive,
         .mergeAbort = mergeAbort,
         .revert = (state.inGit && !state.normal) || state.folderInGit,
-        .switchTo = state.folderInGit && state.onlyOne,
+        .switchTo = oneFolderInGit,
         .merge = merge,
+        .branch = oneFolderInGit,
         .createRepo = outsideRepository || ignoredFolder,
         .add =
             (state.inVersionedFolder && !state.inGit) || (state.inGit && state.folder) || state.ignored || (state.deleted && !state.folder && !state.onlyOne),
@@ -302,6 +305,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_rebaseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-rebase")), i18n("Rebase..."), this))
     , m_switchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("S&witch/Checkout..."), this))
     , m_mergeAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge..."), this))
+    , m_branchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Create &Branch..."), this))
     , m_mergeAbortAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Abort &Merge"), this))
 {
     Q_UNUSED(args)
@@ -347,6 +351,10 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_mergeAction->setToolTip(i18n("Merges another branch"));
     connect(m_mergeAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("merge"), m_mergeAction);
+    });
+    m_branchAction->setToolTip(i18n("Creates a branch or tag"));
+    connect(m_branchAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("branch"), m_branchAction);
     });
     m_mergeAbortAction->setToolTip(i18n("Aborts a running merge."));
     connect(m_mergeAbortAction, &QAction::triggered, this, [this] {
@@ -460,6 +468,7 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
     add(entries.revert, m_revertAction);
     add(entries.switchTo, m_switchAction);
     add(entries.merge, m_mergeAction);
+    add(entries.branch, m_branchAction);
     add(entries.createRepo, m_createRepoAction);
     add(entries.add, m_addAction);
     return actions;

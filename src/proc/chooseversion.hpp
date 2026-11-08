@@ -38,9 +38,10 @@ class ChooseVersion : public QGroupBox
 
 public:
     /**
-     * The radio buttons, TortoiseGit's IDC_RADIO_BRANCH, IDC_RADIO_TAGS and IDC_RADIO_VERSION.
+     * The radio buttons, TortoiseGit's IDC_RADIO_HEAD, IDC_RADIO_BRANCH, IDC_RADIO_TAGS and IDC_RADIO_VERSION.
      */
     enum class Choice {
+        Head,
         Branch,
         Tag,
         Version,
@@ -123,6 +124,11 @@ public:
     [[nodiscard]] const QString& currentBranch() const;
 
     /**
+     * @returns The HEAD radio button, hidden until a host whose resource has IDC_RADIO_HEAD shows it.
+     */
+    [[nodiscard]] QRadioButton *headRadio() const;
+
+    /**
      * @returns The branch combo box.
      */
     [[nodiscard]] QComboBox *branchCombo() const;
@@ -161,6 +167,7 @@ private:
     [[nodiscard]] QRadioButton *radio(Choice choice) const;
 
     Git m_git;
+    QRadioButton *m_radioHead;
     QRadioButton *m_radioBranch;
     QRadioButton *m_radioTag;
     QRadioButton *m_radioVersion;

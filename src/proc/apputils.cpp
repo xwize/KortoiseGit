@@ -7,9 +7,11 @@
 
 #include "apputils.hpp"
 
+#include "createbranchtagdlg.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 #include "gitswitchdlg.hpp"
+#include "kortoisegitproc_debug.hpp"
 #include "mergeabortdlg.hpp"
 #include "progressdlg.hpp"
 #include "utils/runtimeerror.hpp"
@@ -240,6 +242,77 @@ bool AppUtils::performSwitch(const QString& workingTree, const SwitchOptions& op
         }
     });
     return progress.exec() == QDialog::Accepted && progress.gitStatus() == 0;
+}
+
+bool AppUtils::createBranchTag(const QString& workingTree, const CreateBranchTagParams& params, QWidget *parent)
+{
+    const Git git(workingTree);
+    CreateBranchTagDlg dlg(git, params, parent);
+    if (dlg.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    CreateBranchTagOptions options = dlg.options();
+    options.versionName = git.fixBranchName(options.versionName);
+    try {
+        std::ignore = git.run(createBranchArguments(options));
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        KMessageBox::error(parent, e.error().message, QString(), KMessageBox::Options());
+        return false;
+    }
+
+    if (options.switchToNewBranch) {
+        // It is a new branch and the user has requested to switch to it
+        SwitchOptions switchOptions;
+        switchOptions.ref = options.branchTagName;
+        performSwitch(workingTree, switchOptions, parent);
+    }
+    if (!options.message.isEmpty()) {
+        updateBranchDescription(git, options.branchTagName, options.message);
+    }
+    return true;
+}
+
+QStringList AppUtils::createBranchArguments(const CreateBranchTagOptions& options)
+{
+    QStringList arguments{QStringLiteral("branch")};
+    if (options.force) {
+        arguments.append(QStringLiteral("-f"));
+    }
+    if (options.track == Qt::Checked) {
+        arguments.append(QStringLiteral("--track"));
+    } else if (options.track == Qt::Unchecked) {
+        arguments.append(QStringLiteral("--no-track"));
+    }
+    arguments << QStringLiteral("--") << options.branchTagName << options.versionName;
+    return arguments;
+}
+
+bool AppUtils::updateBranchDescription(const Git& git, const QString& branch, QString description)
+{
+    if (branch.isEmpty()) {
+        return false;
+    }
+
+    const QString key = QStringLiteral("branch.%1.description").arg(branch);
+    description.remove(QLatin1Char('\r'));
+    description = description.trimmed();
+    try {
+        if (description.isEmpty()) {
+            git.unsetConfigValue(key);
+        } else {
+            git.setConfigValue(key, description);
+        }
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        qCWarning(KGT_PROC) << "Updating the branch description failed:" << e.error().message;
+    }
+    return true;
 }
 
 } // namespace kgt

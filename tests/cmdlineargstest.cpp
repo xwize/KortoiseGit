@@ -68,6 +68,13 @@ private Q_SLOTS:
         QCOMPARE(args->values.value(QStringLiteral("rev")), QStringLiteral("v1"));
     }
 
+    void parsesBranchName()
+    {
+        const Result<CmdLineArgs> args = parse({QStringLiteral("--command"), QStringLiteral("branch"), QStringLiteral("--name"), QStringLiteral("topic")});
+        QVERIFY(args);
+        QCOMPARE(args->values.value(QStringLiteral("name")), QStringLiteral("topic"));
+    }
+
     void parsesRebaseOptions()
     {
         const Result<CmdLineArgs> args = parse(
