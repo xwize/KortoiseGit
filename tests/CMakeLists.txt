@@ -19,6 +19,7 @@ set(kgt_tests
     gitstatustest
     gittest
     lanestest
+    logdlgfiltertest
     logdlgtest
     massivegittasktest
     mergetest

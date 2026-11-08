@@ -12,15 +12,19 @@
 #pragma once
 
 #include "gitloglistmodel.hpp"
+#include "logdlgfilter.hpp"
 
 #include "utils/error.hpp"
 
 #include <QByteArray>
+#include <QDateTime>
+#include <QHash>
 #include <QString>
 #include <QStringList>
 #include <QTreeView>
 
 #include <memory>
+#include <utility>
 
 namespace kgt
 {
@@ -36,6 +40,16 @@ class GitLogList : public QTreeView
     Q_OBJECT
 
 public:
+    /**
+     * Which commits a walk lists (CGitLogListBase::FilterShow), with TortoiseGit's FILTERSHOW_* values.
+     */
+    enum FilterShow : unsigned int { // NOLINT(cppcoreguidelines-use-enum-class): Combined as bit flags, as in TortoiseGit
+        FilterShowRefs = 1, // FILTERSHOW_REFS: commits with a label, and HEAD
+        FilterShowMergePoints = 2, // FILTERSHOW_MERGEPOINTS: merges and forks
+        FilterShowAnyCommit = 4, // FILTERSHOW_ANYCOMMIT
+        FilterShowAll = FilterShowAnyCommit | FilterShowRefs | FilterShowMergePoints, // FILTERSHOW_ALL
+    };
+
     /**
      * @param parent The parent widget.
      */
@@ -67,6 +81,40 @@ public:
      * @param noMerges Whether to leave merge commits out (CGit::LOG_INFO_NO_MERGE).
      */
     void setRange(const QString& range, bool noMerges = false);
+
+    /**
+     * Sets how history is walked (CGitLogListBase::m_ShowMask and m_Filter). Takes effect on the next reload().
+     * @param options The walk.
+     */
+    void setWalkOptions(const GitLogOptions& options);
+
+    /**
+     * @returns How history is walked.
+     */
+    [[nodiscard]] const GitLogOptions& walkOptions() const;
+
+    /**
+     * Sets which commits are listed (CGitLogListBase::m_ShowFilter). Takes effect on the next reload().
+     * @param showFilter FilterShow bits.
+     */
+    void setShowFilter(unsigned int showFilter);
+
+    /**
+     * Sets what the search box filters for (CGitLogListBase::m_LogFilter). Takes effect on the next reload().
+     * @param filter The filter.
+     */
+    void setLogFilter(const LogDlgFilter& filter);
+
+    /**
+     * @returns What the search box filters for.
+     */
+    [[nodiscard]] const LogDlgFilter& logFilter() const;
+
+    /**
+     * Ported from CGitLogListBase::GetTimeRange: over every commit walked, listed or not.
+     * @returns The oldest and the newest commit date.
+     */
+    [[nodiscard]] std::pair<QDateTime, QDateTime> timeRange() const;
 
     /**
      * Ported from CGitLogListBase::ShowText: abandons any load, empties the list and writes a text into it.
@@ -107,12 +155,13 @@ public:
 
     /**
      * Empties the list and runs git log in the background, adding the commits page by page as git writes them
-     * (CGitLogListBase::FetchLogAsync). Any load still running is abandoned.
+     * (CGitLogListBase::Refresh and LogThread). Any load still running is abandoned. The selected commit is selected
+     * again when it is listed (m_lastSelectedHash).
      */
     void reload();
 
     /**
-     * @returns Whether git log is running.
+     * @returns Whether a reload() is still running, the background work for its filter included.
      */
     [[nodiscard]] bool isBusy() const;
 
@@ -170,8 +219,19 @@ protected:
 private:
     [[nodiscard]] bool maySetRebaseAction(int row, unsigned int action) const;
     [[nodiscard]] QList<int> selectedRows() const;
+    void startLog();
     void onOutputAvailable();
     void onLogFinished();
+    void finishLoadIfDone();
+    void handleRevs(const QList<GitRevLoglist>& revs);
+    void showRevs(const QList<GitRevLoglist>& revs);
+    [[nodiscard]] bool shouldShowRevInGraph(const GitRevLoglist& rev);
+    [[nodiscard]] bool shouldShowRefs(const GitRevLoglist& rev) const;
+    void restoreSelection(int firstRow);
+    void onTagInfoFinished();
+    void startNextSimpleLists();
+    void onSimpleListFinished();
+    void showQueuedRevs(qsizetype count);
     [[nodiscard]] bool takeRecords();
     void failLoad(const Error& error);
     void requestVisibleFiles();
@@ -184,9 +244,22 @@ private:
     QString m_workingTree;
     QStringList m_pathFilter;
     QString m_range; // The revisions listed, empty for HEAD
-    bool m_noMerges = false; // Whether merge commits are left out
+    GitLogOptions m_walkOptions; // CGitLogListBase::m_ShowMask and m_Filter
+    unsigned int m_showFilter = FilterShowAll; // CGitLogListBase::m_ShowFilter
+    LogDlgFilter m_logFilter; // CGitLogListBase::m_LogFilter
     bool m_rebaseMenu = false; // Whether the rebase actions are offered
+    bool m_isLoading = false; // Whether a reload() is running
     std::unique_ptr<GitCall> m_logCall;
+    std::unique_ptr<GitCall> m_tagInfoCall; // The for-each-ref that runs before git log when the filter needs it
+    QHash<QString, QString> m_tagInfo; // The annotated tags' text by full ref name
+    std::unique_ptr<GitCall> m_simpleListCall; // The diff-tree running for the start of m_simpleListQueue
+    qsizetype m_simpleListPage = 0; // How many queued commits it is for
+    QList<GitRevLoglist> m_simpleListQueue; // Walked commits waiting for their changed paths, in git's order
+    QHash<QString, QStringList> m_simpleLists; // m_SimpleFileList by hash; a commit's paths never change
+    QHash<QString, int> m_childCount; // commitChildren: how many walked commits have each hash as a parent
+    QDateTime m_oldestCommit; // GetTimeRange's oldest
+    QDateTime m_latestCommit; // GetTimeRange's latest
+    QString m_lastSelectedHash; // m_lastSelectedHash: selected again when listed, empty once it has been
     QByteArray m_pending; // Output of git log that doesn't make a whole record yet
     QString m_errorMessage; // Shown in the empty list after a failed load
     QList<int> m_filesQueue; // TortoiseGit's m_AsynDiffList: rows waiting for their files, newest last

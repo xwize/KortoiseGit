@@ -7,10 +7,27 @@
 
 #include "filterhelper.hpp"
 
+#include <algorithm>
 #include <iterator>
+#include <utility>
 
 namespace
 {
+
+/**
+ * @param regexp A regular expression.
+ * @param caseSensitive Whether it respects case.
+ * @returns It compiled. '^' and '$' match at line ends, as the filter's tooltip promises and the text being searched
+ *          has one field per line (CFilterHelper::ValidateRegexp's std::wregex does so on MSVC).
+ */
+QRegularExpression compiledRegexp(const QString& regexp, bool caseSensitive)
+{
+    QRegularExpression::PatternOptions options = QRegularExpression::MultilineOption;
+    if (!caseSensitive) {
+        options |= QRegularExpression::CaseInsensitiveOption;
+    }
+    return QRegularExpression(regexp, options);
+}
 
 /**
  * Reads a quoted word starting at the opening quote, the "escaped string?" branch of CFilterHelper's constructor.
@@ -68,7 +85,7 @@ QString plainWord(const QString& text, qsizetype& pos)
 namespace kgt
 {
 
-FilterHelper::FilterHelper(const QString& filter, unsigned int selectedFilters, bool caseSensitive)
+FilterHelper::FilterHelper(const QString& filter, bool filterWithRegex, unsigned int selectedFilters, bool caseSensitive)
     : m_selectedFilters(selectedFilters)
     , m_caseSensitive(caseSensitive)
 {
@@ -78,12 +95,23 @@ FilterHelper::FilterHelper(const QString& filter, unsigned int selectedFilters, 
         m_negate = true;
         filterText.remove(0, 1);
     }
+    if (filterWithRegex && !filterText.isEmpty()) {
+        if (QRegularExpression pattern = compiledRegexp(filterText, m_caseSensitive); pattern.isValid()) {
+            m_patterns.append(std::move(pattern));
+        }
+        return;
+    }
     parse(filterText);
+}
+
+bool FilterHelper::isValidRegexp(const QString& regexp)
+{
+    return compiledRegexp(regexp, true).isValid();
 }
 
 bool FilterHelper::isFilterActive() const
 {
-    return !m_conditions.isEmpty();
+    return !m_conditions.isEmpty() || !m_patterns.isEmpty();
 }
 
 unsigned int FilterHelper::selectedFilters() const
@@ -140,6 +168,11 @@ bool FilterHelper::match(const QString& text) const
         return false;
     }
     const QString haystack = m_caseSensitive ? text : text.toLower();
+    if (!m_patterns.isEmpty()) {
+        return std::ranges::all_of(m_patterns, [&haystack](const QRegularExpression& pattern) {
+            return pattern.match(haystack).hasMatch();
+        });
+    }
     bool currentValue = true;
     for (qsizetype i = 0; i < m_conditions.size(); ++i) {
         const Condition& condition = m_conditions.at(i);

@@ -456,7 +456,7 @@ void BrowseRefsDlg::fillListCtrlForTreeNode()
     const ShadowTree *tree = selectedTreeNode();
     QList<RefLeafListEntry> entries;
     if (tree) {
-        const BrowseRefsDlgFilter filter(m_filter->text(), m_selectedFilters, false);
+        const BrowseRefsDlgFilter filter(m_filter->text(), false, m_selectedFilters, false);
         fillListCtrlForShadowTree(*tree, QString(), true, filter, entries);
     }
     m_listModel->setEntries(entries);

@@ -18,6 +18,7 @@
 
 #include <QByteArray>
 #include <QDateTime>
+#include <QHash>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -46,6 +47,25 @@ struct GitRef {
     bool isCurrent = false; // HEAD points at it: the current branch, or a detached HEAD
 
     bool operator==(const GitRef&) const = default;
+
+    /**
+     * @returns The full ref name, as CGit::GetMapHashToFriendName lists it: "refs/heads/main".
+     */
+    [[nodiscard]] QString fullName() const;
+};
+
+/**
+ * What git log walks: the walk bits of CGit::GetLogCmd's mask (LOG_INFO_*) and its CFilterData date range.
+ */
+struct GitLogOptions {
+    bool noMerges = false; // LOG_INFO_NO_MERGE
+    bool firstParent = false; // LOG_INFO_FIRST_PARENT
+    bool follow = false; // LOG_INFO_FOLLOW
+    bool fullHistory = false; // LOG_INFO_FULL_HISTORY
+    qint64 from = -1; // CFilterData::m_From: oldest commit time in seconds, applied when positive
+    qint64 to = -1; // CFilterData::m_To: newest commit time in seconds, -1 for none
+
+    bool operator==(const GitLogOptions&) const = default;
 };
 
 /**
@@ -92,8 +112,12 @@ struct GitRevLoglist {
     QString authorName; // GitRev::m_AuthorName
     QString authorEmail; // GitRev::m_AuthorEmail
     QDateTime authorDate; // GitRev::m_AuthorDate, in local time
+    QString committerName; // GitRev::m_CommitterName
+    QString committerEmail; // GitRev::m_CommitterEmail
+    QDateTime commitDate; // GitRev::m_CommitterDate, in local time
     QString subject; // GitRev::m_Subject: the message's first paragraph, joined into one line
     QString body; // GitRev::m_Body: the rest of the message, without trailing newlines
+    QString notes; // GitRevLoglist::m_Notes: the commit's git notes, without trailing newlines
     QList<GitRef> refs; // The refs pointing at the commit, in git's order
     TGitPath::Actions actions; // GitRevLoglist::m_Action: what the commit did to its files; empty until known
     QList<GitRevFiles> files; // GitRevLoglist::m_Files: the changes against each parent, in parent order
@@ -106,11 +130,11 @@ struct GitRevLoglist {
     /**
      * @param paths Pathspecs relative to the working tree root that limit the log, or empty for the whole tree.
      * @param range The revisions to list, such as "upstream..branch" (CGit::GetLogCmd's range); empty for HEAD.
-     * @param noMerges Whether to leave merge commits out (CGit::LOG_INFO_NO_MERGE).
+     * @param options What to walk (CGit::GetLogCmd's mask and date filter).
      * @returns The arguments after "git" for a log in TortoiseGit's default order (topological), in the format
      *          takeRecords() reads.
      */
-    [[nodiscard]] static QStringList logArguments(const QStringList& paths = {}, const QString& range = {}, bool noMerges = false);
+    [[nodiscard]] static QStringList logArguments(const QStringList& paths = {}, const QString& range = {}, const GitLogOptions& options = {});
 
     /**
      * Parses the complete records at the start of git log's output, so the log can be shown while git still
@@ -146,6 +170,31 @@ struct GitRevLoglist {
      * @returns The changed files, or a Parse error naming the first bad record.
      */
     [[nodiscard]] static Result<GitRevFiles> parseFiles(const QByteArray& output);
+
+    /**
+     * The batched form of GitRevLoglist::SafeGetSimpleList, for the log filter's Paths field: one git process for
+     * many commits instead of one per commit. Git reads the commits' hashes on stdin, one per line.
+     * @returns The arguments after "git" for a diff-tree that parseSimpleList() reads.
+     */
+    [[nodiscard]] static QStringList simpleListArguments();
+
+    /**
+     * @param output The stdout of git with simpleListArguments().
+     * @returns Each commit's changed paths against every parent, by hash (m_SimpleFileList).
+     */
+    [[nodiscard]] static QHash<QString, QStringList> parseSimpleList(const QByteArray& output);
+
+    /**
+     * Reads every annotated tag in one git process, where CGitLogListBase::GetTagInfo asks for one at a time.
+     * @returns The arguments after "git" for a for-each-ref that parseTagInfo() reads.
+     */
+    [[nodiscard]] static QStringList tagInfoArguments();
+
+    /**
+     * @param output The stdout of git with tagInfoArguments().
+     * @returns The text of each annotated tag as CGit::GetTagInfo writes it, by full ref name.
+     */
+    [[nodiscard]] static QHash<QString, QString> parseTagInfo(const QByteArray& output);
 };
 
 } // namespace kgt

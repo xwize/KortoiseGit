@@ -38,6 +38,7 @@ struct GitStatusListEntry {
     QString linesAdded; // TortoiseGit's m_StatAdd: a number, "-" for a binary file, empty if unknown
     QString linesRemoved; // TortoiseGit's m_StatDel
     int parentNo = 0; // TortoiseGit's m_ParentNo: in a commit's list, the parent the change is against
+    bool isGrayed = false; // TortoiseGit's LOGACTIONS_GRAY: an unrelated path in a log limited to a path
 
     bool operator==(const GitStatusListEntry&) const = default;
 };

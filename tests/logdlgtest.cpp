@@ -7,12 +7,22 @@
 #include "gitstatuslistmodel.hpp"
 #include "testrepo.hpp"
 
+#include <KConfigGroup>
+#include <KSharedConfig>
+
+#include <QBrush>
+#include <QDateEdit>
 #include <QDir>
 #include <QFile>
 #include <QImage>
+#include <QLineEdit>
+#include <QMenu>
+#include <QPainter>
 #include <QPalette>
 #include <QPixmap>
+#include <QPushButton>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTest>
 
 #include <algorithm>
@@ -53,6 +63,144 @@ bool waitForLog(const LogDlg& dlg)
     }
     QSignalSpy loaded(dlg.logList(), &GitLogList::loaded);
     return loaded.wait(timeout);
+}
+
+/**
+ * Waits for the load a change in the dialog has just started.
+ * @param dlg The dialog.
+ * @returns Whether its log loaded.
+ */
+bool waitForReload(const LogDlg& dlg)
+{
+    return QTest::qWaitFor(
+        [&dlg] {
+            return !dlg.logList()->isBusy();
+        },
+        timeout);
+}
+
+/**
+ * Waits for the load a date picker starts after LOGFTIME_TIMER's short delay.
+ * @param dlg The dialog, with a date just changed.
+ * @returns Whether the load started and ended.
+ */
+bool waitForDateReload(const LogDlg& dlg)
+{
+    QSignalSpy loaded(dlg.logList(), &GitLogList::loaded);
+    return loaded.wait(timeout);
+}
+
+/**
+ * @param dlg The dialog.
+ * @param row The row of the commit to select.
+ */
+void selectRow(const LogDlg& dlg, int row)
+{
+    dlg.logList()->setCurrentIndex(dlg.logList()->logModel()->index(row, GitLogListModel::MessageColumn));
+}
+
+/**
+ * Types a filter and applies it at once, as Enter does.
+ * @param dlg The dialog.
+ * @param text The filter.
+ */
+void applyFilter(const LogDlg& dlg, const QString& text)
+{
+    dlg.searchEdit()->setText(text);
+    QTest::keyClick(dlg.searchEdit(), Qt::Key_Return);
+}
+
+/**
+ * @param menu A menu.
+ * @param text An entry's text, without its mnemonic.
+ * @returns The entry, searched for in submenus too, or nullptr.
+ */
+QAction *findAction(const QMenu *menu, const QString& text)
+{
+    for (QAction *action : menu->actions()) {
+        if (action->text().remove(QLatin1Char('&')) == text) {
+            return action;
+        }
+        if (action->menu()) {
+            if (QAction *found = findAction(action->menu(), text)) {
+                return found;
+            }
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * @param model The log.
+ * @returns The subjects listed, top to bottom.
+ */
+QStringList subjects(const GitLogListModel& model)
+{
+    QStringList list;
+    for (int row = 0; row < model.rowCount(); ++row) {
+        list.append(model.rev(row).subject);
+    }
+    return list;
+}
+
+/**
+ * Removes what the log dialog saved, so a test starts from TortoiseGit's defaults.
+ */
+void clearSettings()
+{
+    const KSharedConfigPtr config = KSharedConfig::openConfig();
+    config->deleteGroup(QStringLiteral("General"));
+    config->deleteGroup(QStringLiteral("LogDialog"));
+    config->sync();
+}
+
+/**
+ * @param dlg The dialog.
+ * @param button The button its menu opens from.
+ * @param menu The menu.
+ * @param name The file to save, in the screenshot directory.
+ * @returns Whether the picture of the dialog with the menu over it was saved; true if no directory was asked for.
+ */
+bool saveMenuScreenshot(LogDlg& dlg, const QPushButton *button, QMenu *menu, const QString& name)
+{
+    const QString screenshotDir = qEnvironmentVariable("KGT_SCREENSHOT_DIR");
+    if (screenshotDir.isEmpty()) {
+        return true;
+    }
+    QPixmap shot = dlg.grab();
+    const QPixmap menuShot = menu->grab();
+    QPainter painter(&shot);
+    painter.drawPixmap(button->mapTo(&dlg, QPoint(0, -menuShot.height())), menuShot);
+    painter.end();
+    return shot.save(QDir(screenshotDir).absoluteFilePath(name));
+}
+
+/**
+ * Commits a change with a fixed commit date.
+ * @param repo The repository.
+ * @param date The date.
+ * @param message The commit message.
+ */
+void commitOn(const TestRepo& repo, const QDate& date, const QString& message)
+{
+    const QByteArray stamp = QDateTime(date, QTime(12, 0)).toString(Qt::ISODate).toLatin1();
+    qputenv("GIT_COMMITTER_DATE", stamp);
+    qputenv("GIT_AUTHOR_DATE", stamp);
+    repo.write(QStringLiteral("dated.txt"), message.toUtf8());
+    repo.commitAll(message);
+    qunsetenv("GIT_COMMITTER_DATE");
+    qunsetenv("GIT_AUTHOR_DATE");
+}
+
+/**
+ * Fills a repository with three commits on known dates.
+ * @param repo An empty repository.
+ */
+void makeDatedHistory(const TestRepo& repo)
+{
+    commitOn(repo, QDate(2020, 3, 10), QStringLiteral("Early"));
+    commitOn(repo, QDate(2021, 6, 15), QStringLiteral("Middle"));
+    commitOn(repo, QDate(2023, 9, 20), QStringLiteral("Late"));
 }
 
 /**
@@ -200,7 +348,512 @@ class LogDlgTest : public QObject
 private Q_SLOTS:
     void initTestCase()
     {
+        QStandardPaths::setTestModeEnabled(true);
         TestRepo::isolateGit();
+    }
+
+    void init()
+    {
+        clearSettings();
+    }
+
+    void refreshClearsFilter()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("Alpha"));
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("Beta"));
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QCOMPARE(dlg.logList()->logModel()->rowCount(), 2);
+
+        applyFilter(dlg, QStringLiteral("alpha"));
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(subjects(*dlg.logList()->logModel()), QStringList{QStringLiteral("Alpha")});
+
+        dlg.refreshButton()->click();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(dlg.searchEdit()->text().isEmpty());
+        QCOMPARE(dlg.logList()->logModel()->rowCount(), 2);
+
+        // F5 does the same, wherever the focus is
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowActive(&dlg));
+        applyFilter(dlg, QStringLiteral("alpha"));
+        QVERIFY(waitForReload(dlg));
+        QTest::keyClick(&dlg, Qt::Key_F5);
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(dlg.searchEdit()->text().isEmpty());
+        QCOMPARE(dlg.logList()->logModel()->rowCount(), 2);
+    }
+
+    void refreshKeepsSelection()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("Alpha"));
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("Beta"));
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        selectRow(dlg, 1);
+        applyFilter(dlg, QStringLiteral("alpha"));
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(dlg.logList()->selectedRow(), 0);
+        QCOMPARE(dlg.logList()->logModel()->rev(0).subject, QStringLiteral("Alpha"));
+    }
+
+    void delaysFilter()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("Alpha"));
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("Beta"));
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        const GitLogListModel& model = *dlg.logList()->logModel();
+        dlg.searchEdit()->setText(QStringLiteral("alpha"));
+        QTest::qWait(100);
+        QCOMPARE(model.rowCount(), 2); // Not yet: LOGFILTER_TIMER runs for a second
+        QVERIFY(QTest::qWaitFor(
+            [&model] {
+                return model.rowCount() == 1;
+            },
+            timeout));
+        QVERIFY(waitForReload(dlg));
+    }
+
+    void emptyingSearchClearsFilterAtOnce()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("Alpha"));
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("Beta"));
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        applyFilter(dlg, QStringLiteral("alpha"));
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(dlg.logList()->logModel()->rowCount(), 1);
+        dlg.searchEdit()->clear();
+        QVERIFY(dlg.logList()->isBusy()); // No delay
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(dlg.logList()->logModel()->rowCount(), 2);
+    }
+
+    void filtersByBackgroundData()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("first.txt"), "1");
+        repo.commitAll(QStringLiteral("One"));
+        repo.run({QStringLiteral("tag"), QStringLiteral("-a"), QStringLiteral("-m"), QStringLiteral("Shipping build"), QStringLiteral("v1")});
+        repo.write(QStringLiteral("dir/second.txt"), "1");
+        repo.commitAll(QStringLiteral("Two"));
+        repo.run({QStringLiteral("notes"), QStringLiteral("add"), QStringLiteral("-m"), QStringLiteral("Annotated later"), QStringLiteral("HEAD")});
+        repo.write(QStringLiteral("third.txt"), "1");
+        repo.commitAll(QStringLiteral("Three"));
+
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        const GitLogListModel& model = *dlg.logList()->logModel();
+
+        // Everything is selected by default, so the paths and the tag text are fetched in the background
+        applyFilter(dlg, QStringLiteral("dir/second"));
+        QVERIFY(dlg.logList()->isBusy());
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(subjects(model), QStringList{QStringLiteral("Two")});
+
+        applyFilter(dlg, QStringLiteral("shipping"));
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(subjects(model), QStringList{QStringLiteral("One")});
+
+        applyFilter(dlg, QStringLiteral("annotated"));
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(subjects(model), QStringList{QStringLiteral("Two")});
+
+        // The paths are remembered: filtering again finds them without another diff-tree
+        applyFilter(dlg, QStringLiteral("third.txt"));
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(subjects(model), QStringList{QStringLiteral("Three")});
+    }
+
+    void filterMenuChoosesFields()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("subject.txt"), "1");
+        repo.commitAll(QStringLiteral("Subject"));
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        const GitLogListModel& model = *dlg.logList()->logModel();
+        const QMenu *menu = dlg.filterMenu();
+        QVERIFY(!findAction(menu, QStringLiteral("Bug-IDs")));
+
+        applyFilter(dlg, QStringLiteral("subject.txt"));
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(model.rowCount(), 1);
+
+        // Toggle turns everything off; Paths back on still finds it, Subject alone doesn't
+        findAction(menu, QStringLiteral("Toggle filters"))->trigger();
+        QVERIFY(!findAction(menu, QStringLiteral("Paths"))->isChecked());
+        findAction(menu, QStringLiteral("Subject"))->trigger();
+        QTest::keyClick(dlg.searchEdit(), Qt::Key_Return);
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(model.rowCount(), 0);
+
+        findAction(menu, QStringLiteral("All"))->trigger();
+        QVERIFY(findAction(menu, QStringLiteral("Paths"))->isChecked());
+        QTest::keyClick(dlg.searchEdit(), Qt::Key_Return);
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(model.rowCount(), 1);
+
+        // A regular expression that doesn't compile filters for nothing and isn't applied by the timer
+        findAction(menu, QStringLiteral("Use regular expression"))->trigger();
+        QTest::keyClick(dlg.searchEdit(), Qt::Key_Return);
+        QVERIFY(waitForReload(dlg));
+        applyFilter(dlg, QStringLiteral("(unclosed"));
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(model.rowCount(), 1);
+        QVERIFY(dlg.searchEdit()->palette().color(QPalette::Base) != dlg.palette().color(QPalette::Base));
+        QVERIFY(!dlg.searchEdit()->toolTip().isEmpty());
+        applyFilter(dlg, QStringLiteral("subject\\.txt"));
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(model.rowCount(), 1);
+    }
+
+    void suppressesGraphWhileFiltering()
+    {
+        const TestRepo repo;
+        makeBranchyHistory(repo);
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        const GitLogListModel& model = *dlg.logList()->logModel();
+        QVERIFY(model.isGraphShown());
+
+        applyFilter(dlg, QStringLiteral("Merge"));
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(model.rowCount() > 0);
+        QVERIFY(!model.isGraphShown());
+
+        dlg.refreshButton()->click();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(model.isGraphShown());
+    }
+
+    void walkBehaviorOptions()
+    {
+        const TestRepo repo;
+        makeBranchyHistory(repo);
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        const GitLogListModel& model = *dlg.logList()->logModel();
+        const int allCommits = model.rowCount();
+        QVERIFY(!dlg.walkBehaviorButton()->isChecked());
+        const QMenu *menu = dlg.walkBehaviorMenu();
+
+        const auto toggle = [&](const QString& text) {
+            findAction(menu, text)->trigger();
+            return waitForReload(dlg);
+        };
+
+        QVERIFY(toggle(QStringLiteral("First Parent")));
+        QVERIFY(dlg.walkBehaviorButton()->isChecked());
+        QVERIFY(dlg.logList()->walkOptions().firstParent);
+        const int firstParentCommits = model.rowCount();
+        QVERIFY(firstParentCommits < allCommits);
+        QVERIFY(toggle(QStringLiteral("First Parent")));
+        QVERIFY(!dlg.walkBehaviorButton()->isChecked());
+        QCOMPARE(model.rowCount(), allCommits);
+
+        QVERIFY(toggle(QStringLiteral("No merges")));
+        for (int row = 0; row < model.rowCount(); ++row) {
+            QVERIFY(model.rev(row).parents.size() <= 1);
+        }
+        QVERIFY(toggle(QStringLiteral("No merges")));
+
+        QVERIFY(toggle(QStringLiteral("Full history")));
+        QVERIFY(dlg.logList()->walkOptions().fullHistory);
+        QVERIFY(toggle(QStringLiteral("Full history")));
+        QVERIFY(!dlg.walkBehaviorButton()->isChecked());
+    }
+
+    void compressedGraphAndLabeledCommits()
+    {
+        const TestRepo repo;
+        makeBranchyHistory(repo);
+        repo.run({QStringLiteral("tag"), QStringLiteral("marker"), QStringLiteral("HEAD~1")});
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        const GitLogListModel& model = *dlg.logList()->logModel();
+        const int allCommits = model.rowCount();
+        const QMenu *menu = dlg.walkBehaviorMenu();
+        QAction *compressed = findAction(menu, QStringLiteral("Compressed Graph"));
+        QAction *labeled = findAction(menu, QStringLiteral("Show labeled commits only"));
+
+        compressed->trigger();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(dlg.walkBehaviorButton()->isChecked());
+        QVERIFY(compressed->isChecked());
+        const int compressedCommits = model.rowCount();
+        QVERIFY(compressedCommits < allCommits);
+        QVERIFY(model.isGraphShown());
+        QVERIFY(!model.lanes(0).empty());
+        const QStringList compressedList = subjects(model);
+        QVERIFY(compressedList.contains(QStringLiteral("Merge feature")));
+        QVERIFY(!compressedList.contains(QStringLiteral("Topic 1")));
+
+        // The two exclude each other, and labeled commits only has no graph (no FILTERSHOW_MERGEPOINTS)
+        labeled->trigger();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(!compressed->isChecked());
+        QVERIFY(labeled->isChecked());
+        QVERIFY(!model.isGraphShown());
+        for (int row = 0; row < model.rowCount(); ++row) {
+            QVERIFY(!model.rev(row).refs.isEmpty());
+        }
+
+        // Hiding a kind of label takes its commits out of the labeled list
+        const int labeledCommits = model.rowCount();
+        findAction(dlg.viewMenu(), QStringLiteral("Tags"))->trigger();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(model.rowCount() < labeledCommits);
+
+        labeled->trigger();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(!dlg.walkBehaviorButton()->isChecked());
+        QCOMPARE(model.rowCount(), allCommits);
+    }
+
+    void followRenames()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("old.txt"), "the same content on every line\nthe same content\n");
+        repo.commitAll(QStringLiteral("Add"));
+        repo.run({QStringLiteral("mv"), QStringLiteral("old.txt"), QStringLiteral("new.txt")});
+        repo.commitAll(QStringLiteral("Rename"));
+        repo.write(QStringLiteral("dir/other.txt"), "1");
+        repo.commitAll(QStringLiteral("Other"));
+
+        const LogDlg folderDlg({repo.filePath(QStringLiteral("dir"))});
+        QVERIFY(waitForLog(folderDlg));
+        QVERIFY(!findAction(folderDlg.walkBehaviorMenu(), QStringLiteral("Follow renames"))->isEnabled());
+        const LogDlg wholeDlg({repo.path()});
+        QVERIFY(waitForLog(wholeDlg));
+        QVERIFY(!findAction(wholeDlg.walkBehaviorMenu(), QStringLiteral("Follow renames"))->isEnabled());
+
+        const LogDlg dlg({repo.filePath(QStringLiteral("new.txt"))});
+        QVERIFY(waitForLog(dlg));
+        const GitLogListModel& model = *dlg.logList()->logModel();
+        QCOMPARE(model.rowCount(), 1);
+        QVERIFY(!dlg.logList()->isColumnHidden(GitLogListModel::GraphColumn));
+        QAction *follow = findAction(dlg.walkBehaviorMenu(), QStringLiteral("Follow renames"));
+        QVERIFY(follow->isEnabled());
+
+        follow->trigger();
+        QVERIFY(waitForReload(dlg));
+        QCOMPARE(subjects(model), (QStringList{QStringLiteral("Rename"), QStringLiteral("Add")}));
+        QVERIFY(dlg.logList()->isColumnHidden(GitLogListModel::GraphColumn));
+        QVERIFY(dlg.walkBehaviorButton()->isChecked());
+
+        follow->trigger();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(!dlg.logList()->isColumnHidden(GitLogListModel::GraphColumn));
+    }
+
+    void viewMenuOmitsUnfinishedEntries()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("Add"));
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(!findAction(dlg.viewMenu(), QStringLiteral("Gravatar")));
+        QVERIFY(!findAction(dlg.viewMenu(), QStringLiteral("View Patch")));
+        QVERIFY(findAction(dlg.viewMenu(), QStringLiteral("Hide Unrelated Changed Paths")));
+        QVERIFY(findAction(dlg.viewMenu(), QStringLiteral("Other refs")));
+    }
+
+    void hidesOrGraysUnrelatedPaths()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("dir/inside.txt"), "1");
+        repo.write(QStringLiteral("outside.txt"), "1");
+        repo.commitAll(QStringLiteral("Both"));
+
+        const LogDlg dlg({repo.filePath(QStringLiteral("dir"))});
+        QVERIFY(waitForLog(dlg));
+        selectRow(dlg, 0);
+        QVERIFY(waitForFiles(dlg));
+        const GitStatusListModel *files = dlg.changedFileList()->statusModel();
+
+        const auto foreground = [files](const QString& path) -> QVariant {
+            for (int row = 0; row < files->rowCount(); ++row) {
+                const QModelIndex index = files->index(row, GitStatusListModel::PathColumn);
+                if (index.data(GitStatusListModel::PathRole).toString() == path) {
+                    return index.data(Qt::ForegroundRole);
+                }
+            }
+            return QStringLiteral("absent");
+        };
+
+        // OnInitDialog starts with "unrelated paths" in gray
+        QCOMPARE(files->rowCount(), 2);
+        QVERIFY(foreground(QStringLiteral("outside.txt")).canConvert<QBrush>());
+        QVERIFY(!foreground(QStringLiteral("dir/inside.txt")).isValid());
+
+        QAction *hide = findAction(dlg.viewMenu(), QStringLiteral("Hide Unrelated Changed Paths"));
+        hide->trigger();
+        QVERIFY(waitForFiles(dlg));
+        QCOMPARE(files->rowCount(), 1);
+        QCOMPARE(foreground(QStringLiteral("outside.txt")).toString(), QStringLiteral("absent"));
+
+        hide->trigger(); // Off again: neither hidden nor gray
+        QVERIFY(waitForFiles(dlg));
+        QCOMPARE(files->rowCount(), 2);
+        QVERIFY(!foreground(QStringLiteral("outside.txt")).isValid());
+    }
+
+    void labelsHiddenPerCategory()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("Add"));
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        const GitLogListModel& model = *dlg.logList()->logModel();
+        const GitRef tag{.type = GitRef::Type::Tag, .name = QStringLiteral("t")};
+        const GitRef local{.type = GitRef::Type::LocalBranch, .name = QStringLiteral("l")};
+        const GitRef remote{.type = GitRef::Type::RemoteBranch, .name = QStringLiteral("r")};
+        const GitRef other{.type = GitRef::Type::Other, .name = QStringLiteral("refs/x/y")};
+        const GitRef stash{.type = GitRef::Type::Stash, .name = QStringLiteral("stash")};
+        QVERIFY(model.isRefShown(tag) && model.isRefShown(local) && model.isRefShown(remote) && model.isRefShown(other));
+
+        const QMenu *menu = dlg.viewMenu();
+        findAction(menu, QStringLiteral("Tags"))->trigger();
+        QVERIFY(!model.isRefShown(tag));
+        QVERIFY(model.isRefShown(local));
+        findAction(menu, QStringLiteral("Local branches"))->trigger();
+        QVERIFY(!model.isRefShown(local));
+        findAction(menu, QStringLiteral("Remote branches"))->trigger();
+        QVERIFY(!model.isRefShown(remote));
+        findAction(menu, QStringLiteral("Other refs"))->trigger();
+        QVERIFY(!model.isRefShown(other));
+        QVERIFY(model.isRefShown(stash)); // TortoiseGit has no entry for these
+        findAction(menu, QStringLiteral("Tags"))->trigger();
+        QVERIFY(model.isRefShown(tag));
+    }
+
+    void datePickersShowCommitRange()
+    {
+        const TestRepo repo;
+        makeDatedHistory(repo);
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QCOMPARE(dlg.logList()->logModel()->rowCount(), 3);
+        // The pickers show the range of the commits, and setting them there starts no reload
+        QCOMPARE(dlg.dateFrom()->date(), QDate(2020, 3, 10));
+        QCOMPARE(dlg.dateTo()->date(), QDate(2023, 9, 20));
+        QCOMPARE(dlg.logList()->walkOptions().from, -1);
+        QCOMPARE(dlg.logList()->walkOptions().to, -1);
+    }
+
+    void fromDateLimitsLog()
+    {
+        const TestRepo repo;
+        makeDatedHistory(repo);
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        dlg.dateFrom()->setDate(QDate(2021, 6, 15));
+        QVERIFY(waitForDateReload(dlg));
+        QCOMPARE(subjects(*dlg.logList()->logModel()), (QStringList{QStringLiteral("Late"), QStringLiteral("Middle")}));
+        // The From picker keeps the chosen day; To is still the newest commit
+        QCOMPARE(dlg.dateFrom()->date(), QDate(2021, 6, 15));
+        QCOMPARE(dlg.dateTo()->date(), QDate(2023, 9, 20));
+    }
+
+    void toDateLimitsLog()
+    {
+        const TestRepo repo;
+        makeDatedHistory(repo);
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        dlg.dateTo()->setDate(QDate(2021, 6, 15));
+        QVERIFY(waitForDateReload(dlg));
+        QCOMPARE(subjects(*dlg.logList()->logModel()), (QStringList{QStringLiteral("Middle"), QStringLiteral("Early")}));
+        QCOMPARE(dlg.logList()->walkOptions().to, QDate(2021, 6, 15).endOfDay().toSecsSinceEpoch());
+    }
+
+    void fromDateCannotPassToDate()
+    {
+        const TestRepo repo;
+        makeDatedHistory(repo);
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        dlg.dateFrom()->setDate(QDate(2024, 1, 1));
+        QCOMPARE(dlg.dateFrom()->date(), QDate(2023, 9, 20));
+    }
+
+    void settingsSurviveReopen()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("Add"));
+        {
+            const LogDlg dlg({repo.path()});
+            QVERIFY(waitForLog(dlg));
+            findAction(dlg.filterMenu(), QStringLiteral("Paths"))->trigger();
+            findAction(dlg.filterMenu(), QStringLiteral("Use regular expression"))->trigger();
+            findAction(dlg.filterMenu(), QStringLiteral("Case-sensitive"))->trigger();
+            findAction(dlg.viewMenu(), QStringLiteral("Tags"))->trigger();
+            findAction(dlg.viewMenu(), QStringLiteral("Remote branches"))->trigger();
+            findAction(dlg.walkBehaviorMenu(), QStringLiteral("First Parent"))->trigger();
+            QVERIFY(waitForReload(dlg));
+        }
+        const KConfigGroup general = KSharedConfig::openConfig()->group(QStringLiteral("General"));
+        QCOMPARE(general.readEntry("SelectedLogFilters", 0U), LogFilterAll & ~static_cast<unsigned int>(LogFilterPaths));
+        QCOMPARE(general.readEntry("UseRegexFilter", false), true);
+
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(!findAction(dlg.filterMenu(), QStringLiteral("Paths"))->isChecked());
+        QVERIFY(findAction(dlg.filterMenu(), QStringLiteral("Subject"))->isChecked());
+        QVERIFY(findAction(dlg.filterMenu(), QStringLiteral("Use regular expression"))->isChecked());
+        QVERIFY(findAction(dlg.filterMenu(), QStringLiteral("Case-sensitive"))->isChecked());
+        QVERIFY(!findAction(dlg.viewMenu(), QStringLiteral("Tags"))->isChecked());
+        QVERIFY(!findAction(dlg.viewMenu(), QStringLiteral("Remote branches"))->isChecked());
+        QVERIFY(findAction(dlg.viewMenu(), QStringLiteral("Local branches"))->isChecked());
+        const GitRef tag{.type = GitRef::Type::Tag, .name = QStringLiteral("t")};
+        QVERIFY(!dlg.logList()->logModel()->isRefShown(tag));
+        // TortoiseGit doesn't keep the walk options
+        QVERIFY(!findAction(dlg.walkBehaviorMenu(), QStringLiteral("First Parent"))->isChecked());
+        QVERIFY(!dlg.walkBehaviorButton()->isChecked());
+    }
+
+    void screenshotMenusAndFilter()
+    {
+        const TestRepo repo;
+        makeBranchyHistory(repo);
+        repo.run({QStringLiteral("tag"), QStringLiteral("v1.0"), QStringLiteral("HEAD~1")});
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&dlg));
+        findAction(dlg.walkBehaviorMenu(), QStringLiteral("First Parent"))->trigger();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(saveMenuScreenshot(dlg, dlg.walkBehaviorButton(), dlg.walkBehaviorMenu(), QStringLiteral("logdlg-walkbehavior.png")));
+        findAction(dlg.walkBehaviorMenu(), QStringLiteral("First Parent"))->trigger();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(saveMenuScreenshot(dlg, dlg.viewButton(), dlg.viewMenu(), QStringLiteral("logdlg-view.png")));
+
+        applyFilter(dlg, QStringLiteral("merge"));
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(dlg.logList()->logModel()->rowCount() > 0);
+        QVERIFY(!dlg.grab().isNull());
+        const QString screenshotDir = qEnvironmentVariable("KGT_SCREENSHOT_DIR");
+        if (!screenshotDir.isEmpty()) {
+            QVERIFY(dlg.grab().save(QDir(screenshotDir).absoluteFilePath(QStringLiteral("logdlg-filter.png"))));
+        }
     }
 
     void loadsWholeHistory()

@@ -10,6 +10,7 @@
 
 #include <QByteArrayView>
 #include <QLatin1StringView>
+#include <QLocale>
 
 #include <algorithm>
 #include <array>
@@ -30,19 +31,26 @@ enum class Field {
     AuthorName,
     AuthorEmail,
     AuthorDate,
+    CommitterName,
+    CommitterEmail,
+    CommitDate,
     Decoration,
     Subject,
     Body,
+    Notes,
     Count,
 };
 
 constexpr qsizetype fieldCount = static_cast<qsizetype>(Field::Count);
 
+constexpr char simpleListMarker = '\x01'; // Starts each commit's header in simpleListArguments()' output
+constexpr QLatin1StringView tagPrefix("refs/tags/");
+
 /**
  * Every field ends with a NUL, and -z ends the record with one more: a message can't hold a NUL, so the fields
  * are found without escaping.
  */
-constexpr QLatin1StringView logFormat("--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%D%x00%s%x00%b%x00");
+constexpr QLatin1StringView logFormat("--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%D%x00%s%x00%b%x00%N%x00");
 
 /**
  * @param command The git command that wrote the output, for the message.
@@ -56,6 +64,18 @@ tl::unexpected<Error> badRecord(QLatin1StringView command, const QByteArray& buf
     QByteArray quote = buffer.mid(pos, quoteLength);
     quote.replace('\0', "\\0");
     return makeError(ErrorCategory::Parse, QStringLiteral("Unexpected %1 record: %2").arg(command, QString::fromUtf8(quote)));
+}
+
+/**
+ * @param text A field of git's output.
+ * @returns It as text, without its trailing newlines.
+ */
+QString withoutTrailingNewlines(QByteArrayView text)
+{
+    while (text.endsWith('\n') || text.endsWith('\r')) {
+        text.chop(1);
+    }
+    return QString::fromUtf8(text);
 }
 
 /**
@@ -76,19 +96,23 @@ std::optional<GitRevLoglist> makeRev(const std::array<QByteArrayView, fieldCount
     if (!isNumber) {
         return std::nullopt;
     }
+    const qint64 commitTime = field(Field::CommitDate).toLongLong(&isNumber);
+    if (!isNumber) {
+        return std::nullopt;
+    }
     GitRevLoglist rev;
     rev.hash = QString::fromLatin1(field(Field::Hash));
     rev.parents = QString::fromLatin1(field(Field::Parents)).split(QLatin1Char(' '), Qt::SkipEmptyParts);
     rev.authorName = QString::fromUtf8(field(Field::AuthorName));
     rev.authorEmail = QString::fromUtf8(field(Field::AuthorEmail));
     rev.authorDate = QDateTime::fromSecsSinceEpoch(authorTime);
+    rev.committerName = QString::fromUtf8(field(Field::CommitterName));
+    rev.committerEmail = QString::fromUtf8(field(Field::CommitterEmail));
+    rev.commitDate = QDateTime::fromSecsSinceEpoch(commitTime);
     rev.refs = GitRevLoglist::parseRefs(QString::fromUtf8(field(Field::Decoration)));
     rev.subject = QString::fromUtf8(field(Field::Subject));
-    QByteArrayView body = field(Field::Body);
-    while (body.endsWith('\n') || body.endsWith('\r')) {
-        body.chop(1);
-    }
-    rev.body = QString::fromUtf8(body);
+    rev.body = withoutTrailingNewlines(field(Field::Body));
+    rev.notes = withoutTrailingNewlines(field(Field::Notes));
     return rev;
 }
 
@@ -151,12 +175,31 @@ std::optional<GitStatusEntry> takeRawRecord(const QByteArray& output, qsizetype&
     return entry;
 }
 
+/**
+ * Records an annotated tag's text as CGit::GetTagInfo writes it.
+ * @param[in,out] infos The tags so far, by full ref name.
+ * @param fields The tag's for-each-ref fields: ref name, object type, tagger name, email and date, message.
+ */
+void addTagInfo(QHash<QString, QString>& infos, const std::array<QByteArrayView, 6>& fields)
+{
+    const QString refName = QString::fromUtf8(fields.at(0));
+    QString info = QStringLiteral("tag ") + refName.mid(tagPrefix.size()) + QLatin1Char('\n');
+    const QString taggerName = QString::fromUtf8(fields.at(2));
+    const QString taggerEmail = QString::fromUtf8(fields.at(3));
+    if (!taggerName.isEmpty() || !taggerEmail.isEmpty()) {
+        const QDateTime when = QDateTime::fromSecsSinceEpoch(fields.at(4).toLongLong());
+        info += QStringLiteral("tagger %1 %2 %3\n").arg(taggerName, taggerEmail, QLocale().toString(when, QLocale::ShortFormat));
+    }
+    info += QLatin1Char('\n') + withoutTrailingNewlines(fields.at(5)) + QLatin1Char('\n');
+    infos.insert(refName, info);
+}
+
 } // namespace
 
 namespace kgt
 {
 
-QStringList GitRevLoglist::logArguments(const QStringList& paths, const QString& range, bool noMerges)
+QStringList GitRevLoglist::logArguments(const QStringList& paths, const QString& range, const GitLogOptions& options)
 {
     QStringList arguments{
         QStringLiteral("log"),
@@ -166,13 +209,26 @@ QStringList GitRevLoglist::logArguments(const QStringList& paths, const QString&
         QStringLiteral("--no-show-signature"),
         QStringLiteral("--no-color"),
         QStringLiteral("--encoding=UTF-8"),
-        // CGit::GetLogCmd without LOG_INFO_FULL_HISTORY: rewrites %P to the parents that are listed when a path
-        // limits the log, so the graph's lanes join up
-        QStringLiteral("--parents"),
         logFormat,
     };
-    if (noMerges) {
+    // CGit::GetLogCmd's mask
+    if (options.firstParent) {
+        arguments.append(QStringLiteral("--first-parent"));
+    }
+    if (options.noMerges) {
         arguments.append(QStringLiteral("--no-merges"));
+    }
+    // Without full history, --parents rewrites %P to the parents that are listed when a path limits the log, so the
+    // graph's lanes join up
+    arguments.append(options.fullHistory ? QStringLiteral("--full-history") : QStringLiteral("--parents"));
+    if (options.follow) {
+        arguments.append(QStringLiteral("--follow"));
+    }
+    if (options.from > 0) {
+        arguments.append(QStringLiteral("--max-age=%1").arg(options.from));
+    }
+    if (options.to != -1) {
+        arguments.append(QStringLiteral("--min-age=%1").arg(options.to));
     }
     if (!range.isEmpty()) {
         arguments.append({QStringLiteral("--end-of-options"), range});
@@ -261,6 +317,24 @@ QList<GitRef> GitRevLoglist::parseRefs(const QString& decoration)
     return refs;
 }
 
+QString GitRef::fullName() const
+{
+    switch (type) {
+    case Type::LocalBranch:
+        return QStringLiteral("refs/heads/") + name;
+    case Type::RemoteBranch:
+        return QStringLiteral("refs/remotes/") + name;
+    case Type::Tag:
+        return tagPrefix + name;
+    case Type::Stash:
+        return QStringLiteral("refs/stash");
+    case Type::Head:
+    case Type::Other:
+        break;
+    }
+    return name;
+}
+
 qsizetype GitRevLoglist::diffCount() const
 {
     return std::max<qsizetype>(parents.size(), 1);
@@ -309,6 +383,90 @@ Result<GitRevFiles> GitRevLoglist::parseFiles(const QByteArray& output)
     }
     files.numStat = std::move(*numStat);
     return files;
+}
+
+QStringList GitRevLoglist::simpleListArguments()
+{
+    // One diff per parent and the root commit against nothing, without rename detection (SafeGetSimpleList)
+    return {
+        QStringLiteral("diff-tree"),
+        QStringLiteral("--stdin"),
+        QStringLiteral("-r"),
+        QStringLiteral("-m"),
+        QStringLiteral("--root"),
+        QStringLiteral("--no-renames"),
+        QStringLiteral("--name-only"),
+        QStringLiteral("-z"),
+        QStringLiteral("--format=%x01%H"),
+    };
+}
+
+QHash<QString, QStringList> GitRevLoglist::parseSimpleList(const QByteArray& output)
+{
+    // <marker><hash> NUL newline <path> NUL <path> NUL ..., repeated for each parent of a merge
+    QHash<QString, QStringList> lists;
+    QStringList *current = nullptr;
+    bool isFirstPath = false;
+    qsizetype pos = 0;
+    while (pos < output.size()) {
+        qsizetype end = output.indexOf('\0', pos);
+        if (end < 0) {
+            end = output.size();
+        }
+        QByteArrayView token = QByteArrayView(output).sliced(pos, end - pos);
+        pos = end + 1;
+        if (token.startsWith(simpleListMarker)) {
+            const QString hash = QString::fromLatin1(token.sliced(1));
+            auto entry = lists.find(hash); // A merge has a header per parent
+            if (entry == lists.end()) {
+                entry = lists.insert(hash, {});
+            }
+            current = &entry.value();
+            isFirstPath = true;
+            continue;
+        }
+        if (isFirstPath && token.startsWith('\n')) {
+            token = token.sliced(1);
+        }
+        isFirstPath = false;
+        if (current && !token.isEmpty()) {
+            current->append(QString::fromUtf8(token));
+        }
+    }
+    return lists;
+}
+
+QStringList GitRevLoglist::tagInfoArguments()
+{
+    return {
+        QStringLiteral("for-each-ref"),
+        QStringLiteral("--format=%(refname)%00%(objecttype)%00%(taggername)%00%(taggeremail)%00%(taggerdate:unix)%00%(contents)%00%00"),
+        tagPrefix,
+    };
+}
+
+QHash<QString, QString> GitRevLoglist::parseTagInfo(const QByteArray& output)
+{
+    constexpr std::size_t tagFieldCount = 6;
+    QHash<QString, QString> infos;
+    qsizetype pos = 0;
+    while (pos < output.size()) {
+        std::array<QByteArrayView, tagFieldCount> fields;
+        for (QByteArrayView& field : fields) {
+            const qsizetype end = output.indexOf('\0', pos);
+            if (end < 0) {
+                return infos;
+            }
+            field = QByteArrayView(output).sliced(pos, end - pos);
+            pos = end + 1;
+        }
+        pos += 2; // The record's own NUL and the newline for-each-ref ends it with
+        if (fields.at(1) != "tag") {
+            continue; // A lightweight tag has no tag object to read
+        }
+        addTagInfo(infos, fields);
+    }
+    return infos;
 }
 
 } // namespace kgt
