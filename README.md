@@ -3,6 +3,8 @@ SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
+<img src="data/icons/128-apps-kortoisegit.png" alt="KortoiseGit icon" width="128">
+
 # KortoiseGit
 
 A port of [TortoiseGit](https://tortoisegit.org/) to KDE: a Dolphin plugin plus a standalone Qt 6 / KDE Frameworks 6
