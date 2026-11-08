@@ -26,8 +26,8 @@ curl -fsSL https://raw.githubusercontent.com/xwize/KortoiseGit/main/scripts/unin
 ```
 
 The install adds no packages itself: if a build dependency is missing, it says so and stops, and on Arch it prints the
-`pacman` command to run. When it finishes, log out and log in again, then in Dolphin open Configure Dolphin > Interface
-> Version Control, tick KortoiseGit and untick Git.
+`pacman` command to run. When it finishes, log out and log in again, then in Dolphin open
+Configure Dolphin > Interface > Version Control, tick KortoiseGit and untick Git.
 
 ![KortoiseGit's log dialog showing a commit graph with coloured branch lanes, next to Dolphin's context menu with the Git submenu open](screenshot.png)
 
