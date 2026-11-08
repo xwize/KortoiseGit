@@ -849,6 +849,11 @@ void GitLogList::onLogFinished()
         if (e.error().category != ErrorCategory::Git) {
             throw;
         }
+        // CGitLogListBase::BeginFetchLog: a branch without commits has an empty log
+        if (m_range.isEmpty() && Git(m_workingTree).isUnbornBranch()) {
+            finishLoadIfDone();
+            return;
+        }
         failLoad(e.error());
         return;
     }

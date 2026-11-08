@@ -76,10 +76,10 @@ QString currentBranchOf(const QString& workingTree)
  * @param from A prefix such as refs/heads/.
  * @returns Whether every ref is under it, CBrowseRefsDlg::AreAllFrom.
  */
-bool areAllFrom(const QList<const ShadowTree *>& leaves, QLatin1StringView from)
+bool areAllFrom(const QStringList& refNames, QLatin1StringView from)
 {
-    return std::ranges::all_of(leaves, [from](const ShadowTree *leaf) {
-        return leaf->isFrom(from);
+    return std::ranges::all_of(refNames, [from](const QString& refName) {
+        return refName.startsWith(from);
     });
 }
 
@@ -630,6 +630,11 @@ std::unique_ptr<QMenu> BrowseRefsDlg::createListContextMenu()
 {
     auto popupMenu = std::make_unique<QMenu>(this);
     const VectorShadowTree leaves = selectedLeaves();
+    // By name: a refresh finishing while the menu is open rebuilds the tree the leaves are in
+    QStringList refNames;
+    for (const ShadowTree *leaf : leaves) {
+        refNames.append(leaf->refName());
+    }
     bool addSeparator = false;
     if (leaves.size() == 1) {
         if (m_wantPick) {
@@ -651,19 +656,19 @@ std::unique_ptr<QMenu> BrowseRefsDlg::createListContextMenu()
     // TODO: with two refs selected, the compare and log range entries come with Phase 4
 
     QString deleteText;
-    if (!leaves.isEmpty() && areAllFrom(leaves, remotesPrefix)) {
+    if (!leaves.isEmpty() && areAllFrom(refNames, remotesPrefix)) {
         deleteText = leaves.size() == 1 ? i18n("Delete remote branch") : i18n("Delete %1 remote branches", leaves.size());
-    } else if (!leaves.isEmpty() && areAllFrom(leaves, headsPrefix)) {
+    } else if (!leaves.isEmpty() && areAllFrom(refNames, headsPrefix)) {
         deleteText = leaves.size() == 1 ? i18n("Delete branch") : i18n("Delete %1 branches", leaves.size());
-    } else if (!leaves.isEmpty() && areAllFrom(leaves, tagsPrefix)) {
+    } else if (!leaves.isEmpty() && areAllFrom(refNames, tagsPrefix)) {
         deleteText = leaves.size() == 1 ? i18n("Delete tag") : i18n("Delete %1 tags", leaves.size());
     }
     if (!deleteText.isEmpty()) {
         if (addSeparator) {
             popupMenu->addSeparator();
         }
-        connect(popupMenu->addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), deleteText), &QAction::triggered, this, [this, leaves] {
-            deleteRefs(leaves);
+        connect(popupMenu->addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), deleteText), &QAction::triggered, this, [this, refNames] {
+            deleteRefs(refNames);
         });
         addSeparator = true;
     }
@@ -710,45 +715,53 @@ void BrowseRefsDlg::onListDoubleClicked()
     showLog(leaves.constFirst()->refName());
 }
 
-void BrowseRefsDlg::showLog(const QString& refName)
+QStringList BrowseRefsDlg::showLogArguments(const QString& refName) const
 {
-    // TODO: pass --range refName (FixBranchName) once LogCommand takes a revision; for now the whole history
-    Q_UNUSED(refName)
-    std::ignore = AppUtils::runTortoiseGitProc({QStringLiteral("--command"), QStringLiteral("log"), QStringLiteral("--path"), m_git.workingDirectory()});
+    return {QStringLiteral("--command"),
+            QStringLiteral("log"),
+            QStringLiteral("--path"),
+            m_git.workingDirectory(),
+            QStringLiteral("--range"),
+            m_git.fixBranchName(refName)};
 }
 
-void BrowseRefsDlg::deleteRefs(const VectorShadowTree& leaves)
+void BrowseRefsDlg::showLog(const QString& refName) const
+{
+    std::ignore = AppUtils::runTortoiseGitProc(showLogArguments(refName));
+}
+
+void BrowseRefsDlg::deleteRefs(const QStringList& refNames)
 {
     // eCmd_DeleteBranch, eCmd_DeleteRemoteBranch and eCmd_DeleteTag
-    if (confirmDeleteRef(leaves)) {
-        std::ignore = doDeleteRefs(leaves);
+    if (confirmDeleteRef(refNames)) {
+        std::ignore = doDeleteRefs(refNames);
     }
     refresh();
 }
 
-bool BrowseRefsDlg::confirmDeleteRef(const VectorShadowTree& leaves)
+bool BrowseRefsDlg::confirmDeleteRef(const QStringList& refNames)
 {
-    Q_ASSERT(!leaves.isEmpty());
-    const ShadowTree *first = leaves.constFirst();
-    const bool isRemoteBranch = first->isFrom(remotesPrefix);
-    const bool isBranch = isRemoteBranch || first->isFrom(headsPrefix);
+    Q_ASSERT(!refNames.isEmpty());
+    const QString& first = refNames.constFirst();
+    const bool isRemoteBranch = first.startsWith(remotesPrefix);
+    const bool isBranch = isRemoteBranch || first.startsWith(headsPrefix);
     QString message;
     bool warning = false;
-    if (isBranch && leaves.size() == 1) {
-        const QString branchToDelete = first->refName().mid(isRemoteBranch ? remotesPrefix.size() : headsPrefix.size());
+    if (isBranch && refNames.size() == 1) {
+        const QString branchToDelete = first.mid(isRemoteBranch ? remotesPrefix.size() : headsPrefix.size());
         message = i18n("Do you really want to delete \"%1\"?", branchToDelete);
         // Check if the branch is fully merged into HEAD
-        if (!isFastForward(first->refName(), QStringLiteral("HEAD"))) {
+        if (!isFastForward(first, QStringLiteral("HEAD"))) {
             message += QStringLiteral("\n\n") + i18n("This branch is not fully merged into HEAD.");
             warning = true;
         }
     } else if (isBranch) {
-        message = i18n("Do you really want to permanently delete the %1 selected refs? It can NOT be recovered!", leaves.size());
+        message = i18n("Do you really want to permanently delete the %1 selected refs? It can NOT be recovered!", refNames.size());
         message += QStringLiteral("\n\n") + i18n("It has not been checked if these branches have been fully merged into HEAD.");
         warning = true;
-    } else if (first->isFrom(tagsPrefix)) {
-        message = leaves.size() == 1 ? i18n("Do you really want to delete \"%1\"?", first->refName().mid(tagsPrefix.size()))
-                                     : i18n("Do you really want to permanently delete the %1 selected refs? It can NOT be recovered!", leaves.size());
+    } else if (first.startsWith(tagsPrefix)) {
+        message = refNames.size() == 1 ? i18n("Do you really want to delete \"%1\"?", first.mid(tagsPrefix.size()))
+                                       : i18n("Do you really want to permanently delete the %1 selected refs? It can NOT be recovered!", refNames.size());
     }
     if (isRemoteBranch) {
         message += QStringLiteral("\n\n") + i18n("This action will remove the branches on the remote.");
@@ -757,13 +770,13 @@ bool BrowseRefsDlg::confirmDeleteRef(const VectorShadowTree& leaves)
     return askYesNo(this, message, warning);
 }
 
-bool BrowseRefsDlg::doDeleteRefs(const VectorShadowTree& leaves)
+bool BrowseRefsDlg::doDeleteRefs(const QStringList& refNames)
 {
     // Remote branches are deleted in one push per remote: faster, and fewer password prompts
-    if (areAllFrom(leaves, remotesPrefix)) {
+    if (areAllFrom(refNames, remotesPrefix)) {
         std::map<QString, QStringList> remoteBranches;
-        for (const ShadowTree *leaf : leaves) {
-            if (const std::optional<RemoteBranch> split = splitRemoteBranchName(leaf->refName(), m_remotes)) {
+        for (const QString& refName : refNames) {
+            if (const std::optional<RemoteBranch> split = splitRemoteBranchName(refName, m_remotes)) {
                 remoteBranches[split->remote].append(split->branch);
             }
         }
@@ -774,8 +787,8 @@ bool BrowseRefsDlg::doDeleteRefs(const VectorShadowTree& leaves)
         }
         return true;
     }
-    return std::ranges::all_of(leaves, [this](const ShadowTree *leaf) {
-        return doDeleteRef(leaf->refName());
+    return std::ranges::all_of(refNames, [this](const QString& refName) {
+        return doDeleteRef(refName);
     });
 }
 

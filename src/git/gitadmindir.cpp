@@ -127,6 +127,10 @@ QString GitAdminDir::worktreeAdminDirPath(const QString& path)
         if (dotGit.isFile()) {
             return readGitLink(dotGit.absoluteFilePath());
         }
+        // GetWorktreeAdminDirPath: a bare repository is its own admin directory
+        if (isBareRepo(dir.absolutePath())) {
+            return dir.absolutePath();
+        }
         if (!dir.cdUp()) {
             return {};
         }

@@ -381,6 +381,39 @@ private Q_SLOTS:
             QVERIFY(shot.save(QDir(screenshotDir).absoluteFilePath(QStringLiteral("gitstatuslistctrl.png"))));
         }
     }
+
+    void aPathFilterTooLongForACommandLineStillFilters()
+    {
+        const TestRepo repo;
+        makeChanges(repo);
+        QStringList filter{QStringLiteral("a.txt")};
+        constexpr int extraPaths = 20000;
+        for (int i = 0; i < extraPaths; ++i) {
+            filter.append(QStringLiteral("no/such/folder/with/quite/a/long/name/for/this/test/%1.txt").arg(i));
+        }
+        GitStatusListCtrl ctrl;
+        ctrl.setWorkingTree(repo.path());
+        ctrl.setPathFilter(filter);
+        ctrl.setShowFlags(Show::All, {});
+        QVERIFY(reloadAndWait(ctrl));
+        QCOMPARE(listedPaths(*ctrl.statusModel()), QStringList{QStringLiteral("a.txt")});
+    }
+
+    void aPathFilterIsTakenLiterally()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("odd*.txt"), "1\n");
+        repo.write(QStringLiteral("oddly.txt"), "1\n");
+        repo.commitAll();
+        repo.write(QStringLiteral("odd*.txt"), "2\n");
+        repo.write(QStringLiteral("oddly.txt"), "2\n");
+        GitStatusListCtrl ctrl;
+        ctrl.setWorkingTree(repo.path());
+        ctrl.setPathFilter({QStringLiteral("odd*.txt")});
+        ctrl.setShowFlags(Show::All, {});
+        QVERIFY(reloadAndWait(ctrl));
+        QCOMPARE(listedPaths(*ctrl.statusModel()), QStringList{QStringLiteral("odd*.txt")});
+    }
 };
 
 QTEST_MAIN(GitStatusListCtrlTest)

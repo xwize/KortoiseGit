@@ -1145,21 +1145,7 @@ void RebaseDlg::selectFirstConflict()
 {
     // VerifyNoConflict: select the first conflicted file
     m_tabs->setCurrentIndex(ConflictTab);
-    m_fileListCtrl->clearSelection();
-    const GitStatusListModel *statusModel = m_fileListCtrl->statusModel();
-    const auto *proxy = qobject_cast<const QAbstractProxyModel *>(m_fileListCtrl->model());
-    for (int row = 0; row < statusModel->rowCount(); ++row) {
-        const QModelIndex index = statusModel->index(row, 0);
-        const GitStatusListEntry *entry = statusModel->entry(index);
-        if (!entry || !(entry->actions & TGitPath::Action::Unmerged)) {
-            continue;
-        }
-        const QModelIndex shown = proxy ? proxy->mapFromSource(index) : index;
-        m_fileListCtrl->selectionModel()->select(shown, QItemSelectionModel::Select | QItemSelectionModel::Rows);
-        m_fileListCtrl->scrollTo(shown);
-        m_fileListCtrl->setFocus();
-        return;
-    }
+    m_fileListCtrl->selectFirstConflict();
 }
 
 void RebaseDlg::writeRebaseActiveFolder()
@@ -1252,7 +1238,10 @@ void RebaseDlg::onContinue()
 
 void RebaseDlg::onAbort()
 {
-    // OnBnClickedAbort
+    // OnBnClickedAbort; a Revert or Resolved in the list has to finish first
+    if (m_fileListCtrl->isModifying()) {
+        return;
+    }
     const auto askAbort = [this] {
         return QMessageBox::question(this, i18n("KortoiseGit"), i18n("Are you sure you want to abort the rebase process?"), QMessageBox::Yes | QMessageBox::No)
             == QMessageBox::Yes;

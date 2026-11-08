@@ -5,14 +5,17 @@
 #include "gitstatuslistctrl.hpp"
 #include "gitstatuslistmodel.hpp"
 #include "testrepo.hpp"
+#include "utils/runtimeerror.hpp"
 
 #include <KMessageWidget>
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTest>
+#include <QTimer>
 
 namespace
 {
@@ -79,6 +82,53 @@ QStringList gitLines(const TestRepo& repo, const QStringList& arguments)
     QStringList lines = QString::fromUtf8(repo.git().run(arguments)).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     lines.sort();
     return lines;
+}
+
+/**
+ * @param repo The repository.
+ * @returns HEAD's hash.
+ */
+QString headHash(const TestRepo& repo)
+{
+    return QString::fromLatin1(repo.git().run({QStringLiteral("rev-parse"), QStringLiteral("HEAD")})).trimmed();
+}
+
+/**
+ * Leaves a repository in the middle of a merge, with f.txt in conflict.
+ * @param repo An empty repository.
+ */
+void makeConflict(const TestRepo& repo)
+{
+    repo.write(QStringLiteral("f.txt"), "base\n");
+    repo.commitAll(QStringLiteral("Base"));
+    repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("side")});
+    repo.write(QStringLiteral("f.txt"), "side\n");
+    repo.commitAll(QStringLiteral("Side"));
+    repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("main")});
+    repo.write(QStringLiteral("f.txt"), "main\n");
+    repo.commitAll(QStringLiteral("Main"));
+    try {
+        repo.run({QStringLiteral("merge"), QStringLiteral("--quiet"), QStringLiteral("side")});
+    } catch (const RuntimeError&) { // NOLINT(bugprone-empty-catch): The conflict is the point
+    }
+}
+
+/**
+ * Clicks a button of the open message box.
+ * @param text The button's text.
+ */
+void clickButton(const QString& text)
+{
+    const QWidget *box = QApplication::activeModalWidget();
+    if (!box) {
+        return;
+    }
+    for (QPushButton *button : box->findChildren<QPushButton *>()) {
+        if (button->text().remove(QLatin1Char('&')) == text) {
+            button->click();
+            return;
+        }
+    }
 }
 
 /**
@@ -524,6 +574,71 @@ private Q_SLOTS:
         if (!screenshotDir.isEmpty()) {
             QVERIFY(shot.save(QDir(screenshotDir).absoluteFilePath(QStringLiteral("commitdlg.png"))));
         }
+    }
+
+    void warnsBeforeCommittingConflicts()
+    {
+        const TestRepo repo;
+        makeConflict(repo);
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        const QString head = headHash(repo);
+        dlg.messageEdit()->setPlainText(QStringLiteral("Merge"));
+        QVERIFY(dlg.commitButton()->isEnabled());
+
+        // OK goes back to the list with the conflicted file selected
+        QTimer::singleShot(0, [] {
+            clickButton(QStringLiteral("OK"));
+        });
+        dlg.commitButton()->click();
+        QVERIFY(!dlg.isCommitting());
+        QCOMPARE(headHash(repo), head);
+        const QModelIndexList selected = dlg.fileList()->selectionModel()->selectedRows();
+        QCOMPARE(selected.size(), 1);
+        QCOMPARE(selected.constFirst().data(GitStatusListModel::PathRole).toString(), QStringLiteral("f.txt"));
+    }
+
+    void ignoringTheWarningCommits()
+    {
+        const TestRepo repo;
+        makeConflict(repo);
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        const QString head = headHash(repo);
+        dlg.messageEdit()->setPlainText(QStringLiteral("Merge"));
+        QTimer::singleShot(0, [] {
+            clickButton(QStringLiteral("Ignore"));
+        });
+        dlg.commitButton()->click();
+        QVERIFY(QTest::qWaitFor(
+            [&repo, &head] {
+                return headHash(repo) != head;
+            },
+            timeout));
+    }
+
+    void pathsGoToGitOnStdin()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("deleted.txt"), "1");
+        repo.write(QStringLiteral("changed.txt"), "1");
+        repo.commitAll(QStringLiteral("One"));
+        repo.remove(QStringLiteral("deleted.txt"));
+        repo.write(QStringLiteral("changed.txt"), "2");
+        repo.write(QStringLiteral("odd*.txt"), "3");
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QVERIFY(setChecked(dlg, QStringLiteral("odd*.txt"), true));
+
+        // However long the list, none of the paths are on a command line
+        const CommitPlan plan = CommitDlg::planCommit(*dlg.fileList()->statusModel());
+        QVERIFY(plan.prepareIndex.size() >= 3);
+        for (const CommitStep& step : plan.prepareIndex) {
+            QVERIFY(!step.input.isEmpty());
+            QVERIFY(!step.arguments.join(QLatin1Char(' ')).contains(QLatin1String(".txt")));
+        }
+        QVERIFY(commitAndWait(dlg, QStringLiteral("Paths")));
+        QCOMPARE(committedFiles(repo), (QStringList{QStringLiteral("changed.txt"), QStringLiteral("deleted.txt"), QStringLiteral("odd*.txt")}));
     }
 };
 

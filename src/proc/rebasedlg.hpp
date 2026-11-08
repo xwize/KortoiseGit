@@ -331,6 +331,7 @@ private:
     [[nodiscard]] std::optional<int> handlePickFailure(int row, const QString& hash, unsigned int mode, const QString& output, bool& retry);
     [[nodiscard]] int handlePickSuccess(int row, const QString& hash, unsigned int mode, bool noCommit);
     [[nodiscard]] bool finishRebase();
+    [[nodiscard]] bool moveBranchToRebasedCommits();
     void rewriteNotes();
     [[nodiscard]] bool verifyNoConflict();
     void resetParentForSquash(const QString& commitMessage);

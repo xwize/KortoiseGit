@@ -8,6 +8,7 @@
 
 #include <QAction>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QMenu>
 #include <QPointer>
@@ -621,6 +622,32 @@ private Q_SLOTS:
 
         // The retrieval itself must not touch the index, or every refresh would trigger another
         QVERIFY(!changed.wait(1000));
+    }
+
+    void aShortSelectionGoesOnTheCommandLine()
+    {
+        QCOMPARE(ShellExt::pathArguments({QStringLiteral("/a"), QStringLiteral("/b c")}),
+                 (QStringList{QStringLiteral("--path"), QStringLiteral("/a"), QStringLiteral("--path"), QStringLiteral("/b c")}));
+    }
+
+    void aLongSelectionGoesInAFile()
+    {
+        constexpr int pathCount = 20000;
+        QStringList paths;
+        QByteArray expected;
+        for (int i = 0; i < pathCount; ++i) {
+            paths.append(QStringLiteral("/some/rather/long/folder/name\nwith a newline/file%1.txt").arg(i));
+            expected.append(paths.constLast().toUtf8());
+            expected.append('\0');
+        }
+        const QStringList arguments = ShellExt::pathArguments(paths);
+        QCOMPARE(arguments.size(), 3);
+        QCOMPARE(arguments.at(0), QStringLiteral("--pathfile"));
+        QCOMPARE(arguments.at(2), QStringLiteral("--deletepathfile"));
+        QFile file(arguments.at(1));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), expected);
+        QVERIFY(file.remove());
     }
 };
 

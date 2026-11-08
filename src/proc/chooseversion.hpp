@@ -148,6 +148,11 @@ public:
      */
     [[nodiscard]] QPushButton *browseRefButton() const;
 
+    /**
+     * @returns The button that picks a commit from the log.
+     */
+    [[nodiscard]] QPushButton *showLogButton() const;
+
 Q_SIGNALS:
     /**
      * The choice changed (OnVersionChanged).
@@ -162,6 +167,7 @@ Q_SIGNALS:
 private:
     void onChooseRadio();
     void onBrowseRef();
+    void onShowLog();
     void onLoadFinished();
     void updateGui(const BranchList& branches, const QStringList& tags);
     [[nodiscard]] QRadioButton *radio(Choice choice) const;

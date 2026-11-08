@@ -7,6 +7,8 @@
 
 #include <QCommandLineParser>
 #include <QDir>
+#include <QFile>
+#include <QTemporaryFile>
 #include <QTest>
 
 namespace
@@ -129,6 +131,53 @@ private Q_SLOTS:
         QVERIFY(!command);
         QCOMPARE(command.error().category, ErrorCategory::CommandLine);
         QVERIFY(command.error().message.contains(QStringLiteral("nosuchcommand")));
+    }
+
+    void readsPathsFromAFile()
+    {
+        QTemporaryFile file;
+        file.setAutoRemove(false);
+        QVERIFY(file.open());
+        file.write(QByteArray("/repo/a\0/repo/new\nline\0", 24));
+        file.close();
+        const Result<CmdLineArgs> args =
+            parse({QStringLiteral("--command"), QStringLiteral("add"), QStringLiteral("--pathfile"), file.fileName(), QStringLiteral("--deletepathfile")});
+        QVERIFY(args);
+        QCOMPARE(args->paths, (QStringList{QStringLiteral("/repo/a"), QStringLiteral("/repo/new\nline")}));
+        QVERIFY(!QFile::exists(file.fileName()));
+    }
+
+    void keepsAPathFileUnlessAskedToDeleteIt()
+    {
+        QTemporaryFile file;
+        QVERIFY(file.open());
+        file.write(QByteArray("/repo/a\0", 8));
+        file.close();
+        QVERIFY(parse({QStringLiteral("--command"), QStringLiteral("add"), QStringLiteral("--pathfile"), file.fileName()}));
+        QVERIFY(QFile::exists(file.fileName()));
+    }
+
+    void pathAndPathFileExcludeEachOther()
+    {
+        QVERIFY(!parse({QStringLiteral("--command"),
+                        QStringLiteral("add"),
+                        QStringLiteral("--path"),
+                        QStringLiteral("/a"),
+                        QStringLiteral("--pathfile"),
+                        QStringLiteral("/b")}));
+    }
+
+    void anUnreadablePathFileIsAnError()
+    {
+        QVERIFY(!parse({QStringLiteral("--command"), QStringLiteral("add"), QStringLiteral("--pathfile"), QStringLiteral("/nonexistent/paths")}));
+    }
+
+    void parsesLogRange()
+    {
+        const Result<CmdLineArgs> args =
+            parse({QStringLiteral("--command"), QStringLiteral("log"), QStringLiteral("--range"), QStringLiteral("refs/heads/topic")});
+        QVERIFY(args);
+        QCOMPARE(args->values.value(QStringLiteral("range")), QStringLiteral("refs/heads/topic"));
     }
 };
 

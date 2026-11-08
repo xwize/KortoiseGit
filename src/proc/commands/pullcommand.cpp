@@ -98,7 +98,7 @@ bool PullCommand::pull(const QString& workingTree)
     }
     const PullFetchOptions options = dlg.options();
     // options.rebase would fetch and then open RebaseDlg (DoFetch with runRebase, RebaseAfterFetch); the dialog
-    // keeps it off until KORTOISEGIT-0018 brings RebaseDlg
+    // doesn't offer it yet
     Q_ASSERT(!options.rebase);
 
     const Git git(workingTree);

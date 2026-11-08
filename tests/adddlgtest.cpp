@@ -9,6 +9,8 @@
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
@@ -304,6 +306,17 @@ private Q_SLOTS:
         command.setPaths({repo->filePath(QStringLiteral("a.txt")), repo->filePath(QStringLiteral("sub/b.txt"))});
         QVERIFY(command.execute());
         QCOMPARE(stagedPaths(*repo), (QStringList{QStringLiteral("a.txt"), QStringLiteral("sub/b.txt")}));
+    }
+
+    void aLinkToAFileStaysTheLink()
+    {
+        // Revert and Add must act on the link the user selected, not on the file it points to
+        const TestRepo repo;
+        repo.write(QStringLiteral("real.txt"), "1");
+        QVERIFY(QFile::link(QStringLiteral("real.txt"), repo.filePath(QStringLiteral("link.txt"))));
+        const QString root = QFileInfo(repo.path()).canonicalFilePath();
+        QCOMPARE(AddDlg::relativePaths(root, {repo.filePath(QStringLiteral("link.txt"))}), QStringList{QStringLiteral("link.txt")});
+        QCOMPARE(AddDlg::relativePaths(root, {repo.filePath(QStringLiteral("real.txt"))}), QStringList{QStringLiteral("real.txt")});
     }
 };
 

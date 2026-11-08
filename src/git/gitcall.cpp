@@ -19,6 +19,7 @@ namespace
 {
 
 constexpr auto gitProgram = "git";
+constexpr int killWaitMs = 1000; // How long a killed git gets to go away before it is abandoned
 
 /**
  * @param argument One argument.
@@ -101,11 +102,15 @@ GitCall::~GitCall()
     }
 }
 
-void GitCall::waitForFinished()
+void GitCall::waitForFinished(int timeoutMs)
 {
-    if (!m_isFinished) {
-        m_process.waitForFinished(-1);
+    if (m_isFinished || m_process.waitForFinished(timeoutMs) || m_process.state() == QProcess::NotRunning) {
+        return;
     }
+    m_timedOut = true;
+    m_process.kill();
+    m_process.waitForFinished(killWaitMs);
+    m_isFinished = true;
 }
 
 bool GitCall::isFinished() const
@@ -142,6 +147,9 @@ QByteArray GitCall::output() const
 {
     Q_ASSERT(m_isFinished);
     const QString stderrText = QString::fromUtf8(m_stderr).trimmed();
+    if (m_timedOut) {
+        throw RuntimeError({.category = ErrorCategory::Git, .message = QStringLiteral("%1 timed out").arg(commandLine())});
+    }
     if (m_process.error() == QProcess::FailedToStart) {
         throw RuntimeError({.category = ErrorCategory::Git, .message = QStringLiteral("Could not start %1: %2").arg(commandLine(), stderrText)});
     }

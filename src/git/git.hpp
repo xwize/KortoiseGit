@@ -58,6 +58,13 @@ public:
     [[nodiscard]] const QString& workingDirectory() const;
 
     /**
+     * Limits how long run() waits, for callers that mustn't hang: a git that is stuck is killed and reported as a
+     * failure.
+     * @param timeoutMs The limit; negative for none, the default.
+     */
+    void setRunTimeout(int timeoutMs);
+
+    /**
      * Runs git and waits for it to exit.
      * @param arguments The arguments after "git".
      * @param mode Whether git may take the repository's optional locks.
@@ -103,6 +110,12 @@ public:
      * @throws RuntimeError (category Git) if git fails.
      */
     [[nodiscard]] bool hasWorkingTreeConflicts() const;
+
+    /**
+     * Ported from CGit::IsUnbornBranch, for HEAD.
+     * @returns Whether HEAD names a branch that has no commit yet.
+     */
+    [[nodiscard]] bool isUnbornBranch() const;
 
     /**
      * Ported from CGit::GetConfigValue.
@@ -201,6 +214,7 @@ public:
 
 private:
     QString m_workingDirectory;
+    int m_runTimeoutMs = -1; // How long run() waits; negative for ever
 };
 
 } // namespace kgt

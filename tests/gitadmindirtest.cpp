@@ -100,6 +100,15 @@ private Q_SLOTS:
         // Its admin directory has no objects of its own: they are found through commondir
         QCOMPARE(GitAdminDir::projectTopDir(QDir(worktree).filePath(QStringLiteral("a.txt"))), worktree);
     }
+
+    void aBareRepositoryIsItsOwnAdminDir()
+    {
+        // Inside a working tree, so a walk up the folders would find the wrong repository
+        const TestRepo repo;
+        const QString bare = repo.filePath(QStringLiteral("inner.git"));
+        repo.run({QStringLiteral("init"), QStringLiteral("--quiet"), QStringLiteral("--bare"), bare});
+        QCOMPARE(GitAdminDir::worktreeAdminDirPath(bare), bare);
+    }
 };
 
 QTEST_GUILESS_MAIN(GitAdminDirTest)

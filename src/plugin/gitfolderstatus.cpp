@@ -7,9 +7,11 @@
 
 #include "gitfolderstatus.hpp"
 
+#include "git/gitadmindir.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <QByteArray>
+#include <QDir>
 #include <QFileInfo>
 
 #include <utility>
@@ -19,6 +21,9 @@ namespace
 
 using namespace kgt;
 using ItemVersion = KVersionControlPlugin::ItemVersion;
+
+constexpr int retrievalTimeoutMs = 60000; // Per git command, on Dolphin's worker thread
+constexpr int menuTimeoutMs = 3000; // Per git command, on Dolphin's UI thread, which a stuck git must not hang
 
 /**
  * Like TortoiseGit's GitStatus::GetStatusRanking: when one path has two entries (git rm --cached lists the file
@@ -133,34 +138,36 @@ GitFolderStatus::GitFolderStatus(const QString& prefix, const QList<GitStatusEnt
 
 GitFolderStatus GitFolderStatus::fetch(const QString& directory)
 {
-    return fetch(Git(directory), QStringLiteral("."));
+    Git git(directory);
+    git.setRunTimeout(retrievalTimeoutMs);
+    return fetch(git, QStringLiteral("."));
 }
 
 GitFolderStatus GitFolderStatus::fetchItem(const QString& path)
 {
     const QFileInfo info(path);
-    return fetch(Git(info.absolutePath()), QStringLiteral(":(literal)") + info.fileName());
+    Git git(info.absolutePath());
+    git.setRunTimeout(menuTimeoutMs);
+    return fetch(git, QStringLiteral(":(literal)") + info.fileName());
 }
 
 GitFolderStatus GitFolderStatus::fetch(const Git& git, const QString& pathspec)
 {
-    // --show-toplevel fails inside .git, which therefore gets no overlays
-    const QList<QByteArray> lines =
-        git.run({QStringLiteral("rev-parse"), QStringLiteral("--show-toplevel"), QStringLiteral("--absolute-git-dir"), QStringLiteral("--show-prefix")},
-                RunMode::ReadOnly)
-            .split('\n');
-    if (lines.size() < 3) {
-        throw RuntimeError({.category = ErrorCategory::Parse, .message = QStringLiteral("Unexpected git rev-parse output")});
+    // --show-toplevel fails inside .git, which therefore gets no overlays. Asked for alone, as git writes it unquoted:
+    // only the last newline ends it, the path may hold others
+    QByteArray topLevel = git.run({QStringLiteral("rev-parse"), QStringLiteral("--show-toplevel")}, RunMode::ReadOnly);
+    if (topLevel.endsWith('\n')) {
+        topLevel.chop(1);
     }
-    const QString gitDir = QString::fromUtf8(lines.at(1));
-    const QString prefix = QString::fromUtf8(lines.at(2));
+    const QString relative = QDir(QString::fromUtf8(topLevel)).relativeFilePath(QFileInfo(git.workingDirectory()).canonicalFilePath());
+    const QString prefix = relative.isEmpty() || relative == QLatin1String(".") ? QString() : relative + QLatin1Char('/');
 
     // Only this folder (or item) and below: in a subfolder of a large repository, git doesn't scan the rest
     const QStringList statusArguments = GitStatus::arguments(IgnoredFiles::Include) + QStringList{QStringLiteral("--"), pathspec};
     const QList<GitStatusEntry> entries = getOrThrow(GitStatus::parse(git.run(statusArguments, RunMode::ReadOnly)));
 
     GitFolderStatus status(prefix, entries, trackedChildren(git));
-    status.m_indexFile = gitDir + QStringLiteral("/index");
+    status.m_indexFile = QDir(GitAdminDir::worktreeAdminDirPath(git.workingDirectory())).filePath(QStringLiteral("index"));
     return status;
 }
 

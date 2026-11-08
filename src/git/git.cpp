@@ -65,10 +65,15 @@ const QString& Git::workingDirectory() const
     return m_workingDirectory;
 }
 
+void Git::setRunTimeout(int timeoutMs)
+{
+    m_runTimeoutMs = timeoutMs;
+}
+
 QByteArray Git::run(const QStringList& arguments, RunMode mode, const QByteArray& input) const
 {
     GitCall call(m_workingDirectory, arguments, mode, input);
-    call.waitForFinished();
+    call.waitForFinished(m_runTimeoutMs);
     return call.output();
 }
 
@@ -114,6 +119,28 @@ bool Git::isHash(QByteArrayView text)
 bool Git::hasWorkingTreeConflicts() const
 {
     return !run({QStringLiteral("ls-files"), QStringLiteral("-u")}, RunMode::ReadOnly).isEmpty();
+}
+
+bool Git::isUnbornBranch() const
+{
+    try {
+        std::ignore = run({QStringLiteral("rev-parse"), QStringLiteral("--verify"), QStringLiteral("-q"), QStringLiteral("HEAD")}, RunMode::ReadOnly);
+        return false;
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+    }
+    try {
+        // HEAD has no commit, but does it name a branch? Otherwise something else is wrong
+        std::ignore = run({QStringLiteral("symbolic-ref"), QStringLiteral("-q"), QStringLiteral("HEAD")}, RunMode::ReadOnly);
+        return true;
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        return false;
+    }
 }
 
 QString Git::configValue(const QString& name) const

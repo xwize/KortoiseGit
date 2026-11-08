@@ -18,6 +18,7 @@
 #include <QMenu>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QTemporaryFile>
 
 #include <dlfcn.h>
 
@@ -38,6 +39,8 @@ constexpr std::chrono::milliseconds refreshDelay{600};
 constexpr qsizetype maxMenuBranchLength = 64;
 // CGit::GetShortHASHLength
 constexpr qsizetype shortHashLength = 8;
+// More than this goes in a file: well under Linux's usual 2 MiB for the arguments and the environment together
+constexpr qsizetype maxPathArgumentsLength = 128LL * 1024;
 
 /**
  * The directory holding this plugin's .so, like TortoiseGit's CPathUtils::GetAppDirectory(g_hmodThisDll).
@@ -602,11 +605,13 @@ void ShellExt::runCommand(const QString& command, const QAction *action, const Q
         return;
     }
 
-    QStringList arguments{QStringLiteral("--command"), command};
-    for (const QString& path : paths) {
-        arguments << QStringLiteral("--path") << path;
+    const QStringList selection = pathArguments(paths);
+    if (selection.isEmpty()) {
+        Q_EMIT errorMessage(i18n("KortoiseGitProc launch failed"));
+        return;
     }
-    arguments << switches;
+    QStringList arguments{QStringLiteral("--command"), command};
+    arguments << selection << switches;
 
     // Run from the first item's folder, as TortoiseGitProc gets Explorer's current folder
     const QFileInfo first(paths.constFirst());
@@ -617,6 +622,36 @@ void ShellExt::runCommand(const QString& command, const QAction *action, const Q
         qCWarning(KGT_PLUGIN) << "Failed to start" << program;
         Q_EMIT errorMessage(i18n("KortoiseGitProc launch failed"));
     }
+}
+
+QStringList ShellExt::pathArguments(const QStringList& paths)
+{
+    QStringList arguments;
+    qsizetype length = 0;
+    for (const QString& path : paths) {
+        arguments << QStringLiteral("--path") << path;
+        length += path.toUtf8().size();
+    }
+    if (length <= maxPathArgumentsLength) {
+        return arguments;
+    }
+
+    QTemporaryFile file(QDir(QDir::tempPath()).filePath(QStringLiteral("kortoisegit-paths-XXXXXX")));
+    file.setAutoRemove(false);
+    if (!file.open()) {
+        qCWarning(KGT_PLUGIN) << "Could not create a path file:" << file.errorString();
+        return {};
+    }
+    for (const QString& path : paths) {
+        file.write(path.toUtf8());
+        file.putChar('\0');
+    }
+    if (!file.flush()) {
+        qCWarning(KGT_PLUGIN) << "Could not write the path file:" << file.errorString();
+        file.remove();
+        return {};
+    }
+    return {QStringLiteral("--pathfile"), file.fileName(), QStringLiteral("--deletepathfile")};
 }
 
 void ShellExt::watchIndex(const QString& indexFile)

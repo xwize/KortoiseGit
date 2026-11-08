@@ -20,6 +20,7 @@
 
 class QAction;
 class QDateEdit;
+class QDialogButtonBox;
 class QLineEdit;
 class QMenu;
 class QPushButton;
@@ -46,9 +47,10 @@ public:
     /**
      * Opens the dialog and starts loading the log.
      * @param paths The absolute paths the log was asked for, all in one repository.
+     * @param range The revisions to list (TortoiseGit's /range), or empty for HEAD's history.
      * @param parent Parent widget, or nullptr for a top-level dialog.
      */
-    explicit LogDlg(const QStringList& paths, QWidget *parent = nullptr);
+    explicit LogDlg(const QStringList& paths, const QString& range = {}, QWidget *parent = nullptr);
     ~LogDlg() override;
 
     LogDlg(const LogDlg&) = delete;
@@ -126,6 +128,28 @@ public:
      */
     [[nodiscard]] QDateEdit *dateTo() const;
 
+    /**
+     * Makes the dialog pick one commit for another dialog (CLogDlg::SetSelect): OK needs exactly one commit selected,
+     * and there is a Cancel.
+     * @param select Whether to pick.
+     */
+    void setSelect(bool select);
+
+    /**
+     * @returns The commit picked with OK (CLogDlg::GetSelectedHash), or empty.
+     */
+    [[nodiscard]] const QString& selectedHash() const;
+
+    /**
+     * @returns The dialog's OK and Cancel buttons.
+     */
+    [[nodiscard]] QDialogButtonBox *buttonBox() const;
+
+    /**
+     * Records the commit picked (CLogDlg::OnOK) and closes the dialog.
+     */
+    void accept() override;
+
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
@@ -168,6 +192,7 @@ private:
     void setFilterCueText();
     void updateSearchValidity();
     void setWalkControlsEnabled(bool enabled);
+    void enableOkButton();
     [[nodiscard]] QList<GitStatusListEntry> applyHidePaths(QList<GitStatusListEntry> entries) const;
     void onSelectedRevChanged();
     void fillLogMessage(const GitRevLoglist& rev);
@@ -185,6 +210,9 @@ private:
     QPushButton *m_refresh = nullptr;
     QPushButton *m_walkBehavior = nullptr;
     QPushButton *m_view = nullptr;
+    QDialogButtonBox *m_buttons = nullptr;
+    bool m_select = false; // CLogDlg::m_bSelect
+    QString m_selectedHash; // CLogDlg::m_sSelectedHash
     QMenu *m_walkMenu = nullptr;
     QMenu *m_viewMenu = nullptr;
     QMenu *m_filterMenu = nullptr;

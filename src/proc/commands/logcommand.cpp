@@ -23,7 +23,7 @@ LogCommand::LogCommand()
 
 bool LogCommand::execute()
 {
-    LogDlg dlg(paths());
+    LogDlg dlg(paths(), value(QStringLiteral("range")));
     dlg.exec();
     return true;
 }

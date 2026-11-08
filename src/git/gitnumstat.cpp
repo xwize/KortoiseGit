@@ -85,7 +85,13 @@ namespace kgt
 
 QStringList GitNumStat::arguments(const QString& base, const QStringList& paths)
 {
-    QStringList arguments{QStringLiteral("diff"), QStringLiteral("--numstat"), QStringLiteral("-z"), QStringLiteral("-M"), base, QStringLiteral("--")};
+    QStringList arguments{QStringLiteral("--literal-pathspecs"),
+                          QStringLiteral("diff"),
+                          QStringLiteral("--numstat"),
+                          QStringLiteral("-z"),
+                          QStringLiteral("-M"),
+                          base,
+                          QStringLiteral("--")};
     arguments.append(paths);
     return arguments;
 }

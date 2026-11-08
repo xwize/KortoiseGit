@@ -13,6 +13,7 @@
 #include "browserefsdlg.hpp"
 #include "git/gitcall.hpp"
 #include "kortoisegitproc_debug.hpp"
+#include "logdlg.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KLocalizedString>
@@ -91,8 +92,6 @@ ChooseVersion::ChooseVersion(Git git, const QString& title, QWidget *parent)
     for (QPushButton *button : {m_browseRef, m_showLog}) {
         button->setFixedWidth(button->fontMetrics().horizontalAdvance(QStringLiteral("...")) * 3);
     }
-    // OnBnClickedChooseVersion opens the log as a picker, which LogDlg doesn't offer yet: a hash is typed instead
-    m_showLog->setToolTip(i18n("Type a commit hash; picking it from the log is not available yet."));
 
     auto *layout = new QGridLayout(this);
     m_radioHead->hide();
@@ -115,6 +114,7 @@ ChooseVersion::ChooseVersion(Git git, const QString& title, QWidget *parent)
         });
     }
     connect(m_browseRef, &QPushButton::clicked, this, &ChooseVersion::onBrowseRef);
+    connect(m_showLog, &QPushButton::clicked, this, &ChooseVersion::onShowLog);
     for (const QComboBox *combo : {m_branch, m_tags, m_version}) {
         connect(combo, &QComboBox::currentTextChanged, this, &ChooseVersion::versionChanged);
     }
@@ -285,6 +285,11 @@ QPushButton *ChooseVersion::browseRefButton() const
     return m_browseRef;
 }
 
+QPushButton *ChooseVersion::showLogButton() const
+{
+    return m_showLog;
+}
+
 void ChooseVersion::onChooseRadio()
 {
     const Choice chosen = choice();
@@ -292,8 +297,7 @@ void ChooseVersion::onChooseRadio()
     m_browseRef->setEnabled(chosen == Choice::Branch);
     m_tags->setEnabled(chosen == Choice::Tag);
     m_version->setEnabled(chosen == Choice::Version);
-    // TortoiseGit enables IDC_BUTTON_SHOW with Commit; it stays off until LogDlg can pick a commit
-    m_showLog->setEnabled(false);
+    m_showLog->setEnabled(chosen == Choice::Version);
     Q_EMIT versionChanged();
 }
 
@@ -310,6 +314,16 @@ void ChooseVersion::onBrowseRef()
     }
     m_pendingRefName = resultRef;
     m_notFullName = false;
+}
+
+void ChooseVersion::onShowLog()
+{
+    // OnBnClickedChooseVersion
+    LogDlg dlg({m_git.workingDirectory()}, {}, this);
+    dlg.setSelect(true);
+    if (dlg.exec() == QDialog::Accepted && !dlg.selectedHash().isEmpty()) {
+        m_version->setEditText(dlg.selectedHash());
+    }
 }
 
 void ChooseVersion::onLoadFinished()

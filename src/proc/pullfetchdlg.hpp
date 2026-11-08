@@ -32,7 +32,7 @@ struct PullFetchOptions {
     QString remoteUrl; // m_RemoteURL: a remote's name or a URL
     QString remoteBranchName; // m_RemoteBranchName: empty for the remote's configured refspecs
     bool allRemotes = false; // m_bAllRemotes: fetch from every remote ("- all -")
-    bool rebase = false; // m_bRebase: fetch, then rebase (KORTOISEGIT-0018)
+    bool rebase = false; // m_bRebase: fetch, then rebase; not offered yet
     bool noFF = false; // m_bNoFF: --no-ff
     bool ffOnly = false; // m_bFFonly: --ff-only
     bool squash = false; // m_bSquash: --squash
@@ -48,7 +48,7 @@ struct PullFetchOptions {
  * and leaves the remote branch to the remote's refspecs.
  *
  * Left out for now: the "..." remote ref browser (SelectRemoteRefDlg), Manage Remotes, the PuTTY key, Help and a
- * submodule's default branch. "Launch Rebase After Fetch" stays disabled until RebaseDlg exists (KORTOISEGIT-0018).
+ * submodule's default branch. "Launch Rebase After Fetch" is not offered yet.
  */
 class PullFetchDlg : public QDialog
 {

@@ -48,7 +48,8 @@ private Q_SLOTS:
     void argumentsEndWithPathSpec()
     {
         QCOMPARE(GitNumStat::arguments(QStringLiteral("HEAD"), {QStringLiteral("dir")}),
-                 (QStringList{QStringLiteral("diff"),
+                 (QStringList{QStringLiteral("--literal-pathspecs"),
+                              QStringLiteral("diff"),
                               QStringLiteral("--numstat"),
                               QStringLiteral("-z"),
                               QStringLiteral("-M"),

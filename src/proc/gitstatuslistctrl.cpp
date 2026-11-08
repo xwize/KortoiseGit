@@ -105,6 +105,8 @@ protected:
  */
 constexpr qsizetype shortHashLength = 8;
 
+constexpr qsizetype maxPathSpecLength = 128LL * 1024; // Well under Linux's usual 2 MiB for the arguments and the environment
+
 } // namespace
 
 namespace kgt
@@ -155,6 +157,7 @@ const QString& GitStatusListCtrl::workingTree() const
 void GitStatusListCtrl::setPathFilter(const QStringList& paths)
 {
     m_pathFilter = paths;
+    m_pathFilterSet = QSet<QString>(paths.cbegin(), paths.cend());
 }
 
 void GitStatusListCtrl::setShowFlags(GitStatusListModel::ShowFlags show, GitStatusListModel::ShowFlags check)
@@ -262,7 +265,11 @@ void GitStatusListCtrl::reload()
 
     QStringList arguments = GitStatus::arguments(m_hasIgnored ? IgnoredFiles::Include : IgnoredFiles::Exclude);
     arguments.append(QStringLiteral("--branch"));
-    arguments.append(pathSpec());
+    if (const QStringList spec = pathSpec(); !spec.isEmpty()) {
+        // A file may be named like a pathspec, such as ":x" or "*"
+        arguments.prepend(QStringLiteral("--literal-pathspecs"));
+        arguments.append(spec);
+    }
     m_statusCall = Git(m_workingTree).runAsync(arguments, RunMode::ReadOnly);
     connect(m_statusCall.get(), &GitCall::finished, this, &GitStatusListCtrl::onStatusFinished);
     viewport()->update();
@@ -297,6 +304,34 @@ GitStatusListModel *GitStatusListCtrl::statusModel() const
 QList<GitStatusListEntry> GitStatusListCtrl::checkedEntries() const
 {
     return m_model->checkedEntries();
+}
+
+bool GitStatusListCtrl::hasConflicts() const
+{
+    return std::ranges::any_of(m_model->allEntries(), [](const GitStatusListEntry& entry) {
+        return (entry.actions & Action::Unmerged) != 0;
+    });
+}
+
+void GitStatusListCtrl::selectFirstConflict()
+{
+    clearSelection();
+    for (int row = 0; row < m_model->rowCount(); ++row) {
+        const QModelIndex index = m_model->index(row, 0);
+        const GitStatusListEntry *entry = m_model->entry(index);
+        if (entry && (entry->actions & Action::Unmerged)) {
+            const QModelIndex shown = m_proxy->mapFromSource(index);
+            selectionModel()->select(shown, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+            scrollTo(shown);
+            setFocus();
+            return;
+        }
+    }
+}
+
+bool GitStatusListCtrl::isModifying() const
+{
+    return m_revertCommand || m_resolveCall;
 }
 
 QString GitStatusListCtrl::absolutePath(const GitStatusListEntry& entry) const
@@ -438,10 +473,10 @@ void GitStatusListCtrl::onIndexDiffFinished()
 
 void GitStatusListCtrl::loadNumStat()
 {
-    if (m_includeStaged) {
-        // The status covered the whole working tree: keep what the filter selects, and everything staged
+    if (!isPathFilterGivenToGit()) {
+        // The status covered the whole working tree: keep what the filter selects, and everything staged if asked
         m_pendingStatus.removeIf([this](const GitStatusEntry& entry) {
-            return !isInPathFilter(entry) && entry.index == FileState::Unmodified;
+            return !isInPathFilter(entry) && !(m_includeStaged && entry.index != FileState::Unmodified);
         });
     }
     if (m_isInitialRepo) {
@@ -449,7 +484,7 @@ void GitStatusListCtrl::loadNumStat()
         finishLoad({});
         return;
     }
-    const QStringList numStatPaths = m_includeStaged ? QStringList() : m_pathFilter;
+    const QStringList numStatPaths = isPathFilterGivenToGit() ? m_pathFilter : QStringList();
     m_numStatCall = Git(m_workingTree).runAsync(GitNumStat::arguments(baseRevision(), numStatPaths), RunMode::ReadOnly);
     connect(m_numStatCall.get(), &GitCall::finished, this, &GitStatusListCtrl::onNumStatFinished);
 }
@@ -533,8 +568,14 @@ void GitStatusListCtrl::showGroups()
 void GitStatusListCtrl::onDoubleClicked(const QModelIndex& index)
 {
     const GitStatusListEntry *entry = m_model->entry(m_proxy->mapToSource(index));
-    // TortoiseGit diffs unversioned files against nothing here; that is not ported yet
-    if (!entry || !isTracked(*entry)) {
+    if (!entry) {
+        return;
+    }
+    if (!isTracked(*entry)) {
+        // CGitStatusListCtrl::StartDiff compares an unversioned file with nothing
+        if (!QFileInfo(absolutePath(*entry)).isDir()) {
+            std::ignore = GitDiff::start(this, {.workingDirectory = m_workingTree, .arguments = GitDiff::diffNullArguments(entry->path)});
+        }
         return;
     }
     if (entry->actions & Action::Unmerged) {
@@ -576,7 +617,11 @@ void GitStatusListCtrl::editConflict(const GitStatusListEntry& entry)
      * TortoiseGit's CAppUtils::ConflictEdit opens TortoiseMerge; here git mergetool runs the user's merge tool,
      * detached, and marks the file resolved itself when the tool reports success. F5 shows the result.
      */
-    const QStringList arguments{QStringLiteral("mergetool"), QStringLiteral("--no-prompt"), QStringLiteral("--"), entry.path};
+    const QStringList arguments{QStringLiteral("--literal-pathspecs"),
+                                QStringLiteral("mergetool"),
+                                QStringLiteral("--no-prompt"),
+                                QStringLiteral("--"),
+                                entry.path};
     if (!QProcess::startDetached(QStringLiteral("git"), arguments, m_workingTree)) {
         QMessageBox::warning(this, i18n("Edit conflicts"), i18n("Could not start git mergetool."));
     }
@@ -758,9 +803,23 @@ void GitStatusListCtrl::onRevertFinished()
     Q_EMIT reverted();
 }
 
+bool GitStatusListCtrl::isPathFilterGivenToGit() const
+{
+    if (m_includeStaged) {
+        return false;
+    }
+    // CGit::GetWorkingTreeChanges asks once per path; here a selection that won't fit on a command line is filtered
+    // afterwards
+    qsizetype length = 0;
+    for (const QString& path : m_pathFilter) {
+        length += path.toUtf8().size() + 1;
+    }
+    return length <= maxPathSpecLength;
+}
+
 QStringList GitStatusListCtrl::pathSpec() const
 {
-    if (m_pathFilter.isEmpty() || m_includeStaged) {
+    if (m_pathFilter.isEmpty() || !isPathFilterGivenToGit()) {
         return {};
     }
     return QStringList{QStringLiteral("--")} + m_pathFilter;
@@ -776,12 +835,19 @@ bool GitStatusListCtrl::isInPathFilter(const GitStatusEntry& entry) const
     if (m_pathFilter.isEmpty()) {
         return true;
     }
-    return std::ranges::any_of(m_pathFilter, [&entry](const QString& filter) {
-        const auto isUnder = [&filter](const QString& path) {
-            return !path.isEmpty() && (path == filter || path.startsWith(filter + QLatin1Char('/')));
-        };
-        return isUnder(entry.path) || isUnder(entry.origPath);
-    });
+    if (m_pathFilterSet.contains(QStringLiteral("."))) {
+        return true;
+    }
+    // A set and a walk up the path, as a selection may hold thousands of paths
+    const auto isUnder = [this](const QString& path) {
+        for (qsizetype end = path.size(); end > 0; end = path.lastIndexOf(QLatin1Char('/'), end - 1)) {
+            if (m_pathFilterSet.contains(path.left(end))) {
+                return true;
+            }
+        }
+        return false;
+    };
+    return isUnder(entry.path) || isUnder(entry.origPath);
 }
 
 } // namespace kgt

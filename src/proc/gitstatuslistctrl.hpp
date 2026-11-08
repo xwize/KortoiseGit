@@ -17,6 +17,7 @@
 #include "utils/error.hpp"
 
 #include <QPointer>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QTreeView>
@@ -208,6 +209,21 @@ public:
     [[nodiscard]] QList<GitStatusListEntry> checkedEntries() const;
 
     /**
+     * @returns Whether the list holds a file in conflict (CGitStatusListCtrl::GetConflictedCount).
+     */
+    [[nodiscard]] bool hasConflicts() const;
+
+    /**
+     * Selects the first file in conflict and shows it.
+     */
+    void selectFirstConflict();
+
+    /**
+     * @returns Whether a Revert or Resolved started from the context menu is changing the repository.
+     */
+    [[nodiscard]] bool isModifying() const;
+
+    /**
      * Ported from the IDGITLC_RESOLVECONFLICT entry and ResolveProgressCommand (ResolveWith::Current): asks, then
      * marks the selected conflicted files as resolved with git add -f, and reloads. Files not in conflict are
      * skipped.
@@ -276,6 +292,7 @@ private:
     void editConflict(const GitStatusListEntry& entry);
     void onResolveFinished();
     [[nodiscard]] const GitStatusListEntry *focusedEntry() const;
+    [[nodiscard]] bool isPathFilterGivenToGit() const;
     [[nodiscard]] QStringList pathSpec() const;
     [[nodiscard]] QString baseRevision() const;
     [[nodiscard]] bool isInPathFilter(const GitStatusEntry& entry) const;
@@ -286,6 +303,7 @@ private:
     QPointer<QLabel> m_statLabel;
     QString m_workingTree;
     QStringList m_pathFilter;
+    QSet<QString> m_pathFilterSet; // The same, to look paths up in
     std::unique_ptr<GitCall> m_statusCall;
     std::unique_ptr<GitCall> m_indexDiffCall; // The index against HEAD~1, while amending
     std::unique_ptr<GitCall> m_numStatCall;

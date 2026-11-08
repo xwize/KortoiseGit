@@ -45,6 +45,14 @@ public:
     ShellExt(QObject *parent, const QVariantList& args);
 
     /**
+     * The arguments that hand a selection to kortoisegitproc. A selection too long for a command line goes in a
+     * temporary file that kortoisegitproc deletes, as TortoiseGit always does (/pathfile, /deletepathfile).
+     * @param paths The selected paths.
+     * @returns The arguments, or nothing if the temporary file can't be written.
+     */
+    [[nodiscard]] static QStringList pathArguments(const QStringList& paths);
+
+    /**
      * @returns ".git", the entry whose presence marks a git working tree.
      */
     [[nodiscard]] QString fileName() const override;

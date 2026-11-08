@@ -16,11 +16,14 @@
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 #include "git/gitcall.hpp"
+#include "git/massivegittask.hpp"
 #include "gitstatuslistctrl.hpp"
 #include "gitstatuslistmodel.hpp"
 #include "utils/runtimeerror.hpp"
 
+#include <KGuiItem>
 #include <KLocalizedString>
+#include <KMessageBox>
 #include <KMessageWidget>
 
 #include <QCheckBox>
@@ -68,16 +71,8 @@ struct IndexTasks {
 };
 
 /**
- * @param path A path relative to the working tree root.
- * @returns It as a pathspec that matches only that path, whatever characters it holds.
- */
-QString literalPathSpec(const QString& path)
-{
-    return QStringLiteral(":(literal)") + path;
-}
-
-/**
- * Adds one command for a list of paths, as CMassiveGitTask runs one, if the list isn't empty.
+ * Adds one command for a list of paths, as CMassiveGitTask runs one, if the list isn't empty. The paths go in on stdin,
+ * so that no list is too long for a command line, and are taken literally, whatever characters they hold.
  * @param[in,out] steps Where to add it.
  * @param step The command: its arguments before the paths, and how it runs.
  * @param paths The paths, relative to the working tree root.
@@ -87,11 +82,18 @@ void addTask(QList<CommitStep>& steps, CommitStep step, const QStringList& paths
     if (paths.isEmpty()) {
         return;
     }
-    // update-index takes plain paths; the others take pathspecs, so make those literal
-    const bool takesPathSpecs = step.arguments.constFirst() != QLatin1String("update-index");
-    step.arguments.append(QStringLiteral("--"));
-    for (const QString& path : paths) {
-        step.arguments.append(takesPathSpecs ? literalPathSpec(path) : path);
+    if (step.arguments.constFirst() == QLatin1String("update-index")) {
+        // Takes plain paths, and no --pathspec-from-file
+        step.arguments << QStringLiteral("-z") << QStringLiteral("--stdin");
+        for (const QString& path : paths) {
+            step.input.append(path.toUtf8());
+            step.input.append('\0');
+        }
+    } else {
+        MassiveGitTask massiveTask(step.arguments);
+        massiveTask.setPaths(paths);
+        step.arguments = massiveTask.arguments();
+        step.input = massiveTask.pathSpecFile();
     }
     steps.append(std::move(step));
 }
@@ -104,7 +106,7 @@ void addTask(QList<CommitStep>& steps, CommitStep step, const QStringList& paths
  */
 CommitStep task(QLatin1StringView command, bool ignoreErrors = false, bool always = false)
 {
-    return CommitStep{.arguments = QString(command).split(QLatin1Char(' ')), .ignoreErrors = ignoreErrors, .always = always};
+    return CommitStep{.arguments = QString(command).split(QLatin1Char(' ')), .input = {}, .ignoreErrors = ignoreErrors, .always = always};
 }
 
 /**
@@ -332,7 +334,7 @@ bool CommitDlg::isCommitting() const
 
 void CommitDlg::commit()
 {
-    if (!m_okButton->isEnabled()) {
+    if (!m_okButton->isEnabled() || !confirmNoConflicts()) {
         return;
     }
     m_errorView->hide();
@@ -354,15 +356,36 @@ void CommitDlg::commit()
         commitArguments.append(QStringLiteral("--amend"));
     }
     commitArguments.append({QStringLiteral("-F"), m_messageFile->fileName()});
-    m_steps.append(CommitStep{.arguments = commitArguments, .ignoreErrors = false, .always = false});
+    m_steps.append(CommitStep{.arguments = commitArguments, .input = {}, .ignoreErrors = false, .always = false});
     m_steps.append(plan.restoreIndex);
     setBusy(true);
     runNextStep();
 }
 
+bool CommitDlg::confirmNoConflicts()
+{
+    // CCommitDlg::OnOK: conflict markers must not be committed by accident
+    if (!m_fileList->hasConflicts()) {
+        return true;
+    }
+    const auto answer = KMessageBox::warningTwoActions(this,
+                                                       i18n("One or more files are in a conflicted state."),
+                                                       QString(),
+                                                       KGuiItem(i18n("OK")),
+                                                       KGuiItem(i18n("Ignore")),
+                                                       QStringLiteral("CommitWarnOnUnresolved"),
+                                                       KMessageBox::Options());
+    if (answer == KMessageBox::PrimaryAction) {
+        m_fileList->selectFirstConflict();
+        return false;
+    }
+    return true;
+}
+
 void CommitDlg::reject()
 {
-    if (m_isCommitting) {
+    // Closing kills whatever is running, and a killed git can leave index.lock behind
+    if (m_isCommitting || m_fileList->isModifying()) {
         return;
     }
     QDialog::reject();
@@ -556,7 +579,7 @@ void CommitDlg::runNextStep()
         return;
     }
     m_runningStep = m_steps.takeFirst();
-    m_stepCall = Git(m_workingTree).runAsync(m_runningStep.arguments);
+    m_stepCall = Git(m_workingTree).runAsync(m_runningStep.arguments, RunMode::ReadWrite, m_runningStep.input);
     connect(m_stepCall.get(), &GitCall::finished, this, &CommitDlg::onStepFinished);
 }
 

@@ -510,6 +510,34 @@ private Q_SLOTS:
         QCOMPARE(dlg->commitList()->logModel()->rowCount(), 0);
         QVERIFY(!dlg->continueButton()->isEnabled());
     }
+
+    void aFailedFinishIsNotDone()
+    {
+        const RebaseSetup setup;
+        const QString oldFeature = setup.rev(QStringLiteral("feature"));
+        // The rebase runs on a detached HEAD; only moving the branch at the end needs this ref
+        QFile lock(setup.repo.filePath(QStringLiteral(".git/refs/heads/feature.lock")));
+        QVERIFY(lock.open(QIODevice::WriteOnly));
+        lock.close();
+        const std::unique_ptr<RebaseDlg> dlg = openDlg(setup.repo);
+        QVERIFY(dlg);
+        {
+            // Picks Abort when asked whether to retry moving the branch
+            const BoxAnswerer answerer;
+            QVERIFY(pressContinue(*dlg));
+            QCOMPARE(answerer.texts().size(), 1);
+        }
+        QCOMPARE(dlg->stage(), RebaseDlg::RebaseStage::Finish);
+        QCOMPARE(dlg->continueButton()->text(), QStringLiteral("Finish"));
+        QCOMPARE(setup.rev(QStringLiteral("feature")), oldFeature);
+
+        // Finish tries again and closes the dialog
+        QVERIFY(lock.remove());
+        QVERIFY(pressContinue(*dlg));
+        QCOMPARE(dlg->result(), int(QDialog::Accepted));
+        QCOMPARE(setup.headBranch(), QStringLiteral("feature"));
+        QVERIFY(setup.rev(QStringLiteral("feature")) != oldFeature);
+    }
 };
 
 QTEST_MAIN(RebaseTest)

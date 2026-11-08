@@ -41,7 +41,13 @@ QString head()
 bool isNewlyAdded(const Git& git, const QString& file)
 {
     return git
-        .run({QStringLiteral("status"), QStringLiteral("--porcelain"), QStringLiteral("--no-renames"), QStringLiteral("-z"), QStringLiteral("--"), file},
+        .run({QStringLiteral("--literal-pathspecs"),
+              QStringLiteral("status"),
+              QStringLiteral("--porcelain"),
+              QStringLiteral("--no-renames"),
+              QStringLiteral("-z"),
+              QStringLiteral("--"),
+              file},
              RunMode::ReadOnly)
         .startsWith("A  ");
 }
@@ -114,7 +120,7 @@ bool DiffCommand::execute()
     const QString& path = paths().constFirst();
     const QString path2 = value(QStringLiteral("path2"));
     if (path2.isEmpty() && QFileInfo(path).isDir()) {
-        throw RuntimeError({.category = ErrorCategory::CommandLine, .message = i18n("Diff does not support folders yet.")});
+        throw RuntimeError({.category = ErrorCategory::CommandLine, .message = i18n("Diff needs a file, not a folder.")});
     }
     return GitDiff::start(nullptr, invocation(path, path2, value(QStringLiteral("startrev")), value(QStringLiteral("endrev"))));
 }

@@ -157,7 +157,7 @@ QString repositoryRoot(const QString& path)
 namespace kgt
 {
 
-LogDlg::LogDlg(const QStringList& paths, QWidget *parent)
+LogDlg::LogDlg(const QStringList& paths, const QString& range, QWidget *parent)
     : QDialog(parent)
 {
     Q_ASSERT(!paths.isEmpty());
@@ -178,6 +178,7 @@ LogDlg::LogDlg(const QStringList& paths, QWidget *parent)
 
     m_logList->setWorkingTree(m_workingTree);
     m_logList->setPathFilter(m_pathFilter);
+    m_logList->setRange(range);
     refresh(false);
     m_logList->setFocus();
 }
@@ -255,6 +256,41 @@ QDateEdit *LogDlg::dateFrom() const
 QDateEdit *LogDlg::dateTo() const
 {
     return m_dateTo;
+}
+
+void LogDlg::setSelect(bool select)
+{
+    m_select = select;
+    m_buttons->setStandardButtons(select ? QDialogButtonBox::Ok | QDialogButtonBox::Cancel : QDialogButtonBox::Ok);
+    enableOkButton();
+}
+
+const QString& LogDlg::selectedHash() const
+{
+    return m_selectedHash;
+}
+
+QDialogButtonBox *LogDlg::buttonBox() const
+{
+    return m_buttons;
+}
+
+void LogDlg::accept()
+{
+    if (m_select) {
+        const int row = m_logList->selectedRow();
+        if (row < 0) {
+            return;
+        }
+        m_selectedHash = m_logList->logModel()->rev(row).hash;
+    }
+    QDialog::accept();
+}
+
+void LogDlg::enableOkButton()
+{
+    // CLogDlg::EnableOKButton, with m_bSelectionMustBeSingle
+    m_buttons->button(QDialogButtonBox::Ok)->setEnabled(!m_select || m_logList->selectedRow() >= 0);
 }
 
 bool LogDlg::eventFilter(QObject *watched, QEvent *event)
@@ -403,9 +439,10 @@ QLayout *LogDlg::createBottomRow()
     connect(m_view, &QPushButton::clicked, this, &LogDlg::onViewClicked);
     row->addStretch();
 
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok, this);
-    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
-    row->addWidget(buttons);
+    m_buttons = new QDialogButtonBox(QDialogButtonBox::Ok, this);
+    connect(m_buttons, &QDialogButtonBox::accepted, this, &LogDlg::accept);
+    connect(m_buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    row->addWidget(m_buttons);
     return row;
 }
 
@@ -793,6 +830,7 @@ QList<GitStatusListEntry> LogDlg::applyHidePaths(QList<GitStatusListEntry> entri
 
 void LogDlg::onSelectedRevChanged()
 {
+    enableOkButton();
     // CLogDlg::FillLogMessageCtrl
     m_changedFileList->setCurrentVersion({}, {});
     m_changedFileList->clear();

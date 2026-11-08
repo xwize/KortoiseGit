@@ -12,6 +12,7 @@
 
 #include <QBrush>
 #include <QDateEdit>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QImage>
@@ -1040,6 +1041,59 @@ private Q_SLOTS:
             const QString name = isDark ? QStringLiteral("logdlg-lanes-dark.png") : QStringLiteral("logdlg-lanes-light.png");
             QVERIFY(dlg.grab().save(QDir(screenshotDir).absoluteFilePath(name)));
         }
+    }
+
+    void anEmptyRepositoryHasAnEmptyLog()
+    {
+        const TestRepo repo;
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QCOMPARE(dlg.logList()->logModel()->rowCount(), 0);
+        QVERIFY(dlg.walkBehaviorButton()->isEnabled()); // The load counts as finished, not failed
+    }
+
+    void listsTheGivenRange()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("On main"));
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("topic")});
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("On topic"));
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("main")});
+
+        const LogDlg dlg({repo.path()}, QStringLiteral("refs/heads/topic"));
+        QVERIFY(waitForLog(dlg));
+        QCOMPARE(subjects(*dlg.logList()->logModel()), (QStringList{QStringLiteral("On topic"), QStringLiteral("On main")}));
+    }
+
+    void aPathIsNeverAPathspecPattern()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("odd*.txt"), "1");
+        repo.commitAll(QStringLiteral("Odd"));
+        repo.write(QStringLiteral("oddly.txt"), "1");
+        repo.commitAll(QStringLiteral("Other"));
+        const LogDlg dlg({repo.filePath(QStringLiteral("odd*.txt"))});
+        QVERIFY(waitForLog(dlg));
+        QCOMPARE(subjects(*dlg.logList()->logModel()), QStringList{QStringLiteral("Odd")});
+    }
+
+    void selectModeReturnsTheCommit()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("One"));
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        dlg.setSelect(true);
+        const QPushButton *okButton = dlg.buttonBox()->button(QDialogButtonBox::Ok);
+        QVERIFY(dlg.buttonBox()->button(QDialogButtonBox::Cancel));
+        QVERIFY(!okButton->isEnabled()); // CLogDlg::EnableOKButton: exactly one commit
+        selectRow(dlg, 0);
+        QVERIFY(okButton->isEnabled());
+        dlg.accept();
+        QCOMPARE(dlg.selectedHash(), dlg.logList()->logModel()->rev(0).hash);
     }
 };
 

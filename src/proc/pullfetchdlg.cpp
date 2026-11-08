@@ -214,10 +214,11 @@ PullFetchDlg::PullFetchDlg(const QString& workingDirectory, bool isPull, QWidget
     const KConfigGroup settings = KSharedConfig::openConfig()->group(settingsGroup());
 
     // TortoiseGit fetches and then opens RebaseDlg rather than running "git pull --rebase" (CAppUtils::Pull,
-    // RebaseAfterFetch), also when branch.<name>.rebase or pull.rebase asks for it. Until RebaseDlg exists
-    // (KORTOISEGIT-0018) the option stays off and disabled, and its "rebase" setting is neither read nor written.
+    // RebaseAfterFetch), also when branch.<name>.rebase or pull.rebase asks for it. Until that is ported the option
+    // isn't offered, and its "rebase" setting is neither read nor written.
     m_rebase->setChecked(false);
     m_rebase->setEnabled(false);
+    m_rebase->hide();
 
     m_remoteRadio->setChecked(true);
     m_other->setEnabled(false);
@@ -387,7 +388,7 @@ void PullFetchDlg::onSourceChanged()
     if (m_remoteRadio->isChecked()) {
         m_remote->setEnabled(true);
         m_other->setEnabled(false);
-        // TortoiseGit enables the rebase option here (KORTOISEGIT-0018)
+        // TortoiseGit enables the rebase option here
         if (!m_isPull) {
             m_remoteBranch->setEnabled(false);
         }

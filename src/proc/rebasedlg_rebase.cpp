@@ -258,7 +258,7 @@ bool RebaseDlg::continueConflict()
         plan = CommitDlg::planCommit(*m_fileListCtrl->statusModel());
     });
     for (const CommitStep& step : std::as_const(plan.prepareIndex)) {
-        if (!gitRun(step.arguments).ok && !step.ignoreErrors) {
+        if (!gitRun(step.arguments, step.input).ok && !step.ignoreErrors) {
             addLogString(QStringLiteral("An error occurred while updating the index."));
             return false;
         }
@@ -269,7 +269,7 @@ bool RebaseDlg::continueConflict()
     }
     // ReaddUnselectedAddedFilesAfterCommit
     for (const CommitStep& step : std::as_const(plan.restoreIndex)) {
-        std::ignore = gitRun(step.arguments);
+        std::ignore = gitRun(step.arguments, step.input);
     }
 
     const int row = m_currentRebaseIndex;
@@ -519,8 +519,10 @@ void RebaseDlg::rebaseThread()
             }
         } else if (stage == RebaseStage::Finish) {
             // TortoiseGit's OnRebaseUpdateUI finishes the rebase here, on the UI thread
-            std::ignore = finishRebase();
-            m_rebaseStage = RebaseStage::Done;
+            // TortoiseGit goes on to Done even if this failed; staying here says so, and Finish can try again
+            if (finishRebase()) {
+                m_rebaseStage = RebaseStage::Done;
+            }
             break;
         } else {
             break;
@@ -903,10 +905,14 @@ int RebaseDlg::handlePickSuccess(int row, const QString& hash, unsigned int mode
 bool RebaseDlg::finishRebase()
 {
     // FinishRebase
-    if (m_finishedRebase) {
-        return true;
+    if (!m_finishedRebase) {
+        m_finishedRebase = moveBranchToRebasedCommits();
     }
-    m_finishedRebase = true;
+    return m_finishedRebase;
+}
+
+bool RebaseDlg::moveBranchToRebasedCommits()
+{
     rewriteNotes();
     const QString head = hashOf(QStringLiteral("HEAD"));
     if (head.isEmpty()) {
