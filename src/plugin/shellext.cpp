@@ -377,7 +377,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_tagAction(new QAction(QIcon::fromTheme(QStringLiteral("tag")), i18n("Create &Tag..."), this))
     , m_mergeAbortAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Abort &Merge"), this))
     , m_gitMenu(std::make_unique<QMenu>())
-    , m_gitMenuAction(new QAction(i18n("&Git"), this))
+    , m_gitMenuAction(new QAction(QIcon::fromTheme(QStringLiteral("kortoisegit")), i18n("&Git"), this))
 {
     Q_UNUSED(args)
     m_gitMenuAction->setMenu(m_gitMenu.get());

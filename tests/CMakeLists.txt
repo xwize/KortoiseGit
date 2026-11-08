@@ -3,6 +3,7 @@
 
 set(kgt_tests
     adddlgtest
+    appicontest
     browserefsdlgtest
     clonetest
     cmdlineargstest
