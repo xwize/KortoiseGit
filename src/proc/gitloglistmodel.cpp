@@ -10,6 +10,9 @@
 
 #include <KLocalizedString>
 
+#include <QBrush>
+#include <QColor>
+#include <QFont>
 #include <QLocale>
 #include <QStringList>
 
@@ -80,6 +83,66 @@ void GitLogListModel::setFilesFailed(int row)
     Q_EMIT dataChanged(cell, cell); // The Actions column shows the error icon
 }
 
+void GitLogListModel::setRebaseMode(bool rebaseMode)
+{
+    beginResetModel();
+    m_rebaseMode = rebaseMode;
+    endResetModel();
+}
+
+bool GitLogListModel::isRebaseMode() const
+{
+    return m_rebaseMode;
+}
+
+void GitLogListModel::setRebaseAction(int row, unsigned int action)
+{
+    Q_ASSERT(row >= 0 && row < m_revs.size());
+    std::next(m_revs.begin(), row)->rebaseAction = action;
+    Q_EMIT dataChanged(index(row, 0), index(row, ColumnCount - 1));
+}
+
+void GitLogListModel::removeRev(int row)
+{
+    Q_ASSERT(row >= 0 && row < m_revs.size());
+    beginRemoveRows({}, row, row);
+    m_revs.removeAt(row);
+    endRemoveRows();
+    if (m_rebaseMode && row > 0) {
+        // The IDs above it count down from the row count
+        Q_EMIT dataChanged(index(0, ActionsColumn), index(row - 1, ActionsColumn));
+    }
+}
+
+void GitLogListModel::swapWithNext(int row)
+{
+    Q_ASSERT(row >= 0 && row + 1 < m_revs.size());
+    // Moving the lower row up keeps the IDs, which belong to the positions, where they are
+    beginMoveRows({}, row + 1, row + 1, {}, row);
+    m_revs.swapItemsAt(row, row + 1);
+    endMoveRows();
+    if (m_rebaseMode) {
+        Q_EMIT dataChanged(index(row, ActionsColumn), index(row + 1, ActionsColumn));
+    }
+}
+
+QString GitLogListModel::rebaseActionName(unsigned int action)
+{
+    if (action & GitRevLoglist::RebaseEdit) {
+        return i18n("Edit");
+    }
+    if (action & GitRevLoglist::RebaseSquash) {
+        return i18n("Squash");
+    }
+    if (action & GitRevLoglist::RebasePick) {
+        return i18n("Pick");
+    }
+    if (action & GitRevLoglist::RebaseSkip) {
+        return i18n("Skip");
+    }
+    return i18n("Unknown");
+}
+
 QList<TGitPath::Action> GitLogListModel::shownActions()
 {
     return {Action::Modified, Action::Added, Action::Deleted, Action::Replaced, Action::Unmerged};
@@ -103,9 +166,13 @@ QVariant GitLogListModel::data(const QModelIndex& index, int role) const
     const GitRevLoglist& rowRev = rev(index.row());
     switch (role) {
     case Qt::DisplayRole:
-        return displayData(rowRev, index.column());
+        return displayData(index);
+    case Qt::BackgroundRole:
+    case Qt::ForegroundRole:
+    case Qt::FontRole:
+        return rebaseRowData(rowRev, role);
     case Qt::ToolTipRole:
-        if (index.column() == ActionsColumn) {
+        if (index.column() == ActionsColumn && !m_rebaseMode) {
             return actionsToolTip(rowRev.actions);
         }
         return {};
@@ -129,9 +196,9 @@ QVariant GitLogListModel::headerData(int section, Qt::Orientation orientation, i
     }
     switch (section) {
     case GraphColumn:
-        return i18n("Graph");
+        return m_rebaseMode ? i18n("REBASE") : i18n("Graph");
     case ActionsColumn:
-        return i18n("Actions");
+        return m_rebaseMode ? i18n("ID") : i18n("Actions");
     case MessageColumn:
         return i18n("Message");
     case AuthorColumn:
@@ -143,9 +210,17 @@ QVariant GitLogListModel::headerData(int section, Qt::Orientation orientation, i
     }
 }
 
-QVariant GitLogListModel::displayData(const GitRevLoglist& rev, int column)
+QVariant GitLogListModel::displayData(const QModelIndex& index) const
 {
-    switch (column) {
+    const int row = index.row();
+    const GitRevLoglist& rev = this->rev(row);
+    switch (index.column()) {
+    case GraphColumn:
+        // LOGLIST_REBASE
+        return m_rebaseMode ? QVariant(rebaseActionName(rev.rebaseAction & GitRevLoglist::RebaseModeMask)) : QVariant();
+    case ActionsColumn:
+        // LOGLIST_ID: numbered from the oldest, the last row (m_IsOldFirst is off)
+        return m_rebaseMode ? QVariant(QString::number(m_revs.size() - row)) : QVariant();
     case MessageColumn:
         return rev.subject;
     case AuthorColumn:
@@ -153,6 +228,43 @@ QVariant GitLogListModel::displayData(const GitRevLoglist& rev, int column)
     case DateColumn:
         // CLoglistUtils::FormatDateAndTime with the system's short date and time format
         return QLocale().toString(rev.authorDate, QLocale::ShortFormat);
+    default:
+        return {};
+    }
+}
+
+QVariant GitLogListModel::rebaseRowData(const GitRevLoglist& rev, int role) const
+{
+    // CGitLogListBase::OnNMCustomdrawLoglist's colours for the rebase dialog
+    if (!m_rebaseMode) {
+        return {};
+    }
+    const unsigned int action = rev.rebaseAction;
+    switch (role) {
+    case Qt::BackgroundRole:
+        if (action & GitRevLoglist::RebaseSquash) {
+            return QBrush(QColor(156, 156, 156));
+        }
+        if (action & GitRevLoglist::RebaseEdit) {
+            return QBrush(QColor(200, 200, 128));
+        }
+        return {};
+    case Qt::ForegroundRole:
+        if (action & (GitRevLoglist::RebaseDone | GitRevLoglist::RebaseSkip)) {
+            return QBrush(QColor(128, 128, 128));
+        }
+        // Dark text on the light squash and edit colours, whatever the colour scheme
+        if (action & (GitRevLoglist::RebaseSquash | GitRevLoglist::RebaseEdit)) {
+            return QBrush(Qt::black);
+        }
+        return {};
+    case Qt::FontRole:
+        if (action & GitRevLoglist::RebaseCurrent) {
+            QFont bold;
+            bold.setBold(true);
+            return bold;
+        }
+        return {};
     default:
         return {};
     }

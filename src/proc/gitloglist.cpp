@@ -13,9 +13,11 @@
 #include <KLocalizedString>
 
 #include <QApplication>
+#include <QContextMenuEvent>
 #include <QHeaderView>
 #include <QIcon>
 #include <QKeyEvent>
+#include <QMenu>
 #include <QPainter>
 #include <QStyledItemDelegate>
 
@@ -141,7 +143,8 @@ public:
     {
         const auto *model = qobject_cast<const GitLogListModel *>(index.model());
         const int column = index.column();
-        if (!model || (column != GitLogListModel::ActionsColumn && column != GitLogListModel::MessageColumn)) {
+        const bool drawn = column == GitLogListModel::MessageColumn || (column == GitLogListModel::ActionsColumn && model && !model->isRebaseMode());
+        if (!model || !drawn) {
             QStyledItemDelegate::paint(painter, option, index);
             return;
         }
@@ -287,10 +290,148 @@ void GitLogList::reload()
     m_pending.clear();
     m_errorMessage.clear();
     m_model->clear();
-    m_logCall = Git(m_workingTree).runAsync(GitRevLoglist::logArguments(m_pathFilter), RunMode::ReadOnly);
+    m_logCall = Git(m_workingTree).runAsync(GitRevLoglist::logArguments(m_pathFilter, m_range, m_noMerges), RunMode::ReadOnly);
     connect(m_logCall.get(), &GitCall::outputAvailable, this, &GitLogList::onOutputAvailable);
     connect(m_logCall.get(), &GitCall::finished, this, &GitLogList::onLogFinished);
     viewport()->update();
+}
+
+void GitLogList::setRange(const QString& range, bool noMerges)
+{
+    m_range = range;
+    m_noMerges = noMerges;
+}
+
+void GitLogList::showText(const QString& text)
+{
+    if (GitCall *call = m_logCall.release()) {
+        call->disconnect(this);
+        call->deleteLater();
+    }
+    m_filesCall.reset();
+    m_filesQueue.clear();
+    m_filesRow = -1;
+    m_pending.clear();
+    m_model->clear();
+    m_errorMessage = text;
+    viewport()->update();
+}
+
+void GitLogList::setRebaseMenuEnabled(bool enabled)
+{
+    m_rebaseMenu = enabled;
+}
+
+bool GitLogList::isRebaseMenuEnabled() const
+{
+    return m_rebaseMenu;
+}
+
+bool GitLogList::maySetRebaseAction(int row, unsigned int action) const
+{
+    // CGitLogList::SetSelectedRebaseAction's conditions (cherry-pick mode is not ported)
+    const GitRevLoglist& rev = m_model->rev(row);
+    if (rev.rebaseAction & (GitRevLoglist::RebaseCurrent | GitRevLoglist::RebaseDone)) {
+        return false;
+    }
+    if (action == GitRevLoglist::RebaseSquash && (row == m_model->rowCount() - 1 || rev.parents.size() != 1)) {
+        return false;
+    }
+    return true;
+}
+
+QList<int> GitLogList::selectedRows() const
+{
+    QList<int> rows;
+    for (const QModelIndex& index : selectionModel()->selectedRows()) {
+        rows.append(index.row());
+    }
+    std::ranges::sort(rows);
+    return rows;
+}
+
+void GitLogList::setSelectedRebaseAction(unsigned int action)
+{
+    const QList<int> rows = selectedRows();
+    if (rows.isEmpty()) {
+        return;
+    }
+    for (const int row : rows) {
+        if (maySetRebaseAction(row, action)) {
+            m_model->setRebaseAction(row, action);
+        }
+    }
+    Q_EMIT rebaseActionChanged();
+}
+
+void GitLogList::setUnselectedRebaseAction(unsigned int action)
+{
+    const QList<int> selected = selectedRows();
+    for (int row = 0; row < m_model->rowCount(); ++row) {
+        if (!selected.contains(row) && maySetRebaseAction(row, action)) {
+            m_model->setRebaseAction(row, action);
+        }
+    }
+    Q_EMIT rebaseActionChanged();
+}
+
+void GitLogList::shiftSelectedRebaseAction()
+{
+    for (const int row : selectedRows()) {
+        const GitRevLoglist& rev = m_model->rev(row);
+        unsigned int action = rev.rebaseAction;
+        switch (action) {
+        case GitRevLoglist::RebasePick:
+            action = GitRevLoglist::RebaseSkip;
+            break;
+        case GitRevLoglist::RebaseSkip:
+            action = GitRevLoglist::RebaseEdit;
+            break;
+        case GitRevLoglist::RebaseEdit:
+            action = GitRevLoglist::RebaseSquash;
+            // TortoiseGit's condition, kept as it is: the last row with one parent goes back to Pick
+            if (row == m_model->rowCount() - 1 && rev.parents.size() == 1) {
+                action = GitRevLoglist::RebasePick;
+            }
+            break;
+        case GitRevLoglist::RebaseSquash:
+            action = GitRevLoglist::RebasePick;
+            break;
+        default:
+            continue;
+        }
+        m_model->setRebaseAction(row, action);
+    }
+}
+
+void GitLogList::contextMenuEvent(QContextMenuEvent *event)
+{
+    // The rebase entries of CGitLogListBase::OnContextMenu; the log's other entries are not ported yet
+    const QList<int> rows = selectedRows();
+    if (!m_rebaseMenu || rows.isEmpty()) {
+        return;
+    }
+    // pSelLogEntry: the entry the menu was opened on
+    const QModelIndex current = currentIndex();
+    const int selRow = current.isValid() && rows.contains(current.row()) ? current.row() : rows.constFirst();
+    const GitRevLoglist& selRev = m_model->rev(selRow);
+    if (selRev.rebaseAction & (GitRevLoglist::RebaseCurrent | GitRevLoglist::RebaseDone)) {
+        return;
+    }
+    const int lastRow = m_model->rowCount() - 1;
+    QMenu menu(this);
+    const auto addEntry = [&](const QString& icon, const QString& text, unsigned int action) {
+        menu.addAction(QIcon::fromTheme(icon), text, this, [this, action] {
+            setSelectedRebaseAction(action);
+        });
+    };
+    addEntry(QStringLiteral("dialog-ok-apply"), i18n("Pick"), GitRevLoglist::RebasePick);
+    if (rows.constFirst() != lastRow && rows.constLast() != lastRow && selRev.parents.size() == 1) {
+        addEntry(QStringLiteral("merge"), i18n("Squash (with commit below)"), GitRevLoglist::RebaseSquash);
+    }
+    addEntry(QStringLiteral("document-edit"), i18n("Edit"), GitRevLoglist::RebaseEdit);
+    addEntry(QStringLiteral("go-jump"), i18n("Skip"), GitRevLoglist::RebaseSkip);
+    menu.exec(event->globalPos());
 }
 
 bool GitLogList::isBusy() const

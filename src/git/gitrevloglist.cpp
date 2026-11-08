@@ -170,7 +170,7 @@ std::optional<GitStatusEntry> takeRawRecord(const QByteArray& output, qsizetype&
 namespace kgt
 {
 
-QStringList GitRevLoglist::logArguments(const QStringList& paths)
+QStringList GitRevLoglist::logArguments(const QStringList& paths, const QString& range, bool noMerges)
 {
     QStringList arguments{
         QStringLiteral("log"),
@@ -181,8 +181,14 @@ QStringList GitRevLoglist::logArguments(const QStringList& paths)
         QStringLiteral("--no-color"),
         QStringLiteral("--encoding=UTF-8"),
         logFormat,
-        QStringLiteral("--"),
     };
+    if (noMerges) {
+        arguments.append(QStringLiteral("--no-merges"));
+    }
+    if (!range.isEmpty()) {
+        arguments.append({QStringLiteral("--end-of-options"), range});
+    }
+    arguments.append(QStringLiteral("--"));
     arguments.append(paths);
     return arguments;
 }

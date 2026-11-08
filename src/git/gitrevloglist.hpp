@@ -72,6 +72,21 @@ struct GitRevLoglist {
         Failed, // git diff-tree failed
     };
 
+    /**
+     * What the rebase dialog does with the commit, and how far it got: CGitLogListBase's LOGACTIONS_REBASE_*, with
+     * the same values. One of Pick, Squash, Edit and Skip is the mode; Current and Done are added as it runs.
+     */
+    enum RebaseAction : unsigned int { // NOLINT(cppcoreguidelines-use-enum-class): Combined as bit flags, as in TortoiseGit
+        RebaseCurrent = 0x08000000, // LOGACTIONS_REBASE_CURRENT: being rebased now
+        RebasePick = 0x04000000, // LOGACTIONS_REBASE_PICK
+        RebaseSquash = 0x02000000, // LOGACTIONS_REBASE_SQUASH: squashed into the commit below
+        RebaseEdit = 0x01000000, // LOGACTIONS_REBASE_EDIT: stop to amend it
+        RebaseDone = 0x00800000, // LOGACTIONS_REBASE_DONE
+        RebaseSkip = 0x00400000, // LOGACTIONS_REBASE_SKIP: left out
+        RebaseMask = 0x0FC00000, // LOGACTIONS_REBASE_MASK
+        RebaseModeMask = 0x07C00000, // LOGACTIONS_REBASE_MODE_MASK
+    };
+
     QString hash; // The full commit hash
     QStringList parents; // The parents' hashes, first parent first; empty for a root commit
     QString authorName; // GitRev::m_AuthorName
@@ -83,15 +98,18 @@ struct GitRevLoglist {
     TGitPath::Actions actions; // GitRevLoglist::m_Action: what the commit did to its files; empty until known
     QList<GitRevFiles> files; // GitRevLoglist::m_Files: the changes against each parent, in parent order
     FilesState filesState = FilesState::NotLoaded; // Whether files and actions are known
+    unsigned int rebaseAction = 0; // GitRevLoglist::m_RebaseAction: RebaseAction bits, set by the rebase dialog
 
     bool operator==(const GitRevLoglist&) const = default;
 
     /**
      * @param paths Pathspecs relative to the working tree root that limit the log, or empty for the whole tree.
-     * @returns The arguments after "git" for a log of HEAD in TortoiseGit's default order (topological), in the
-     *          format takeRecords() reads.
+     * @param range The revisions to list, such as "upstream..branch" (CGit::GetLogCmd's range); empty for HEAD.
+     * @param noMerges Whether to leave merge commits out (CGit::LOG_INFO_NO_MERGE).
+     * @returns The arguments after "git" for a log in TortoiseGit's default order (topological), in the format
+     *          takeRecords() reads.
      */
-    [[nodiscard]] static QStringList logArguments(const QStringList& paths = {});
+    [[nodiscard]] static QStringList logArguments(const QStringList& paths = {}, const QString& range = {}, bool noMerges = false);
 
     /**
      * Parses the complete records at the start of git log's output, so the log can be shown while git still

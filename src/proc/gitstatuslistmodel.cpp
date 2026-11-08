@@ -93,6 +93,20 @@ QList<GitStatusListEntry> GitStatusListModel::makeEntries(const QList<GitStatusE
     return entries;
 }
 
+QList<GitStatusListEntry> GitStatusListModel::makeRevisionEntries(const QList<GitRevFiles>& files)
+{
+    QList<GitStatusListEntry> entries;
+    for (qsizetype parentNo = 0; parentNo < files.size(); ++parentNo) {
+        const GitRevFiles& diff = files.at(parentNo);
+        QList<GitStatusListEntry> parentEntries = makeEntries(diff.status, diff.numStat);
+        for (GitStatusListEntry& entry : parentEntries) {
+            entry.parentNo = static_cast<int>(parentNo);
+        }
+        entries.append(parentEntries);
+    }
+    return entries;
+}
+
 void GitStatusListModel::setEntries(const QList<GitStatusListEntry>& entries)
 {
     beginResetModel();

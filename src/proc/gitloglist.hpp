@@ -61,6 +61,51 @@ public:
     void setPathFilter(const QStringList& paths);
 
     /**
+     * Lists a revision range instead of HEAD's history (the range argument of CGitLogListBase::FillGitLog). Takes
+     * effect on the next reload().
+     * @param range Such as "upstream..branch", or empty for HEAD.
+     * @param noMerges Whether to leave merge commits out (CGit::LOG_INFO_NO_MERGE).
+     */
+    void setRange(const QString& range, bool noMerges = false);
+
+    /**
+     * Ported from CGitLogListBase::ShowText: abandons any load, empties the list and writes a text into it.
+     * @param text Translated text.
+     */
+    void showText(const QString& text);
+
+    /**
+     * Offers the rebase actions (Pick, Squash, Edit, Skip) in the context menu, as the rebase dialog turns on
+     * ID_REBASE_* in m_ContextMenuMask.
+     * @param enabled Whether they are offered.
+     */
+    void setRebaseMenuEnabled(bool enabled);
+
+    /**
+     * @returns Whether the rebase actions are offered.
+     */
+    [[nodiscard]] bool isRebaseMenuEnabled() const;
+
+    /**
+     * Ported from CGitLogList::SetSelectedRebaseAction: gives the selected commits a rebase action, leaving out
+     * those already done or being rebased, and refusing Squash for the last (oldest) commit and merge commits.
+     * @param action RebasePick, RebaseSquash, RebaseEdit or RebaseSkip.
+     */
+    void setSelectedRebaseAction(unsigned int action);
+
+    /**
+     * Ported from CGitLogList::SetUnselectedRebaseAction: the same for the commits not selected.
+     * @param action RebasePick, RebaseSquash, RebaseEdit or RebaseSkip.
+     */
+    void setUnselectedRebaseAction(unsigned int action);
+
+    /**
+     * Ported from CGitLogList::ShiftSelectedRebaseAction: steps the selected commits' actions on, Pick, Skip,
+     * Edit, Squash and back to Pick, as the space bar does.
+     */
+    void shiftSelectedRebaseAction();
+
+    /**
      * Empties the list and runs git log in the background, adding the commits page by page as git writes them
      * (CGitLogListBase::FetchLogAsync). Any load still running is abandoned.
      */
@@ -112,11 +157,19 @@ Q_SIGNALS:
      */
     void selectedRevChanged();
 
+    /**
+     * The user changed rebase actions (CGitLogListBase::m_RebaseActionMessage).
+     */
+    void rebaseActionChanged();
+
 protected:
     void keyPressEvent(QKeyEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
 
 private:
+    [[nodiscard]] bool maySetRebaseAction(int row, unsigned int action) const;
+    [[nodiscard]] QList<int> selectedRows() const;
     void onOutputAvailable();
     void onLogFinished();
     [[nodiscard]] bool takeRecords();
@@ -130,6 +183,9 @@ private:
     GitLogListModel *m_model;
     QString m_workingTree;
     QStringList m_pathFilter;
+    QString m_range; // The revisions listed, empty for HEAD
+    bool m_noMerges = false; // Whether merge commits are left out
+    bool m_rebaseMenu = false; // Whether the rebase actions are offered
     std::unique_ptr<GitCall> m_logCall;
     QByteArray m_pending; // Output of git log that doesn't make a whole record yet
     QString m_errorMessage; // Shown in the empty list after a failed load

@@ -222,17 +222,8 @@ void LogDlg::showFiles(const GitRevLoglist& rev)
     case GitRevLoglist::FilesState::Loaded:
         break;
     }
-    QList<GitStatusListEntry> entries;
-    for (qsizetype parentNo = 0; parentNo < rev.files.size(); ++parentNo) {
-        const GitRevFiles& diff = rev.files.at(parentNo);
-        QList<GitStatusListEntry> parentEntries = GitStatusListModel::makeEntries(diff.status, diff.numStat);
-        for (GitStatusListEntry& entry : parentEntries) {
-            entry.parentNo = static_cast<int>(parentNo);
-        }
-        entries.append(parentEntries);
-    }
     m_changedFileList->setCurrentVersion(rev.hash, rev.parents);
-    m_changedFileList->updateWithGitPathList(entries);
+    m_changedFileList->updateWithGitPathList(GitStatusListModel::makeRevisionEntries(rev.files));
 }
 
 } // namespace kgt

@@ -27,6 +27,7 @@
 
 class QCheckBox;
 class QLabel;
+class QMenu;
 class QSortFilterProxyModel;
 
 namespace kgt
@@ -38,8 +39,8 @@ class RevertProgressCommand;
 /**
  * The changed-files list. The owning dialog sets the working tree and the show flags, places the Select all
  * checkbox and the counter label, calls reload() and acts on checkedEntries(). Double-clicking a file compares it
- * with HEAD in git difftool; the context menu offers Compare with base, Revert..., Open, Open with... and Explore
- * to; F5 reloads.
+ * with HEAD in git difftool, or opens a conflicted one in git mergetool; the context menu offers Edit conflicts,
+ * Resolved, Compare with base, Revert..., Open, Open with... and Explore to; F5 reloads.
  */
 class GitStatusListCtrl : public QTreeView
 {
@@ -52,6 +53,8 @@ public:
      */
     enum class ContextMenu : unsigned int {
         Revert = 0x1, // GITSLC_POPREVERT
+        Conflict = 0x2, // GITSLC_POPCONFLICT: Edit conflicts, which runs git mergetool
+        Resolve = 0x4, // GITSLC_POPRESOLVE: Resolved
         All = 0xFFFFFFFF, // GITSLC_POPALL
     };
     Q_DECLARE_FLAGS(ContextMenus, ContextMenu)
@@ -192,6 +195,13 @@ public:
     [[nodiscard]] QList<GitStatusListEntry> checkedEntries() const;
 
     /**
+     * Ported from the IDGITLC_RESOLVECONFLICT entry and ResolveProgressCommand (ResolveWith::Current): asks, then
+     * marks the selected conflicted files as resolved with git add -f, and reloads. Files not in conflict are
+     * skipped.
+     */
+    void resolveSelected();
+
+    /**
      * @param entry An entry of this list.
      * @returns Its absolute path.
      */
@@ -220,6 +230,11 @@ Q_SIGNALS:
      */
     void reverted();
 
+    /**
+     * Resolved has finished, and the list is reloading. If it failed, the error has been shown.
+     */
+    void resolved();
+
 protected:
     void keyPressEvent(QKeyEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
@@ -242,6 +257,9 @@ private:
     void explore(const GitStatusListEntry& entry) const;
     void revertSelected();
     void onRevertFinished();
+    void addConflictEntries(QMenu& menu, int selectedCount);
+    void editConflict(const GitStatusListEntry& entry);
+    void onResolveFinished();
     [[nodiscard]] const GitStatusListEntry *focusedEntry() const;
     [[nodiscard]] QStringList pathSpec() const;
     [[nodiscard]] bool isInPathFilter(const GitStatusEntry& entry) const;
@@ -255,6 +273,7 @@ private:
     std::unique_ptr<GitCall> m_statusCall;
     std::unique_ptr<GitCall> m_numStatCall;
     std::unique_ptr<RevertProgressCommand> m_revertCommand; // The running revert, if any
+    std::unique_ptr<GitCall> m_resolveCall; // The running git add of Resolved, if any
     QList<GitStatusEntry> m_pendingStatus; // The status of the running load, waiting for its line counts
     QString m_errorMessage; // Shown in the empty list after a failed load
     QString m_emptyString; // Shown in the empty list after a load that found nothing
