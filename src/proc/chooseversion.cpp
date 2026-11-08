@@ -30,6 +30,9 @@ namespace
 using namespace Qt::StringLiterals;
 using namespace kgt;
 
+constexpr auto refsPrefix = "refs/"_L1;
+constexpr auto headsPrefix = "heads/"_L1;
+constexpr auto remotesPrefix = "remotes/"_L1;
 constexpr auto tagsPrefix = "tags/"_L1;
 constexpr auto peeledSuffix = "^{}"_L1;
 
@@ -168,14 +171,14 @@ QString ChooseVersion::versionName() const
     case Choice::Branch: {
         const QString name = m_branch->currentIndex() < 0 ? QString() : m_branch->currentText();
         if (!name.isEmpty() && !m_git.isBranchTagNameUnique(name)) {
-            return Git::refsHeadsPrefix + name;
+            return QStringLiteral("refs/heads/") + name;
         }
         return name;
     }
     case Choice::Tag: {
         const QString name = m_tags->currentIndex() < 0 ? QString() : m_tags->currentText();
         if (!name.isEmpty() && !m_git.isBranchTagNameUnique(name)) {
-            return Git::refsTagsPrefix + name;
+            return QStringLiteral("refs/tags/") + name;
         }
         return name;
     }
@@ -204,14 +207,14 @@ void ChooseVersion::selectRef(QString refName, bool refNameIsPossiblyNotFullName
         }
     }
 
-    if (refName.startsWith(Git::refsPrefix)) {
-        refName = refName.mid(Git::refsPrefix.size());
+    if (refName.startsWith(refsPrefix)) {
+        refName = refName.mid(refsPrefix.size());
     }
-    if (refName.startsWith(Git::headsPrefix)) {
-        refName = refName.mid(Git::headsPrefix.size());
+    if (refName.startsWith(headsPrefix)) {
+        refName = refName.mid(headsPrefix.size());
         setDefaultChoose(Choice::Branch);
         m_branch->setCurrentIndex(m_branch->findText(refName, Qt::MatchExactly | Qt::MatchCaseSensitive));
-    } else if (refName.startsWith(Git::remotesPrefix)) {
+    } else if (refName.startsWith(remotesPrefix)) {
         setDefaultChoose(Choice::Branch);
         m_branch->setCurrentIndex(m_branch->findText(refName, Qt::MatchExactly | Qt::MatchCaseSensitive));
     } else if (refName.startsWith(tagsPrefix)) {
@@ -223,7 +226,13 @@ void ChooseVersion::selectRef(QString refName, bool refNameIsPossiblyNotFullName
         m_tags->setCurrentIndex(m_tags->findText(refName, Qt::MatchExactly | Qt::MatchCaseSensitive));
     } else {
         setDefaultChoose(Choice::Version);
-        AppUtils::addString(m_version, refName);
+        // CHistoryCombo::AddString: the commit goes in once and is selected
+        int index = m_version->findText(refName, Qt::MatchExactly | Qt::MatchCaseSensitive);
+        if (index < 0) {
+            m_version->addItem(refName);
+            index = m_version->count() - 1;
+        }
+        m_version->setCurrentIndex(index);
     }
     Q_EMIT versionChanged();
 }

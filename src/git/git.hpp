@@ -13,7 +13,6 @@
 #include "git/gitcall.hpp"
 
 #include <QByteArray>
-#include <QLatin1StringView>
 #include <QString>
 #include <QStringList>
 
@@ -53,15 +52,6 @@ public:
      * @param workingDirectory The directory git runs in: a working tree or any directory inside one.
      */
     explicit Git(QString workingDirectory);
-
-    // Full ref names
-    static constexpr QLatin1StringView refsPrefix{"refs/"};
-    static constexpr QLatin1StringView refsHeadsPrefix{"refs/heads/"};
-    static constexpr QLatin1StringView refsRemotesPrefix{"refs/remotes/"};
-    static constexpr QLatin1StringView refsTagsPrefix{"refs/tags/"};
-    // Short ref names, as stripRefName() and git branch -a leave them
-    static constexpr QLatin1StringView headsPrefix{"heads/"};
-    static constexpr QLatin1StringView remotesPrefix{"remotes/"};
 
     /**
      * @returns The directory git runs in.

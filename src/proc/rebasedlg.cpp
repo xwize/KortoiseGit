@@ -89,6 +89,24 @@ QStringList splitAllTexts()
     };
 }
 
+/**
+ * Ported from CHistoryCombo::AddString: puts a text at the top of a combo box, once, and selects it.
+ * @param combo The combo box.
+ * @param text The text.
+ */
+void addString(QComboBox *combo, const QString& text)
+{
+    if (text.isEmpty()) {
+        return;
+    }
+    const int existing = combo->findText(text, Qt::MatchExactly | Qt::MatchCaseSensitive);
+    if (existing >= 0) {
+        combo->removeItem(existing);
+    }
+    combo->insertItem(0, text);
+    combo->setCurrentIndex(0);
+}
+
 } // namespace
 
 namespace kgt
@@ -408,7 +426,7 @@ void RebaseDlg::onBranchesLoaded()
         } else {
             // GetCurrentBranch(true): HEAD when detached
             const QString head = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(m_git.workingDirectory()));
-            AppUtils::addString(m_branchCtrl, head.isEmpty() ? QStringLiteral("HEAD") : head, 0);
+            addString(m_branchCtrl, head.isEmpty() ? QStringLiteral("HEAD") : head);
         }
 
         const BranchList upstreams = Git::parseBranchList(branchOutput, BranchAllF, false, !m_git.derefFetchHead().isEmpty());
@@ -416,7 +434,7 @@ void RebaseDlg::onBranchesLoaded()
         m_upstreamCtrl->addItems(upstreams.branches + Git::parseTagList(AppUtils::outputOrEmpty(*tagCall)));
         m_upstreamCtrl->setCurrentIndex(-1);
         if (!m_options.upstream.isEmpty()) {
-            AppUtils::addString(m_upstreamCtrl, m_options.upstream, 0);
+            addString(m_upstreamCtrl, m_options.upstream);
         } else {
             // Select pull-remote from current branch (GetRemoteTrackedBranchForHEAD)
             const QString current = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(m_git.workingDirectory()));
@@ -765,8 +783,8 @@ void RebaseDlg::onReverse()
     {
         const QSignalBlocker branchBlocker(m_branchCtrl);
         const QSignalBlocker upstreamBlocker(m_upstreamCtrl);
-        AppUtils::addString(m_branchCtrl, upstream, 0);
-        AppUtils::addString(m_upstreamCtrl, branch, 0);
+        addString(m_branchCtrl, upstream);
+        addString(m_upstreamCtrl, branch);
     }
     fetchLogList();
 }
@@ -780,7 +798,7 @@ void RebaseDlg::onBrowse()
     }
     {
         const QSignalBlocker blocker(m_upstreamCtrl);
-        AppUtils::addString(m_upstreamCtrl, Git::stripRefName(ref), 0);
+        addString(m_upstreamCtrl, Git::stripRefName(ref));
     }
     fetchLogList();
 }

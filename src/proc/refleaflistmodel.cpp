@@ -6,7 +6,6 @@
 
 #include "refleaflistmodel.hpp"
 
-#include "git/git.hpp"
 #include "shadowtree.hpp"
 
 #include <KLocalizedString>
@@ -87,7 +86,7 @@ int compareNoDesc(const QCollator& collator, int column, const ShadowTree& left,
 QString upstreamText(const ShadowTree& tree)
 {
     QString upstream = tree.ref.upstreamRef;
-    for (const QLatin1StringView prefix : {Git::refsPrefix, Git::remotesPrefix}) {
+    for (const QLatin1StringView prefix : {QLatin1StringView("refs/"), QLatin1StringView("remotes/")}) {
         if (upstream.startsWith(prefix)) {
             upstream = upstream.mid(prefix.size());
         }

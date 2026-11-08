@@ -9,9 +9,9 @@
 
 #include "pushdlg.hpp"
 
-#include "apputils.hpp"
 #include "utils/runtimeerror.hpp"
 
+#include <KGuiItem>
 #include <KLocalizedString>
 #include <KMessageBox>
 
@@ -55,6 +55,20 @@ void selectText(QComboBox *combo, const QString& text)
     } else {
         combo->setEditText(text);
     }
+}
+
+/**
+ * @param question A question.
+ * @param warning Whether it warns of something, such as a deletion, rather than only asking.
+ * @returns Whether the user answered Yes.
+ */
+bool askYesNo(const QString& question, bool warning)
+{
+    const KGuiItem yesItem(i18n("&Yes"));
+    const KGuiItem noItem(i18n("&No"));
+    const auto answer = warning ? KMessageBox::warningTwoActions(nullptr, question, QString(), yesItem, noItem, QString(), noNotify)
+                                : KMessageBox::questionTwoActions(nullptr, question, QString(), yesItem, noItem, QString(), noNotify);
+    return answer == KMessageBox::PrimaryAction;
 }
 
 } // namespace
@@ -145,11 +159,11 @@ void PushDlg::accept()
         return;
     }
     if (chosen.localBranch.isEmpty() && chosen.remoteBranch.isEmpty()) {
-        if (!AppUtils::askYesNo(nullptr, i18n("The local branch name and the remote branch name are empty.\nContinue?"), false)) {
+        if (!askYesNo(i18n("The local branch name and the remote branch name are empty.\nContinue?"), false)) {
             return;
         }
     } else if (chosen.localBranch.isEmpty()) {
-        if (!AppUtils::askYesNo(nullptr, i18n("The local branch/tag name is empty. This results in a remote removal.\nContinue?"), true)) {
+        if (!askYesNo(i18n("The local branch/tag name is empty. This results in a remote removal.\nContinue?"), true)) {
             return;
         }
     } else if (!chosen.remoteBranch.isEmpty() && !isBranchNameValid(chosen.remoteBranch)) {
@@ -167,7 +181,7 @@ void PushDlg::refresh(const QString& selectLocalBranch)
     m_remote->setCurrentIndex(-1);
 
     const QStringList branches =
-        lines(m_git.run({QStringLiteral("for-each-ref"), QStringLiteral("--format=%(refname:short)"), Git::refsHeadsPrefix}, RunMode::ReadOnly));
+        lines(m_git.run({QStringLiteral("for-each-ref"), QStringLiteral("--format=%(refname:short)"), QStringLiteral("refs/heads/")}, RunMode::ReadOnly));
     QString current;
     try {
         current = QString::fromUtf8(

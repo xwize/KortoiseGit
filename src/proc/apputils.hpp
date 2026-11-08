@@ -18,7 +18,6 @@
 #include <QString>
 #include <QStringList>
 
-class QComboBox;
 class QWidget;
 
 namespace kgt
@@ -26,7 +25,6 @@ namespace kgt
 
 class Git;
 class GitCall;
-class ProgressDlg;
 enum class ResetType;
 struct CreateBranchTagOptions;
 struct CreateBranchTagParams;
@@ -63,37 +61,11 @@ public:
     [[nodiscard]] static KConfigGroup generalSettings();
 
     /**
-     * Asks a yes/no question as TortoiseGit's CMessageBox::Show with MB_YESNO.
-     * @param parent The parent of the message box; may be null.
-     * @param question The question.
-     * @param warning Whether to show it as a warning (MB_ICONWARNING) rather than a question.
-     * @returns Whether the user answered Yes.
-     */
-    [[nodiscard]] static bool askYesNo(QWidget *parent, const QString& question, bool warning);
-
-    /**
-     * Ported from CHistoryCombo::AddString: adds an entry once and selects it. An existing entry after @p pos moves
-     * there; one at or before it stays where it is.
-     * @param combo The combo box.
-     * @param text The entry; nothing happens if it is empty.
-     * @param pos Where to put it; negative for the end, TortoiseGit's default.
-     */
-    static void addString(QComboBox *combo, const QString& text, int pos = -1);
-
-    /**
      * @param call A finished git call that lists branches or tags.
      * @returns Its output, or nothing if git failed: TortoiseGit's loading threads ignore these lists' errors too.
      * @throws RuntimeError for a failure other than git's.
      */
     [[nodiscard]] static QByteArray outputOrEmpty(const GitCall& call);
-
-    /**
-     * The m_PostCmdCallback of CAppUtils::DoPull and DoMerge: once the commands end, a failure that left conflicts
-     * tells the user how to resolve them.
-     * @param progress The dialog running the pull or merge.
-     * @param git The repository.
-     */
-    static void hintMergeConflictsOnFailure(ProgressDlg& progress, const Git& git);
 
     /**
      * @returns The app icon: the installed hicolor theme's, or the copy bundled in icons.qrc when running from build/bin.

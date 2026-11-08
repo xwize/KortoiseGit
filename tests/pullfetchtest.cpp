@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "apputils.hpp"
 #include "commands/fetchcommand.hpp"
 #include "commands/pullcommand.hpp"
 #include "progressdlg.hpp"
@@ -143,22 +142,6 @@ private Q_SLOTS:
         for (const QString& group : config->groupList()) {
             config->deleteGroup(group);
         }
-    }
-
-    void addStringKeepsOrMovesAnEntry()
-    {
-        QComboBox combo;
-        combo.addItems({QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c")});
-        AppUtils::addString(&combo, QString());
-        QCOMPARE(combo.currentIndex(), 0);
-        AppUtils::addString(&combo, QStringLiteral("b"));
-        QCOMPARE(combo.currentIndex(), 1);
-        AppUtils::addString(&combo, QStringLiteral("d"));
-        QCOMPARE(combo.currentIndex(), 3);
-        AppUtils::addString(&combo, QStringLiteral("c"), 0);
-        QCOMPARE(combo.count(), 4);
-        QCOMPARE(combo.itemText(0), QStringLiteral("c"));
-        QCOMPARE(combo.currentIndex(), 0);
     }
 
     void pullFastForward()

@@ -90,6 +90,24 @@ void saveHistory(const QComboBox *combo, const History& history)
 }
 
 /**
+ * Ported from CHistoryCombo::AddString: appends an entry unless it is there already, and selects it.
+ * @param combo A combo box.
+ * @param text The entry; nothing happens if it is empty.
+ */
+void addString(QComboBox *combo, const QString& text)
+{
+    if (text.isEmpty()) {
+        return;
+    }
+    int index = combo->findText(text, Qt::MatchExactly | Qt::MatchCaseSensitive);
+    if (index < 0) {
+        combo->addItem(text);
+        index = combo->count() - 1;
+    }
+    combo->setCurrentIndex(index);
+}
+
+/**
  * @param text A checkbox's label.
  * @param tristate Whether it has a third, "git's default", state.
  * @param parent Its parent.
@@ -317,7 +335,7 @@ void PullFetchDlg::refresh()
     m_configPullBranch = pullBranch;
 
     // Without an upstream, the branch of the same name
-    AppUtils::addString(m_remoteBranch, pullBranch.isEmpty() ? currentBranch : pullBranch);
+    addString(m_remoteBranch, pullBranch.isEmpty() ? currentBranch : pullBranch);
 
     if (pullRemote.isEmpty()) {
         pullRemote = historyGroup(QStringLiteral("PullRemote")).readEntry(m_git.workingDirectory(), QString());

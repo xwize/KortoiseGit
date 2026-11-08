@@ -37,6 +37,9 @@
 namespace
 {
 
+using namespace Qt::StringLiterals;
+
+constexpr auto remotesPrefix = "remotes/"_L1;
 constexpr auto newBranchSwitchToKey = "NewBranchSwitchTo";
 constexpr auto pushTagKey = "PushTag";
 constexpr KMessageBox::Options noNotify = KMessageBox::Options();
@@ -241,7 +244,7 @@ void CreateBranchTagDlg::onBranchSelectionChanged()
 {
     // Ported from CCreateBranchTagDlg::OnCbnSelchangeComboboxexBranch: a remote branch offers its name and Track
     const QString selected = m_chooseVersion->branchCombo()->currentText();
-    if (selected.startsWith(Git::remotesPrefix) && !m_isTag) {
+    if (selected.startsWith(remotesPrefix) && !m_isTag) {
         QString oldName = m_oldSelectBranch;
         if (const qsizetype start = oldName.lastIndexOf(QLatin1Char('/')); start >= 0) {
             oldName = oldName.mid(start + 1);
@@ -253,7 +256,7 @@ void CreateBranchTagDlg::onBranchSelectionChanged()
         if (m_name->text().isEmpty() || isDefault) {
             QString name = selected;
             // Past remotes/<remote>/
-            if (const qsizetype start = name.indexOf(QLatin1Char('/'), Git::remotesPrefix.size() + 1); start >= 0) {
+            if (const qsizetype start = name.indexOf(QLatin1Char('/'), remotesPrefix.size() + 1); start >= 0) {
                 name = name.mid(start + 1);
             }
             m_name->setText(name);
@@ -272,7 +275,7 @@ void CreateBranchTagDlg::onNameChanged()
     }
     const QString name = QLatin1Char('/') + m_name->text();
     const QString remoteName = m_chooseVersion->branchCombo()->currentText();
-    if (remoteName.startsWith(Git::remotesPrefix) && !remoteName.endsWith(name)) {
+    if (remoteName.startsWith(remotesPrefix) && !remoteName.endsWith(name)) {
         m_track->setCheckState(Qt::Unchecked);
     }
 }

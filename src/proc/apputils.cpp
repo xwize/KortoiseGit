@@ -26,7 +26,6 @@
 #include <KSharedConfig>
 
 #include <QClipboard>
-#include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
 #include <QGuiApplication>
@@ -57,35 +56,6 @@ KConfigGroup AppUtils::generalSettings()
     return KSharedConfig::openConfig()->group(QStringLiteral("General"));
 }
 
-bool AppUtils::askYesNo(QWidget *parent, const QString& question, bool warning)
-{
-    const KGuiItem yesItem(i18n("&Yes"));
-    const KGuiItem noItem(i18n("&No"));
-    // Like TortoiseGit's message boxes, these don't also raise a desktop notification
-    constexpr KMessageBox::Options noNotify = KMessageBox::Options();
-    const auto answer = warning ? KMessageBox::warningTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify)
-                                : KMessageBox::questionTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify);
-    return answer == KMessageBox::PrimaryAction;
-}
-
-void AppUtils::addString(QComboBox *combo, const QString& text, int pos)
-{
-    if (text.isEmpty()) {
-        return;
-    }
-    const int position = pos < 0 ? combo->count() : pos;
-    const int existing = combo->findText(text, Qt::MatchExactly | Qt::MatchCaseSensitive);
-    if (existing >= 0) {
-        if (existing <= position) {
-            combo->setCurrentIndex(existing);
-            return;
-        }
-        combo->removeItem(existing);
-    }
-    combo->insertItem(position, text);
-    combo->setCurrentIndex(position);
-}
-
 QByteArray AppUtils::outputOrEmpty(const GitCall& call)
 {
     try {
@@ -97,25 +67,6 @@ QByteArray AppUtils::outputOrEmpty(const GitCall& call)
         qCWarning(KGT_PROC) << "Loading the branches or tags failed:" << e.error().message;
         return {};
     }
-}
-
-void AppUtils::hintMergeConflictsOnFailure(ProgressDlg& progress, const Git& git)
-{
-    QObject::connect(&progress, &ProgressDlg::commandsFinished, &progress, [&progress, git] {
-        if (progress.gitStatus() == 0) {
-            return;
-        }
-        try {
-            if (git.hasWorkingTreeConflicts()) {
-                showMergeConflictsHint(&progress);
-            }
-        } catch (const RuntimeError& e) {
-            if (e.error().category != ErrorCategory::Git) {
-                throw;
-            }
-            KMessageBox::error(&progress, i18n("Checking for conflicts failed.") + QLatin1Char('\n') + e.error().message, QString(), KMessageBox::Options());
-        }
-    });
 }
 
 QIcon AppUtils::appIcon()
@@ -278,8 +229,9 @@ SwitchOptions AppUtils::switchOptions(const GitSwitchOptions& chosen)
 {
     // If refs/heads/ is not stripped, checkout will detach HEAD; checkout prefers branches on name clashes (with tags)
     QString ref = chosen.versionName;
-    if (ref.startsWith(Git::refsHeadsPrefix) && !chosen.branchOverride) {
-        ref = ref.mid(Git::refsHeadsPrefix.size());
+    constexpr QLatin1StringView headsPrefix("refs/heads/");
+    if (ref.startsWith(headsPrefix) && !chosen.branchOverride) {
+        ref = ref.mid(headsPrefix.size());
     }
     return SwitchOptions{
         .ref = ref,
@@ -373,7 +325,7 @@ bool AppUtils::createBranchTag(const QString& workingTree, const CreateBranchTag
 
     if (params.isTag) {
         if (options.push) {
-            push(workingTree, Git::refsTagsPrefix + options.branchTagName, parent);
+            push(workingTree, QStringLiteral("refs/tags/") + options.branchTagName, parent);
         }
         return true;
     }

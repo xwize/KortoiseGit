@@ -36,7 +36,9 @@ namespace
 
 using namespace Qt::StringLiterals;
 
+constexpr auto headsPrefix = "refs/heads/"_L1;
 constexpr auto originPrefix = "origin/"_L1;
+constexpr auto remotesPrefix = "remotes/"_L1;
 constexpr auto newBranchForTagKey = "SwitchToTagNewBranch";
 constexpr auto newBranchForCommitKey = "SwitchToCommitNewBranch";
 // CGit::GetShortHASHLength
@@ -194,8 +196,8 @@ void GitSwitchDlg::setDefaultName()
     qsizetype start = -1;
     if (version.startsWith(originPrefix)) {
         start = version.indexOf(QLatin1Char('/'), originPrefix.size() + 1);
-    } else if (version.startsWith(Git::remotesPrefix)) {
-        start = version.indexOf(QLatin1Char('/'), Git::remotesPrefix.size() + 1);
+    } else if (version.startsWith(remotesPrefix)) {
+        start = version.indexOf(QLatin1Char('/'), remotesPrefix.size() + 1);
     }
 
     bool branch = false;
@@ -207,8 +209,8 @@ void GitSwitchDlg::setDefaultName()
         branch = true;
         track = Qt::PartiallyChecked;
     } else {
-        if (versionName.startsWith(Git::refsHeadsPrefix)) {
-            version = versionName.mid(Git::refsHeadsPrefix.size());
+        if (versionName.startsWith(headsPrefix)) {
+            version = versionName.mid(headsPrefix.size());
         } else if (choice == ChooseVersion::Choice::Version) {
             version = version.left(shortHashLength);
         }
@@ -244,7 +246,7 @@ void GitSwitchDlg::onNewBranchChanged()
     }
     const QString name = QLatin1Char('/') + m_newBranch->text();
     const QString remoteName = m_chooseVersion->branchCombo()->currentText();
-    if (remoteName.startsWith(Git::remotesPrefix) && !remoteName.endsWith(name)) {
+    if (remoteName.startsWith(remotesPrefix) && !remoteName.endsWith(name)) {
         m_track->setCheckState(Qt::Unchecked);
     }
 }
