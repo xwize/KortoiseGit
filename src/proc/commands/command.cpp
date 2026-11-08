@@ -10,6 +10,7 @@
 
 #include "commands/command.hpp"
 
+#include "commands/aboutcommand.hpp"
 #include "commands/addcommand.hpp"
 #include "commands/branchcommand.hpp"
 #include "commands/clonecommand.hpp"
@@ -56,6 +57,7 @@ std::unique_ptr<kgt::Command> create()
 }
 
 constexpr std::array commands{
+    CommandEntry{.name = u"about", .create = &create<kgt::AboutCommand>},
     CommandEntry{.name = u"add", .create = &create<kgt::AddCommand>},
     CommandEntry{.name = u"branch", .create = &create<kgt::BranchCommand>},
     CommandEntry{.name = u"clone", .create = &create<kgt::CloneCommand>},

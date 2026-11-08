@@ -94,7 +94,7 @@ public:
      * @param items The selected items. They can still be in a working tree or a bare repository of their own,
      *        such as a repository's folder seen from its parent.
      * @returns The context menu entries TortoiseGit gives them (see menuActions()): "Git Clone..." and "Git Create
-     *          repository here..." for a folder in no repository.
+     *          repository here..." for a folder in no repository, and "About" for anything.
      */
     [[nodiscard]] QList<QAction *> outOfVersionControlActions(const KFileItemList& items) const override;
 
@@ -107,12 +107,21 @@ public:
 
 private:
     /**
+     * What a command is told about the selection.
+     */
+    enum class CommandPaths {
+        Selection, // Passed as --path or --pathfile
+        None, // Nothing, as CShellExt::InvokeCommand does for About
+    };
+
+    /**
      * Starts kortoisegitproc for the paths stored in @p action's data.
      * @param command TortoiseGit's command name, passed as --command.
      * @param action The triggered action; its data holds the selected paths.
      * @param switches Switches after the paths, such as --abort.
+     * @param commandPaths Whether the selected paths are passed to the command.
      */
-    void runCommand(const QString& command, const QAction *action, const QStringList& switches = {});
+    void runCommand(const QString& command, const QAction *action, const QStringList& switches = {}, CommandPaths commandPaths = CommandPaths::Selection);
 
     /**
      * Refreshes the overlays if the cache reported a change to an item of the folder shown.
@@ -164,6 +173,7 @@ private:
     QAction *m_branchAction;
     QAction *m_tagAction;
     QAction *m_mergeAbortAction;
+    QAction *m_aboutAction;
     std::unique_ptr<QMenu> m_gitMenu; // A QMenu's parent must be a widget, so it can't be a child of the plugin
     QAction *m_gitMenuAction;
     std::optional<GitFolderStatus> m_folderStatus; // Only touched on Dolphin's retrieval thread

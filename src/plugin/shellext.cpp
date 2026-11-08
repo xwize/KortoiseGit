@@ -373,6 +373,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_branchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Create &Branch..."), this))
     , m_tagAction(new QAction(QIcon::fromTheme(QStringLiteral("tag")), i18n("Create &Tag..."), this))
     , m_mergeAbortAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Abort &Merge"), this))
+    , m_aboutAction(new QAction(QIcon::fromTheme(QStringLiteral("help-about")), i18n("A&bout"), this))
     , m_gitMenu(std::make_unique<QMenu>())
     , m_gitMenuAction(new QAction(submenuIcon(), i18n("&KortoiseGit"), this))
 {
@@ -452,6 +453,11 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_addAction->setToolTip(i18n("Adds file(s) to Git control"));
     connect(m_addAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("add"), m_addAction);
+    });
+    m_aboutAction->setToolTip(i18n("Shows information about KortoiseGit"));
+    connect(m_aboutAction, &QAction::triggered, this, [this] {
+        // CShellExt::InvokeCommand: About is the one command given no paths
+        runCommand(QStringLiteral("about"), m_aboutAction, {}, CommandPaths::None);
     });
 
     m_refreshTimer.setSingleShot(true);
@@ -591,14 +597,15 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
             separator,
             entry(entries.createRepo, m_createRepoAction),
             entry(entries.add, m_addAction),
+            separator,
+            // MenuInfo's conditions are "folder" or "not a folder": always
+            entry(true, m_aboutAction),
         },
         topEntries,
         paths,
         *m_gitMenu);
-    // CShellExt::QueryContextMenu: no submenu when it would be empty
-    if (!m_gitMenu->isEmpty()) {
-        actions.append(m_gitMenuAction);
-    }
+    // About is always in it, so unlike in CShellExt::QueryContextMenu the submenu is never empty
+    actions.append(m_gitMenuAction);
     return actions;
 }
 
@@ -611,7 +618,7 @@ void ShellExt::watchForNewRepository(const QString& folder)
     m_newRepoWatch.addDir(m_watchedNewRepo);
 }
 
-void ShellExt::runCommand(const QString& command, const QAction *action, const QStringList& switches)
+void ShellExt::runCommand(const QString& command, const QAction *action, const QStringList& switches, CommandPaths commandPaths)
 {
     const QStringList paths = action->data().toStringList();
     Q_ASSERT(!paths.isEmpty());
@@ -623,13 +630,16 @@ void ShellExt::runCommand(const QString& command, const QAction *action, const Q
         return;
     }
 
-    const QStringList selection = pathArguments(paths);
-    if (selection.isEmpty()) {
-        Q_EMIT errorMessage(i18n("KortoiseGitProc launch failed"));
-        return;
-    }
     QStringList arguments{QStringLiteral("--command"), command};
-    arguments << selection << switches;
+    if (commandPaths == CommandPaths::Selection) {
+        const QStringList selection = pathArguments(paths);
+        if (selection.isEmpty()) {
+            Q_EMIT errorMessage(i18n("KortoiseGitProc launch failed"));
+            return;
+        }
+        arguments << selection;
+    }
+    arguments << switches;
 
     // Run from the first item's folder, as TortoiseGitProc gets Explorer's current folder
     const QFileInfo first(paths.constFirst());
