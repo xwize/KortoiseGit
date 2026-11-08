@@ -1,0 +1,17 @@
+<!DOCTYPE RCC>
+<!--
+SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+SPDX-License-Identifier: GPL-2.0-or-later
+-->
+<!-- The submenu's icon, carried by the plugin as TortoiseGit's shell extension carries IDI_APP in its own resources -->
+<RCC version="1.0">
+    <qresource prefix="/kortoisegitplugin">
+        <file alias="kortoisegit-16.png">../../data/icons/16-apps-kortoisegit.png</file>
+        <file alias="kortoisegit-22.png">../../data/icons/22-apps-kortoisegit.png</file>
+        <file alias="kortoisegit-32.png">../../data/icons/32-apps-kortoisegit.png</file>
+        <file alias="kortoisegit-48.png">../../data/icons/48-apps-kortoisegit.png</file>
+        <file alias="kortoisegit-64.png">../../data/icons/64-apps-kortoisegit.png</file>
+        <file alias="kortoisegit-128.png">../../data/icons/128-apps-kortoisegit.png</file>
+        <file alias="kortoisegit-256.png">../../data/icons/256-apps-kortoisegit.png</file>
+    </qresource>
+</RCC>
