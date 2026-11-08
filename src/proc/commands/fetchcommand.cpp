@@ -6,7 +6,7 @@
  * @file
  * Ported from TortoiseGit src/TortoiseProc/Commands/FetchCommand.cpp, CAppUtils::Fetch and DoFetch. The
  * post-command buttons (Retry, Show Log, Reset, Fetch, Rebase, Switch), the /remote: preselection and the PuTTY key
- * are left out for now; "Launch Rebase After Fetch" waits for RebaseDlg (KORTOISEGIT-0018).
+ * are left out for now.
  */
 
 #include "commands/fetchcommand.hpp"

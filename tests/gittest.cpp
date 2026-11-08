@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "git/git.hpp"
+#include "testrepo.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <QDir>
+#include <QElapsedTimer>
+#include <QFile>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -147,6 +150,42 @@ private Q_SLOTS:
 
 private:
     QTemporaryDir m_dir;
+
+    void aStuckGitIsKilledAtTheTimeout()
+    {
+        // A git that never answers: the plugin must not wait for it on Dolphin's UI thread
+        const QTemporaryDir bin;
+        QFile script(QDir(bin.path()).filePath(QStringLiteral("git")));
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write("#!/bin/sh\nexec sleep 30\n");
+        script.close();
+        QVERIFY(script.setPermissions(script.permissions() | QFileDevice::ExeOwner));
+        const QByteArray path = qgetenv("PATH");
+        qputenv("PATH", QByteArray(bin.path().toLocal8Bit() + ':' + path));
+
+        Git git(QDir::tempPath());
+        git.setRunTimeout(200);
+        QElapsedTimer elapsed;
+        elapsed.start();
+        bool threw = false;
+        try {
+            std::ignore = git.run({QStringLiteral("status")});
+        } catch (const RuntimeError& e) {
+            threw = e.error().category == ErrorCategory::Git && e.error().message.contains(QLatin1String("timed out"));
+        }
+        qputenv("PATH", path);
+        QVERIFY(threw);
+        QVERIFY(elapsed.elapsed() < 10000);
+    }
+
+    void knowsAnUnbornBranch()
+    {
+        const TestRepo repo;
+        QVERIFY(repo.git().isUnbornBranch());
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("One"));
+        QVERIFY(!repo.git().isUnbornBranch());
+    }
 };
 
 QTEST_GUILESS_MAIN(GitTest)

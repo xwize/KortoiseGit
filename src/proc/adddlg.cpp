@@ -36,11 +36,16 @@ using Show = GitStatusListModel::Show;
 
 /**
  * @param path An absolute path.
- * @returns It with symbolic links resolved, as git reports the working tree; unchanged if it doesn't exist.
+ * @returns It with symbolic links resolved, as git reports the working tree; unchanged if it doesn't exist. A link to
+ *          a file stays itself, in its resolved folder: git tracks the link, and the user chose the link.
  */
 QString resolved(const QString& path)
 {
     const QFileInfo info(path);
+    if (info.isSymLink() && !info.isDir()) {
+        const QString folder = QFileInfo(info.absolutePath()).canonicalFilePath();
+        return folder.isEmpty() ? info.absoluteFilePath() : QDir(folder).filePath(info.fileName());
+    }
     const QString canonical = info.canonicalFilePath();
     return canonical.isEmpty() ? info.absoluteFilePath() : canonical;
 }

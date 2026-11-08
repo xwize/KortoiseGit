@@ -5,6 +5,8 @@
 #include "chooseversion.hpp"
 #include "commands/command.hpp"
 #include "createbranchtagdlg.hpp"
+#include "gitloglist.hpp"
+#include "logdlg.hpp"
 #include "progressdlg.hpp"
 #include "pushdlg.hpp"
 #include "testrepo.hpp"
@@ -1089,6 +1091,26 @@ private Q_SLOTS:
         if (const QString dir = qEnvironmentVariable("KGT_SCREENSHOT_DIR"); !dir.isEmpty()) {
             QVERIFY(pixmap.save(QDir(dir).absoluteFilePath(QStringLiteral("createbranchtagdlg.png"))));
         }
+    }
+
+    void picksACommitFromTheLog()
+    {
+        const BranchSetup setup;
+        ChooseVersion chooser(setup.repo.git(), QStringLiteral("From"));
+        chooser.setDefaultChoose(ChooseVersion::Choice::Version);
+        QVERIFY(chooser.showLogButton()->isEnabled());
+        QTimer::singleShot(0, [] {
+            auto *log = qobject_cast<LogDlg *>(QApplication::activeModalWidget());
+            QVERIFY(log);
+            QVERIFY(QTest::qWaitFor([log] {
+                return !log->logList()->isBusy();
+            }));
+            log->logList()->setCurrentIndex(log->logList()->logModel()->index(0, 0));
+            log->accept();
+        });
+        chooser.showLogButton()->click();
+        QCOMPARE(chooser.versionCombo()->currentText(),
+                 QString::fromLatin1(setup.repo.git().run({QStringLiteral("rev-parse"), QStringLiteral("HEAD")})).trimmed());
     }
 };
 

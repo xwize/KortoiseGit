@@ -37,7 +37,7 @@ QByteArray fileContent()
  */
 QStringList difftool(const QStringList& arguments)
 {
-    return QStringList{QStringLiteral("difftool"), QStringLiteral("--no-prompt")} + arguments;
+    return QStringList{QStringLiteral("--literal-pathspecs"), QStringLiteral("difftool"), QStringLiteral("--no-prompt")} + arguments;
 }
 
 /**

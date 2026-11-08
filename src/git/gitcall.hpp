@@ -54,8 +54,9 @@ public:
 
     /**
      * Blocks until git exits, without an event loop: safe on a worker thread such as Dolphin's retrieval thread.
+     * @param timeoutMs How long to wait before killing git, which output() then reports; negative to wait for ever.
      */
-    void waitForFinished();
+    void waitForFinished(int timeoutMs = -1);
 
     /**
      * @returns Whether git has exited or failed to start, so output() may be called.
@@ -108,6 +109,7 @@ private:
     QByteArray m_stdout;
     QByteArray m_stderr;
     bool m_isFinished = false;
+    bool m_timedOut = false; // waitForFinished() gave up and killed git
 };
 
 } // namespace kgt

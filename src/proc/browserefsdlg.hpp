@@ -190,6 +190,12 @@ public:
     [[nodiscard]] static QStringList deleteRemoteRefsArguments(const QString& remote, const QStringList& branches);
 
     /**
+     * @param refName A full ref name.
+     * @returns The kortoisegitproc arguments that show the log of that ref (TortoiseGit's /range).
+     */
+    [[nodiscard]] QStringList showLogArguments(const QString& refName) const;
+
+    /**
      * Ported from SplitRemoteBranchName.
      * @param ref A remote-tracking ref, such as refs/remotes/origin/feature/x.
      * @param remotes The repository's remotes.
@@ -231,10 +237,10 @@ private:
     void showFilterMenu();
     void onListContextMenu(const QPoint& pos);
     void onListDoubleClicked();
-    void showLog(const QString& refName);
-    void deleteRefs(const VectorShadowTree& leaves);
-    [[nodiscard]] bool confirmDeleteRef(const VectorShadowTree& leaves);
-    bool doDeleteRefs(const VectorShadowTree& leaves);
+    void showLog(const QString& refName) const;
+    void deleteRefs(const QStringList& refNames);
+    [[nodiscard]] bool confirmDeleteRef(const QStringList& refNames);
+    bool doDeleteRefs(const QStringList& refNames);
     bool doDeleteRef(const QString& completeRefName);
     bool deleteRemoteRefs(const QString& remote, const QStringList& branches);
     [[nodiscard]] bool isFastForward(const QString& from, const QString& target) const;

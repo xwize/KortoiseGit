@@ -30,7 +30,7 @@ bool PrevDiffCommand::execute()
 {
     const QString& path = paths().constFirst();
     if (QFileInfo(path).isDir()) {
-        throw RuntimeError({.category = ErrorCategory::CommandLine, .message = i18n("Diff with previous version does not support folders yet.")});
+        throw RuntimeError({.category = ErrorCategory::CommandLine, .message = i18n("Diff with previous version needs a file, not a folder.")});
     }
     const std::optional<DiffInvocation> diff = invocation(path);
     if (!diff) {
@@ -46,7 +46,8 @@ std::optional<DiffInvocation> PrevDiffCommand::invocation(const QString& path)
     const QString file = gitPath(path);
     QByteArray output;
     try {
-        output = Git(root).run({QStringLiteral("log"),
+        output = Git(root).run({QStringLiteral("--literal-pathspecs"),
+                                QStringLiteral("log"),
                                 QStringLiteral("-n"),
                                 QStringLiteral("2"),
                                 QStringLiteral("--topo-order"),

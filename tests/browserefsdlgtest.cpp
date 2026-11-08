@@ -408,6 +408,21 @@ private Q_SLOTS:
 private:
     std::unique_ptr<TestRepo> m_upstream;
     std::unique_ptr<TestRepo> m_repo;
+
+    void showLogNamesTheRef()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("One"));
+        const BrowseRefsDlg dlg(repo.path());
+        QCOMPARE(dlg.showLogArguments(QStringLiteral("refs/heads/topic")),
+                 (QStringList{QStringLiteral("--command"),
+                              QStringLiteral("log"),
+                              QStringLiteral("--path"),
+                              repo.path(),
+                              QStringLiteral("--range"),
+                              QStringLiteral("refs/heads/topic")}));
+    }
 };
 
 QTEST_MAIN(BrowseRefsDlgTest)

@@ -21,6 +21,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
+#include <QMessageBox>
 
 #include <cstdio>
 #include <memory>
@@ -78,6 +79,8 @@ int run(const QCommandLineParser& parser)
     } catch (const RuntimeError& e) {
         qCCritical(KGT_PROC) << "Command" << parser.value(QStringLiteral("command")) << "failed:" << e.error().message;
         printError(e.error().message);
+        // Started from Dolphin there is no terminal to read the line above on
+        QMessageBox::critical(nullptr, i18n("KortoiseGit"), e.error().message);
         return exitFailure;
     }
 }

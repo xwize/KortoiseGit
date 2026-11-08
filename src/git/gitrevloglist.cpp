@@ -234,7 +234,11 @@ QStringList GitRevLoglist::logArguments(const QStringList& paths, const QString&
         arguments.append({QStringLiteral("--end-of-options"), range});
     }
     arguments.append(QStringLiteral("--"));
-    arguments.append(paths);
+    if (!paths.isEmpty()) {
+        // A file may be named like a pathspec, such as ":x" or "*"
+        arguments.prepend(QStringLiteral("--literal-pathspecs"));
+        arguments.append(paths);
+    }
     return arguments;
 }
 

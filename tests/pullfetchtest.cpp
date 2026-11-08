@@ -257,8 +257,8 @@ private Q_SLOTS:
         QCheckBox *prune = checkBox(dlg, QStringLiteral("Prune"));
         const QCheckBox *rebase = checkBox(dlg, QStringLiteral("&Launch Rebase After Fetch"));
         QVERIFY(noFF && ffOnly && tags && prune && rebase);
-        // Disabled until RebaseDlg (KORTOISEGIT-0018)
-        QVERIFY(!rebase->isEnabled());
+        // Not offered until the rebase after a fetch is ported
+        QVERIFY(rebase->isHidden());
         QCOMPARE(tags->checkState(), Qt::PartiallyChecked);
         QCOMPARE(prune->checkState(), Qt::PartiallyChecked);
         // remote.origin.tagopt isn't set

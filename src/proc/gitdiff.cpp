@@ -20,7 +20,7 @@ namespace
  */
 QStringList difftool()
 {
-    return {QStringLiteral("difftool"), QStringLiteral("--no-prompt")};
+    return {QStringLiteral("--literal-pathspecs"), QStringLiteral("difftool"), QStringLiteral("--no-prompt")};
 }
 
 /**

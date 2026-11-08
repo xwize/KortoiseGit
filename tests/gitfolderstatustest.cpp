@@ -5,6 +5,8 @@
 #include "testrepo.hpp"
 #include "utils/runtimeerror.hpp"
 
+#include <QDir>
+#include <QFile>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -345,6 +347,23 @@ private Q_SLOTS:
 
         const GitFolderStatus parentChanged = GitFolderStatus::fetch(repo.path() + QLatin1Char('/'));
         QCOMPARE(parentChanged.itemVersion(QStringLiteral("lib"), true), KVersionControlPlugin::LocallyModifiedUnstagedVersion);
+    }
+
+    void handlesANewlineInThePath()
+    {
+        // git prints these paths unquoted, one per line, so a newline used to shift the prefix into nonsense
+        const QTemporaryDir parent;
+        const QString root = QDir(parent.path()).filePath(QStringLiteral("repo\nname"));
+        QVERIFY(QDir().mkpath(root + QStringLiteral("/sub\ndir")));
+        const Git git(root);
+        std::ignore = git.run({QStringLiteral("init"), QStringLiteral("--quiet"), QStringLiteral("--initial-branch=main")});
+        QFile file(root + QStringLiteral("/sub\ndir/new.txt"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.close();
+
+        const GitFolderStatus status = GitFolderStatus::fetch(root + QStringLiteral("/sub\ndir"));
+        QCOMPARE(status.itemVersion(QStringLiteral("new.txt"), false), KVersionControlPlugin::UnversionedVersion);
+        QCOMPARE(status.indexFile(), root + QStringLiteral("/.git/index"));
     }
 };
 
