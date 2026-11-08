@@ -12,7 +12,6 @@
 
 #include "apputils.hpp"
 #include "git/git.hpp"
-#include "utils/runtimeerror.hpp"
 
 #include <KLocalizedString>
 #include <KMessageBox>
@@ -33,7 +32,6 @@
 #include <QSpinBox>
 #include <QVBoxLayout>
 
-#include <tuple>
 
 namespace
 {
@@ -56,27 +54,6 @@ QString unquoted(const QString& text)
         return text.mid(1, text.size() - 2);
     }
     return text;
-}
-
-/**
- * Ported from CGit::IsBranchNameValid.
- * @param name A branch name.
- * @returns Whether git accepts it.
- */
-bool isBranchNameValid(const QString& name)
-{
-    if (name.isEmpty() || name.startsWith(QLatin1Char('-')) || name == QLatin1String("HEAD")) {
-        return false;
-    }
-    try {
-        std::ignore = Git(QDir::tempPath()).run({QStringLiteral("check-ref-format"), QStringLiteral("refs/heads/") + name}, RunMode::ReadOnly);
-        return true;
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        return false;
-    }
 }
 
 } // namespace
@@ -242,7 +219,7 @@ void CloneDlg::accept()
     }
     // TortoiseGit shows these as balloons on the field
     QLineEdit *invalid = nullptr;
-    if (chosen.branch && !isBranchNameValid(chosen.branchName)) {
+    if (chosen.branch && !Git::isBranchNameValid(chosen.branchName)) {
         invalid = m_branchName;
     } else if (chosen.origin && !chosen.bare && chosen.originName.isEmpty()) {
         invalid = m_originName;

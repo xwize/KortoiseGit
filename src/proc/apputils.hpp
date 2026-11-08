@@ -20,6 +20,19 @@ namespace kgt
 {
 
 enum class ResetType;
+struct GitSwitchOptions;
+
+/**
+ * The arguments of CAppUtils::PerformSwitch: what git checkout switches to and how.
+ */
+struct SwitchOptions {
+    QString ref; // The branch, tag or commit to switch to
+    bool force = false; // -f
+    QString newBranch; // The branch to create, empty for none
+    bool branchOverride = false; // -B in place of -b
+    Qt::CheckState track = Qt::PartiallyChecked; // --track, --no-track or neither, with a new branch only
+    bool merge = false; // --merge
+};
 
 /**
  * Helpers shared by several dialogs and commands, TortoiseGit's CAppUtils.
@@ -94,6 +107,40 @@ public:
      * @returns True if the merge was aborted.
      */
     static bool mergeAbort(const QString& workingTree, QWidget *parent = nullptr);
+
+    /**
+     * Ported from CAppUtils::Switch: asks what to switch to in GitSwitchDlg, then switches.
+     * @param workingTree The working tree's root.
+     * @param initialRefName What the dialog selects first; empty for the current branch.
+     * @param parent Parent of the dialogs.
+     * @returns True if the switch succeeded.
+     */
+    static bool switchTo(const QString& workingTree, const QString& initialRefName = {}, QWidget *parent = nullptr);
+
+    /**
+     * The part of CAppUtils::Switch between the dialog and PerformSwitch. A branch keeps its refs/heads/ prefix
+     * only with "Override branch if exists", since checking out refs/heads/<name> would detach HEAD.
+     * @param chosen What the user chose in GitSwitchDlg.
+     * @returns PerformSwitch's arguments.
+     */
+    [[nodiscard]] static SwitchOptions switchOptions(const GitSwitchOptions& chosen);
+
+    /**
+     * PerformSwitch's command line.
+     * @param options What to switch to and how; options.ref must already be FixBranchName'd.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList switchArguments(const SwitchOptions& options);
+
+    /**
+     * Ported from CAppUtils::PerformSwitch, without its post-command buttons: runs git checkout in ProgressDlg.
+     * A switch with --merge that leaves conflicts counts as a failure.
+     * @param workingTree The working tree's root.
+     * @param options What to switch to and how.
+     * @param parent Parent of the progress dialog.
+     * @returns True if the switch succeeded and the dialog was closed with Close.
+     */
+    static bool performSwitch(const QString& workingTree, const SwitchOptions& options, QWidget *parent = nullptr);
 };
 
 } // namespace kgt

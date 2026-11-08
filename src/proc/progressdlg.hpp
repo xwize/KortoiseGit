@@ -19,6 +19,7 @@
 #include <QStringList>
 #include <QTimer>
 
+#include <functional>
 #include <memory>
 
 class QLabel;
@@ -58,6 +59,18 @@ public:
      * @param arguments The arguments after "git".
      */
     void addGitCmd(const QStringList& arguments);
+
+    /**
+     * Called when the commands end, before the result is shown, with the OR-ed exit status and an empty message.
+     * It may change the status, such as to report a success that left conflicts as a failure, and may set a
+     * message to append to the log. TortoiseGit's m_PostExecCallback.
+     */
+    using PostExecCallback = std::function<void(int& exitCode, QString& extraMsg)>;
+
+    /**
+     * @param callback Called when the commands end (see PostExecCallback). Must be set before they start.
+     */
+    void setPostExecCallback(PostExecCallback callback);
 
     /**
      * Starts the commands, if they haven't been started. Showing the dialog does this; tests may call it directly.
@@ -160,6 +173,7 @@ private:
     QPushButton *m_abortButton;
     QString m_workingDirectory;
     QList<QStringList> m_gitCmdList;
+    PostExecCallback m_postExecCallback;
     qsizetype m_nextCmd = 0; // Index in m_gitCmdList of the command to run next
     std::unique_ptr<QProcess> m_process; // The running command
     GitCliOutputParser m_parser;

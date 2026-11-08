@@ -108,9 +108,10 @@ private:
     void watchIndex(const QString& indexFile);
 
     /**
-     * The entries TortoiseGit's menu gives the selection: Clone, Pull, Fetch, Push, Commit, Show log, Revert, Create repository
-     * and Add, each where its MenuInfo condition holds. Decided afresh on every request from the items' own paths,
-     * as CShellExt::Initialize and QueryContextMenu do.
+     * The entries TortoiseGit's menu gives the selection: Clone, Pull, Fetch, Push, Commit, Show log, Browse
+     * References, Abort Merge, Revert, Switch/Checkout, Merge, Create repository and Add, each where its MenuInfo
+     * condition holds. Decided afresh on every request from the items' own paths, as CShellExt::Initialize and
+     * QueryContextMenu do.
      * @param selected The selected paths, or the folder shown when nothing is selected.
      * @returns The actions, in TortoiseGit's menu order, their data set to the paths.
      */
@@ -133,6 +134,7 @@ private:
     QAction *m_pushAction;
     QAction *m_cloneAction;
     QAction *m_refBrowseAction;
+    QAction *m_switchAction;
     QAction *m_mergeAction;
     QAction *m_mergeAbortAction;
     std::optional<GitFolderStatus> m_folderStatus; // Only touched on Dolphin's retrieval thread

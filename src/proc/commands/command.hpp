@@ -13,6 +13,7 @@
 
 #include "utils/result.hpp"
 
+#include <QMap>
 #include <QString>
 #include <QStringList>
 
@@ -84,6 +85,18 @@ public:
      */
     [[nodiscard]] bool hasKey(const QString& name) const;
 
+    /**
+     * @param values The options given with a value on the command line, such as "rev".
+     */
+    void setValues(const QMap<QString, QString>& values);
+
+    /**
+     * Ported from CCmdLineParser::GetVal.
+     * @param name An option's name, such as "rev".
+     * @returns Its value, or an empty string if it wasn't given.
+     */
+    [[nodiscard]] QString value(const QString& name) const;
+
 protected:
     /**
      * @param requirement What the command needs as its --path.
@@ -100,6 +113,7 @@ private:
     PathRequirement m_pathRequirement;
     QStringList m_paths;
     QStringList m_switches;
+    QMap<QString, QString> m_values;
 };
 
 /**

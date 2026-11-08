@@ -36,6 +36,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <utility>
 
 namespace
 {
@@ -140,6 +141,12 @@ void ProgressDlg::addGitCmd(const QStringList& arguments)
 {
     Q_ASSERT(!m_started);
     m_gitCmdList.append(arguments);
+}
+
+void ProgressDlg::setPostExecCallback(PostExecCallback callback)
+{
+    Q_ASSERT(!m_started);
+    m_postExecCallback = std::move(callback);
 }
 
 void ProgressDlg::start()
@@ -306,6 +313,16 @@ void ProgressDlg::finish(int status)
     m_gitStatus = status;
     m_progress->setValue(100);
     m_closeButton->setEnabled(true);
+
+    if (m_postExecCallback) {
+        QString extraMsg;
+        m_postExecCallback(m_gitStatus, extraMsg);
+        if (!extraMsg.isEmpty()) {
+            QTextCursor cursor(m_log->document());
+            cursor.movePosition(QTextCursor::End);
+            cursor.insertText(extraMsg, QTextCharFormat());
+        }
+    }
 
     const QString endTime = QLocale().toString(QDateTime::currentDateTime(), QLocale::ShortFormat);
     const qint64 elapsedMs = m_elapsed.elapsed();

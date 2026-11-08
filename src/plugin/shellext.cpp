@@ -231,6 +231,7 @@ struct MenuEntries {
     bool refBrowse = false;
     bool mergeAbort = false;
     bool revert = false;
+    bool switchTo = false;
     bool merge = false;
     bool createRepo = false;
     bool add = false;
@@ -271,6 +272,7 @@ MenuEntries menuEntries(const MenuState& state)
         .refBrowse = (state.folderInGit && state.onlyOne) || state.bareRepo,
         .mergeAbort = mergeAbort,
         .revert = (state.inGit && !state.normal) || state.folderInGit,
+        .switchTo = state.folderInGit && state.onlyOne,
         .merge = merge,
         .createRepo = outsideRepository || ignoredFolder,
         .add =
@@ -295,6 +297,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_pushAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-push")), i18n("Pus&h..."), this))
     , m_cloneAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-download")), i18n("Git Clone..."), this))
     , m_refBrowseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Browse References"), this))
+    , m_switchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("S&witch/Checkout..."), this))
     , m_mergeAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge..."), this))
     , m_mergeAbortAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Abort &Merge"), this))
 {
@@ -328,6 +331,10 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_refBrowseAction->setToolTip(i18n("Opens the Reference Browser dialog."));
     connect(m_refBrowseAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("refbrowse"), m_refBrowseAction);
+    });
+    m_switchAction->setToolTip(i18n("Switch/Checkout working tree to another branch/tag"));
+    connect(m_switchAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("switch"), m_switchAction);
     });
     m_mergeAction->setToolTip(i18n("Merges another branch"));
     connect(m_mergeAction, &QAction::triggered, this, [this] {
@@ -442,6 +449,7 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
     add(entries.refBrowse, m_refBrowseAction);
     add(entries.mergeAbort, m_mergeAbortAction);
     add(entries.revert, m_revertAction);
+    add(entries.switchTo, m_switchAction);
     add(entries.merge, m_mergeAction);
     add(entries.createRepo, m_createRepoAction);
     add(entries.add, m_addAction);

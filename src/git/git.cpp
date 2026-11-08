@@ -16,6 +16,7 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <tuple>
 #include <utility>
 
 namespace
@@ -164,6 +165,41 @@ bool Git::isBranchTagNameUnique(const QString& name) const
         }
         // Exit code 1: neither exists
         return true;
+    }
+}
+
+bool Git::branchTagExists(const QString& name, bool isBranch) const
+{
+    try {
+        const QByteArray output = run({QStringLiteral("show-ref"),
+                                       isBranch ? QStringLiteral("--heads") : QStringLiteral("--tags"),
+                                       QStringLiteral("--"),
+                                       QStringLiteral("refs/heads/") + name,
+                                       QStringLiteral("refs/tags/") + name},
+                                      RunMode::ReadOnly);
+        return !output.isEmpty();
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        // Exit code 1: none
+        return false;
+    }
+}
+
+bool Git::isBranchNameValid(const QString& name)
+{
+    if (name.isEmpty() || name.startsWith(QLatin1Char('-')) || name == QLatin1String("HEAD")) {
+        return false;
+    }
+    try {
+        std::ignore = Git(QDir::tempPath()).run({QStringLiteral("check-ref-format"), QStringLiteral("refs/heads/") + name}, RunMode::ReadOnly);
+        return true;
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        return false;
     }
 }
 
