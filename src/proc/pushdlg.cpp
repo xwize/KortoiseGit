@@ -75,7 +75,7 @@ bool askYesNo(const QString& question, bool warning)
 namespace kgt
 {
 
-PushDlg::PushDlg(const QString& workingTree, QWidget *parent)
+PushDlg::PushDlg(const QString& workingTree, QWidget *parent, const QString& selectLocalBranch)
     : QDialog(parent)
     , m_git(workingTree)
     , m_branchSource(new QComboBox(this))
@@ -124,7 +124,7 @@ PushDlg::PushDlg(const QString& workingTree, QWidget *parent)
     connect(m_forceWithLease, &QCheckBox::toggled, this, &PushDlg::updateOptionStates);
     connect(m_tags, &QCheckBox::toggled, this, &PushDlg::updateOptionStates);
 
-    refresh();
+    refresh(selectLocalBranch);
     resize(520, sizeHint().height());
 }
 
@@ -162,7 +162,7 @@ void PushDlg::accept()
     QDialog::accept();
 }
 
-void PushDlg::refresh()
+void PushDlg::refresh(const QString& selectLocalBranch)
 {
     const QStringList remotes = lines(m_git.run({QStringLiteral("remote")}, RunMode::ReadOnly));
     m_remote->clear();
@@ -188,7 +188,12 @@ void PushDlg::refresh()
         const QSignalBlocker blocker(m_branchSource);
         m_branchSource->clear();
         m_branchSource->addItems(branches);
-        selectText(m_branchSource, current);
+        if (selectLocalBranch.isEmpty()) {
+            selectText(m_branchSource, current);
+        } else {
+            // A ref such as refs/tags/v1 is not in the list of branches
+            m_branchSource->setEditText(selectLocalBranch);
+        }
     }
     selectRemoteBranch(m_branchSource->currentText());
 

@@ -38,6 +38,20 @@ private Q_SLOTS:
         TestRepo::isolateGit();
     }
 
+    void preselectedRefIsShown()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        repo.run({QStringLiteral("tag"), QStringLiteral("v1")});
+        addRemote(repo, QStringLiteral("origin"));
+
+        const PushOptions options = PushDlg(repo.path(), nullptr, QStringLiteral("refs/tags/v1")).options();
+        QCOMPARE(options.localBranch, QStringLiteral("refs/tags/v1"));
+        QCOMPARE(options.remote, QStringLiteral("origin"));
+        QCOMPARE(options.remoteBranch, QStringLiteral("refs/tags/v1"));
+    }
+
     void untrackedBranchOnlyRemote()
     {
         const TestRepo repo;

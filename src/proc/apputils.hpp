@@ -146,12 +146,12 @@ public:
     static bool performSwitch(const QString& workingTree, const SwitchOptions& options, QWidget *parent = nullptr);
 
     /**
-     * Ported from CAppUtils::CreateBranchTag, for branches: asks how in CreateBranchTagDlg, runs git branch,
-     * switches to the branch if asked to, and stores its description.
+     * Ported from CAppUtils::CreateBranchTag: asks how in CreateBranchTagDlg and runs git branch or git tag. A new
+     * branch is then switched to if asked to and gets its description; a new tag is offered for pushing if asked to.
      * @param workingTree The working tree's root or the bare repository.
      * @param params What the dialog starts with.
      * @param parent Parent of the dialogs.
-     * @returns True if the branch was created.
+     * @returns True if the branch or tag was created, whatever became of the push.
      */
     static bool createBranchTag(const QString& workingTree, const CreateBranchTagParams& params, QWidget *parent = nullptr);
 
@@ -161,6 +161,24 @@ public:
      * @returns The arguments after "git".
      */
     [[nodiscard]] static QStringList createBranchArguments(const CreateBranchTagOptions& options);
+
+    /**
+     * CAppUtils::CreateBranchTag's command line for a tag.
+     * @param options What the user chose in CreateBranchTagDlg; options.versionName must already be FixBranchName'd
+     *                and options.message trimmed. An empty message makes a lightweight tag.
+     * @param messageFile The file holding the message; ignored without a message.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList createTagArguments(const CreateBranchTagOptions& options, const QString& messageFile);
+
+    /**
+     * Ported from CAppUtils::Push: asks what to push in PushDlg and pushes it.
+     * @param workingTree The working tree's root or the bare repository.
+     * @param selectLocalBranch The local branch or ref to preselect; empty for the current branch.
+     * @param parent Parent of the dialogs.
+     * @returns True if the push ran and succeeded.
+     */
+    static bool push(const QString& workingTree, const QString& selectLocalBranch = {}, QWidget *parent = nullptr);
 
     /**
      * Ported from CAppUtils::UpdateBranchDescription: sets branch.<branch>.description, or removes it if the

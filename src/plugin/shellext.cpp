@@ -244,6 +244,7 @@ struct MenuEntries {
     bool switchTo = false;
     bool merge = false;
     bool branch = false;
+    bool tag = false;
     bool createRepo = false;
     bool add = false;
 };
@@ -302,6 +303,7 @@ MenuEntries menuEntries(const MenuState& state)
         .switchTo = oneFolderInGit,
         .merge = merge,
         .branch = oneFolderInGit,
+        .tag = oneFolderInGit,
         .createRepo = outsideRepository || ignoredFolder,
         .add =
             (state.inVersionedFolder && !state.inGit) || (state.inGit && state.folder) || state.ignored || (state.deleted && !state.folder && !state.onlyOne),
@@ -372,6 +374,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_switchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("S&witch/Checkout..."), this))
     , m_mergeAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge..."), this))
     , m_branchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Create &Branch..."), this))
+    , m_tagAction(new QAction(QIcon::fromTheme(QStringLiteral("tag")), i18n("Create &Tag..."), this))
     , m_mergeAbortAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Abort &Merge"), this))
     , m_gitMenu(std::make_unique<QMenu>())
     , m_gitMenuAction(new QAction(i18n("&Git"), this))
@@ -435,6 +438,10 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_branchAction->setToolTip(i18n("Creates a branch or tag"));
     connect(m_branchAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("branch"), m_branchAction);
+    });
+    m_tagAction->setToolTip(i18n("Creates a branch or tag"));
+    connect(m_tagAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("tag"), m_tagAction);
     });
     m_mergeAbortAction->setToolTip(i18n("Aborts a running merge."));
     connect(m_mergeAbortAction, &QAction::triggered, this, [this] {
@@ -559,6 +566,7 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
             entry(entries.switchTo, m_switchAction),
             entry(entries.merge, m_mergeAction),
             entry(entries.branch, m_branchAction),
+            entry(entries.tag, m_tagAction),
             separator,
             entry(entries.createRepo, m_createRepoAction),
             entry(entries.add, m_addAction),

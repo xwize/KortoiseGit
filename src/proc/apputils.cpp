@@ -7,6 +7,7 @@
 
 #include "apputils.hpp"
 
+#include "commands/pushcommand.hpp"
 #include "createbranchtagdlg.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
@@ -14,6 +15,7 @@
 #include "kortoisegitproc_debug.hpp"
 #include "mergeabortdlg.hpp"
 #include "progressdlg.hpp"
+#include "pushdlg.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KGuiItem>
@@ -25,6 +27,7 @@
 #include <QDir>
 #include <QGuiApplication>
 #include <QProcess>
+#include <QTemporaryFile>
 
 #include <tuple>
 
@@ -254,14 +257,32 @@ bool AppUtils::createBranchTag(const QString& workingTree, const CreateBranchTag
 
     CreateBranchTagOptions options = dlg.options();
     options.versionName = git.fixBranchName(options.versionName);
+
+    // A tag's message goes to git in a file, as SaveCommitUnicodeFile writes it; it must outlive git tag
+    QTemporaryFile messageFile(QDir::temp().absoluteFilePath(QStringLiteral("kortoisegit-tag-XXXXXX.txt")));
+    if (params.isTag) {
+        options.message = options.message.trimmed();
+        if (!options.message.isEmpty() && (!messageFile.open() || messageFile.write(options.message.toUtf8()) < 0 || !messageFile.flush())) {
+            KMessageBox::error(parent, i18n("Could not save tag message"), QString(), KMessageBox::Options());
+            return false;
+        }
+    }
+
     try {
-        std::ignore = git.run(createBranchArguments(options));
+        std::ignore = git.run(params.isTag ? createTagArguments(options, messageFile.fileName()) : createBranchArguments(options));
     } catch (const RuntimeError& e) {
         if (e.error().category != ErrorCategory::Git) {
             throw;
         }
         KMessageBox::error(parent, e.error().message, QString(), KMessageBox::Options());
         return false;
+    }
+
+    if (params.isTag) {
+        if (options.push) {
+            push(workingTree, QStringLiteral("refs/tags/") + options.branchTagName, parent);
+        }
+        return true;
     }
 
     if (options.switchToNewBranch) {
@@ -289,6 +310,35 @@ QStringList AppUtils::createBranchArguments(const CreateBranchTagOptions& option
     }
     arguments << QStringLiteral("--") << options.branchTagName << options.versionName;
     return arguments;
+}
+
+QStringList AppUtils::createTagArguments(const CreateBranchTagOptions& options, const QString& messageFile)
+{
+    QStringList arguments{QStringLiteral("tag")};
+    if (options.force) {
+        arguments.append(QStringLiteral("-f"));
+    }
+    if (options.sign) {
+        arguments.append(QStringLiteral("-s"));
+    }
+    // Without a message the tag is lightweight
+    if (!options.message.isEmpty()) {
+        arguments << QStringLiteral("-F") << messageFile;
+    }
+    arguments << QStringLiteral("--") << options.branchTagName << options.versionName;
+    return arguments;
+}
+
+bool AppUtils::push(const QString& workingTree, const QString& selectLocalBranch, QWidget *parent)
+{
+    PushDlg dlg(workingTree, parent, selectLocalBranch);
+    if (dlg.exec() != QDialog::Accepted) {
+        return false;
+    }
+    ProgressDlg progress(workingTree, parent);
+    progress.addGitCmd(PushCommand::pushArguments(dlg.options()));
+    progress.exec();
+    return progress.gitStatus() == 0;
 }
 
 bool AppUtils::updateBranchDescription(const Git& git, const QString& branch, QString description)

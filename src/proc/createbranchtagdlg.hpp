@@ -4,8 +4,8 @@
 
 /**
  * @file
- * Ported from TortoiseGit src/TortoiseProc/CreateBranchTagDlg.h (CCreateBranchTagDlg): the Create Branch dialog.
- * TortoiseGit's dialog also creates tags (m_bIsTag); only branch mode is built so far.
+ * Ported from TortoiseGit src/TortoiseProc/CreateBranchTagDlg.h (CCreateBranchTagDlg): the Create Branch and Create
+ * Tag dialog.
  */
 
 #pragma once
@@ -26,16 +26,17 @@ namespace kgt
 class ChooseVersion;
 
 /**
- * What the Create Branch dialog starts with: the parameters of CAppUtils::CreateBranchTag.
+ * What the dialog starts with: the parameters of CAppUtils::CreateBranchTag.
  */
 struct CreateBranchTagParams {
     QString initialRefName; // m_initialRefName: what to base it on; empty for HEAD
-    QString name; // m_BranchTagName: the new branch's name
+    QString name; // m_BranchTagName: the new branch's or tag's name
     bool switchNewBranch = false; // m_bSwitch: tick "Switch to new branch" whatever was remembered
+    bool isTag = false; // m_bIsTag: create a tag rather than a branch
 };
 
 /**
- * What the Create Branch dialog asks for: CCreateBranchTagDlg's members that CAppUtils::CreateBranchTag reads.
+ * What the dialog asks for: CCreateBranchTagDlg's members that CAppUtils::CreateBranchTag reads.
  */
 struct CreateBranchTagOptions {
     QString branchTagName; // m_BranchTagName: the name, trimmed
@@ -43,12 +44,14 @@ struct CreateBranchTagOptions {
     bool force = false; // m_bForce: -f
     Qt::CheckState track = Qt::PartiallyChecked; // m_bTrack: --track, --no-track, or neither
     bool switchToNewBranch = false; // m_bSwitch: switch to it afterwards
-    QString message; // m_Message: the branch's description
+    QString message; // m_Message: the branch's description or the tag's message
+    bool sign = false; // m_bSign: -s, tags only
+    bool push = false; // m_bPush: open the push dialog afterwards, tags only
 };
 
 /**
- * The Create Branch dialog: a name, a ChooseVersion for what to base it on, the options of git branch and a
- * description.
+ * The Create Branch and Create Tag dialog: a name, a ChooseVersion for what to base it on, the options of git branch
+ * or git tag, and a description or tag message.
  */
 class CreateBranchTagDlg : public QDialog
 {
@@ -74,8 +77,8 @@ public:
     [[nodiscard]] ChooseVersion *chooseVersion() const;
 
     /**
-     * Ported from CCreateBranchTagDlg::OnBnClickedOk: checks the name, remembers "Switch to new branch" and
-     * collects the options.
+     * Ported from CCreateBranchTagDlg::OnBnClickedOk: checks the message and name, remembers "Switch to new branch"
+     * or "Push" and collects the options.
      */
     void accept() override;
 
@@ -92,10 +95,12 @@ private:
     QCheckBox *m_track;
     QCheckBox *m_force;
     QCheckBox *m_switch;
+    QCheckBox *m_sign;
+    QCheckBox *m_push;
     QPlainTextEdit *m_message;
     QDialogButtonBox *m_buttons;
     QString m_oldSelectBranch; // m_OldSelectBranch: the branch selected before the current one
-    bool m_isTag = false; // m_bIsTag: always false until tag mode is built
+    bool m_isTag; // m_bIsTag: creates a tag rather than a branch
 };
 
 } // namespace kgt

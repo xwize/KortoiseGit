@@ -144,6 +144,7 @@ private:
     QAction *m_switchAction;
     QAction *m_mergeAction;
     QAction *m_branchAction;
+    QAction *m_tagAction;
     QAction *m_mergeAbortAction;
     std::unique_ptr<QMenu> m_gitMenu; // A QMenu's parent must be a widget, so it can't be a child of the plugin
     QAction *m_gitMenuAction;

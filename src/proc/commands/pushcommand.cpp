@@ -10,8 +10,8 @@
 
 #include "commands/pushcommand.hpp"
 
+#include "apputils.hpp"
 #include "git/git.hpp"
-#include "progressdlg.hpp"
 #include "pushdlg.hpp"
 
 namespace kgt
@@ -24,15 +24,7 @@ PushCommand::PushCommand()
 
 bool PushCommand::execute()
 {
-    const QString workingTree = Git::workingTreeRoot(paths().constFirst());
-    PushDlg dlg(workingTree);
-    if (dlg.exec() != QDialog::Accepted) {
-        return false;
-    }
-    ProgressDlg progress(workingTree);
-    progress.addGitCmd(pushArguments(dlg.options()));
-    progress.exec();
-    return progress.gitStatus() == 0;
+    return AppUtils::push(Git::workingTreeRoot(paths().constFirst()));
 }
 
 QStringList PushCommand::pushArguments(const PushOptions& options)
