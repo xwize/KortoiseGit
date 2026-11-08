@@ -4,7 +4,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 /**
- * Ported from TortoiseGit src/Git/GitStatusListCtrl.cpp (CGitStatusListCtrl::Show, GetCellText, SelectAll),
+ * Ported from TortoiseGit src/Git/GitStatusListCtrl.cpp (CGitStatusListCtrl::Show, GetCellText, SelectAll,
+ * PrepareGroups, SetItemGroup, the colours of OnNMCustomdraw),
  * src/Git/Git.cpp (CGit::GetWorkingTreeChanges) and src/Git/TGitPath.cpp (CTGitPath::GetActionName,
  * GetFileExtension).
  */
@@ -13,6 +14,7 @@
 
 #include <KLocalizedString>
 
+#include <QColor>
 #include <QFont>
 #include <QGuiApplication>
 #include <QIcon>
@@ -20,6 +22,7 @@
 #include <QPalette>
 
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <utility>
 
@@ -28,6 +31,43 @@ namespace
 
 using namespace kgt;
 using Action = TGitPath::Action;
+
+/**
+ * The group of a working tree entry, in PrepareGroups' order: the values are SetItemGroup's group ids.
+ */
+enum class StatusGroup : qsizetype {
+    ModifiedFiles,
+    NotVersionedFiles,
+    IgnoredFiles,
+    IgnoreLocalChanges,
+};
+
+/**
+ * The colour of a kind of entry.
+ */
+struct ActionColor {
+    TGitPath::Actions actions; // Any of these
+    QRgb color;
+};
+
+/**
+ * CGitStatusListCtrl::OnNMCustomdraw's colours, in its order: the first match wins, and anything else keeps the
+ * normal text colour. Its code decides, not the comment above it, which has replaced entries brown.
+ *
+ * TortoiseGit's hues (Colors.cpp) as pastels, one set for both themes in place of CTheme::GetThemeColor's lightness
+ * inversion, as branchLineColors in gitloglist.cpp does. OKLCh lightness 0.60 is a little below that palette's
+ * because these are file names: it is where the contrast is about equal on white and on Breeze Dark, near 4:1 on
+ * both. TortoiseGit's Modified and Renamed are both blue, and its Deleted is a darker Conflict, so Renamed moves
+ * towards cyan and Deleted towards brown to tell them apart.
+ */
+constexpr std::array<ActionColor, 6> actionColors{{
+    {.actions = Action::Unmerged, .color = 0xffc25d58}, // Conflict, red
+    {.actions = Action::Modified, .color = 0xff5581c1}, // Modified, blue
+    {.actions = Action::Added | Action::Copy, .color = 0xffa763ab}, // Added, purple
+    {.actions = Action::Deleted, .color = 0xffa27552}, // Deleted, brown
+    {.actions = Action::Replaced, .color = 0xff318ea2}, // Renamed, cyan-blue
+    {.actions = Action::Merged, .color = 0xff4d9351}, // Merged, green
+}};
 
 /**
  * @param entry A status entry.
@@ -55,6 +95,36 @@ int lineCountSortKey(const QString& text)
     bool isNumber = false;
     const int count = text.toInt(&isNumber);
     return isNumber ? count : -1;
+}
+
+/**
+ * @param actions What happened to a file.
+ * @returns The colour of its text, or an invalid QVariant for the normal one (CGitStatusListCtrl::OnNMCustomdraw).
+ */
+QVariant actionColor(TGitPath::Actions actions)
+{
+    const auto *const found = std::ranges::find_if(actionColors, [actions](const ActionColor& entry) {
+        return (actions & entry.actions) != 0;
+    });
+    return found == actionColors.cend() ? QVariant() : QColor::fromRgb(found->color);
+}
+
+/**
+ * @param actions What happened to a file.
+ * @returns Its group in a working tree's list (CGitStatusListCtrl::SetItemGroup).
+ */
+StatusGroup statusGroup(TGitPath::Actions actions)
+{
+    if (actions & (Action::SkipWorktree | Action::AssumeValid)) {
+        return StatusGroup::IgnoreLocalChanges;
+    }
+    if (actions & Action::Ignore) {
+        return StatusGroup::IgnoredFiles;
+    }
+    if (actions & Action::Unversioned) {
+        return StatusGroup::NotVersionedFiles;
+    }
+    return StatusGroup::ModifiedFiles;
 }
 
 } // namespace
@@ -175,6 +245,20 @@ const GitStatusListEntry *GitStatusListModel::entry(const QModelIndex& index) co
     return row < 0 ? nullptr : &m_entries.at(m_rows.at(row));
 }
 
+QModelIndex GitStatusListModel::entryIndex(int row, int column) const
+{
+    if (!hasGroups()) {
+        return index(row, column);
+    }
+    for (int group = 0; group < m_groups.size(); ++group) {
+        const qsizetype position = m_groups.at(group).rows.indexOf(row);
+        if (position >= 0) {
+            return index(static_cast<int>(position), column, index(group, 0));
+        }
+    }
+    return {};
+}
+
 QList<GitStatusListEntry> GitStatusListModel::checkedEntries() const
 {
     QList<GitStatusListEntry> checked;
@@ -281,7 +365,7 @@ int GitStatusListModel::rowCount(const QModelIndex& parent) const
     if (parent.internalId() != 0 || parent.column() != 0) {
         return 0;
     }
-    return static_cast<int>(m_groups.at(parent.row()).size());
+    return static_cast<int>(m_groups.at(parent.row()).rows.size());
 }
 
 int GitStatusListModel::columnCount(const QModelIndex& parent) const
@@ -327,7 +411,7 @@ QVariant GitStatusListModel::data(const QModelIndex& index, int role) const
         if (rowEntry.isGrayed) {
             return QGuiApplication::palette().brush(QPalette::Disabled, QPalette::Text);
         }
-        return {};
+        return actionColor(rowEntry.actions);
     case Qt::DecorationRole:
         if (index.column() == PathColumn) {
             // TortoiseGit shows the system icon for the file type
@@ -372,7 +456,8 @@ Qt::ItemFlags GitStatusListModel::flags(const QModelIndex& index) const
         return Qt::NoItemFlags;
     }
     if (!entry(index)) {
-        return Qt::ItemIsEnabled;
+        // Not enabled either, so QTreeView's keyboard navigation steps over it, as it does a list view's group header
+        return Qt::NoItemFlags;
     }
     Qt::ItemFlags itemFlags = Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemNeverHasChildren;
     if (m_hasCheckboxes && index.column() == PathColumn) {
@@ -430,19 +515,50 @@ void GitStatusListModel::rebuildRows()
 
 void GitStatusListModel::rebuildGroups()
 {
-    // CGitStatusListCtrl::PrepareGroups: a group per parent once any change is against a parent but the first
+    // CGitStatusListCtrl::PrepareGroups. Its bForce is left out: nothing in TortoiseGit passes it
     m_groups.clear();
     int maxParent = 0;
-    for (const qsizetype index : std::as_const(m_rows)) {
-        maxParent = std::max(maxParent, m_entries.at(index).parentNo);
+    bool hasGroupedKind = false;
+    const unsigned int groupedKinds =
+        m_show.toInt() & TGitPath::Actions(Action::Unversioned | Action::Ignore | Action::AssumeValid | Action::SkipWorktree).toInt();
+    for (const GitStatusListEntry& listEntry : std::as_const(m_entries)) {
+        maxParent = std::max(maxParent, listEntry.parentNo);
+        hasGroupedKind = hasGroupedKind || (listEntry.actions.toInt() & groupedKinds) != 0;
     }
-    if (maxParent == 0) {
+    if (maxParent == 0 && !hasGroupedKind) {
         return;
     }
-    m_groups.resize(std::max<qsizetype>(maxParent + 1, m_parentHeaders.size()));
+
+    QList<Group> groups = preparedGroups(maxParent);
     for (qsizetype row = 0; row < m_rows.size(); ++row) {
-        std::next(m_groups.begin(), m_entries.at(m_rows.at(row)).parentNo)->append(row);
+        // CGitStatusListCtrl::SetItemGroup. A commit's files are never unversioned or ignored, so a merge has only parents
+        const GitStatusListEntry& listEntry = m_entries.at(m_rows.at(row));
+        const qsizetype group = maxParent > 0 ? listEntry.parentNo : static_cast<qsizetype>(statusGroup(listEntry.actions));
+        std::next(groups.begin(), group)->rows.append(row);
     }
+    // A Windows list view doesn't show a group with no items
+    std::ranges::copy_if(groups, std::back_inserter(m_groups), [](const Group& group) {
+        return !group.rows.isEmpty();
+    });
+}
+
+QList<GitStatusListModel::Group> GitStatusListModel::preparedGroups(int maxParent) const
+{
+    QList<Group> groups;
+    if (maxParent > 0) {
+        for (int parent = 0; parent < std::max<qsizetype>(maxParent + 1, m_parentHeaders.size()); ++parent) {
+            groups.append({.header = parent < m_parentHeaders.size() ? m_parentHeaders.at(parent) : i18n("Diff with parent %1", parent + 1), .rows = {}});
+        }
+        return groups;
+    }
+    // In the order of StatusGroup
+    for (const QString& header : {i18n("Modified Files"),
+                                  i18n("Not Versioned Files"),
+                                  i18n("Ignored Files"),
+                                  i18n("Local changes ignored (assumed valid/unchanged or skip worktree flagged files)")}) {
+        groups.append({.header = header, .rows = {}});
+    }
+    return groups;
 }
 
 void GitStatusListModel::emitCheckStatesChanged()
@@ -473,23 +589,25 @@ qsizetype GitStatusListModel::listedRow(const QModelIndex& index) const
     if (index.internalId() == 0) {
         return -1;
     }
-    return m_groups.at(static_cast<qsizetype>(index.internalId() - 1)).at(index.row());
+    return m_groups.at(static_cast<qsizetype>(index.internalId() - 1)).rows.at(index.row());
 }
 
 QVariant GitStatusListModel::groupData(const QModelIndex& index, int role) const
 {
-    const int group = index.row();
     if (index.column() != PathColumn) {
         return {};
     }
     switch (role) {
     case Qt::DisplayRole:
-        return group < m_parentHeaders.size() ? m_parentHeaders.at(group) : i18n("Diff with parent %1", group + 1);
+        return m_groups.at(index.row()).header;
     case Qt::FontRole: {
         QFont font;
         font.setBold(true);
         return font;
     }
+    case Qt::ForegroundRole:
+        // A header row isn't enabled, and that shouldn't gray it out
+        return QGuiApplication::palette().brush(QPalette::Text);
     default:
         return {};
     }

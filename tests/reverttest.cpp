@@ -10,6 +10,7 @@
 #include "utils/runtimeerror.hpp"
 
 #include <QAbstractButton>
+#include <QAbstractProxyModel>
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QDialogButtonBox>
@@ -161,10 +162,11 @@ QStringList checkedPaths(const GitStatusListCtrl *list)
 void select(const GitStatusListCtrl *list, const QStringList& paths)
 {
     list->selectionModel()->clearSelection();
-    const QAbstractItemModel *model = list->model();
-    for (int row = 0; row < model->rowCount(); ++row) {
-        const QModelIndex index = model->index(row, 0);
-        const int position = static_cast<int>(paths.indexOf(index.data(GitStatusListModel::PathRole).toString()));
+    const GitStatusListModel *model = list->statusModel();
+    const auto *proxy = qobject_cast<const QAbstractProxyModel *>(list->model());
+    for (int row = 0; row < model->listedCount(); ++row) {
+        const QModelIndex index = proxy->mapFromSource(model->entryIndex(row));
+        const int position = static_cast<int>(paths.indexOf(model->entry(row).path));
         if (position < 0) {
             continue;
         }

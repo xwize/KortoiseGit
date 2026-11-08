@@ -700,8 +700,9 @@ private Q_SLOTS:
 
         // OnInitDialog starts with "unrelated paths" in gray
         QCOMPARE(files->rowCount(), 2);
-        QVERIFY(foreground(QStringLiteral("outside.txt")).canConvert<QBrush>());
-        QVERIFY(!foreground(QStringLiteral("dir/inside.txt")).isValid());
+        const QBrush gray = QGuiApplication::palette().brush(QPalette::Disabled, QPalette::Text);
+        QCOMPARE(foreground(QStringLiteral("outside.txt")).value<QBrush>(), gray);
+        QVERIFY(foreground(QStringLiteral("dir/inside.txt")).value<QBrush>() != gray);
 
         QAction *hide = findAction(dlg.viewMenu(), QStringLiteral("Hide Unrelated Changed Paths"));
         hide->trigger();
@@ -712,7 +713,7 @@ private Q_SLOTS:
         hide->trigger(); // Off again: neither hidden nor gray
         QVERIFY(waitForFiles(dlg));
         QCOMPARE(files->rowCount(), 2);
-        QVERIFY(!foreground(QStringLiteral("outside.txt")).isValid());
+        QVERIFY(foreground(QStringLiteral("outside.txt")).value<QBrush>() != gray);
     }
 
     void labelsHiddenPerCategory()

@@ -47,8 +47,10 @@ struct GitStatusListEntry {
  * The status list's rows: the entries the show flags let through, each with a checkbox. The check state of every
  * path is remembered across reloads and changes of the show flags, as TortoiseGit's m_mapFilenameToChecked does.
  *
- * The list is flat, except for a merge commit's files compared with more than one parent: those are grouped
- * under a header row per parent, as CGitStatusListCtrl::PrepareGroups does, and the entries are its children.
+ * The list is flat until CGitStatusListCtrl::PrepareGroups' conditions hold: unversioned, ignored or assume-valid /
+ * skip-worktree files are shown and there are some, or a merge commit's files are compared with more than one
+ * parent. Then the entries are the children of header rows, one per group, and groups with no entries have no row,
+ * as a Windows list view hides them. TortoiseGit's changelist groups are not ported.
  */
 class GitStatusListModel : public QAbstractItemModel
 {
@@ -167,14 +169,14 @@ public:
     [[nodiscard]] const QList<GitStatusListEntry>& allEntries() const;
 
     /**
-     * Names the groups of a commit's files, one per parent (IDS_STATUSLIST_GROUP_DIFFWITHPARENT). The list is
-     * grouped only when an entry is against a parent other than the first.
+     * Names the groups of a commit's files, one per parent (IDS_STATUSLIST_GROUP_DIFFWITHPARENT). They are used
+     * only when an entry is against a parent other than the first.
      * @param headers The header of each parent's group, in parent order; empty for no groups.
      */
     void setParentHeaders(const QStringList& headers);
 
     /**
-     * @returns Whether the entries are grouped by parent.
+     * @returns Whether the entries are grouped under header rows.
      */
     [[nodiscard]] bool hasGroups() const;
 
@@ -194,6 +196,19 @@ public:
      * @returns The entry shown there, or nullptr for a group header.
      */
     [[nodiscard]] const GitStatusListEntry *entry(const QModelIndex& index) const;
+
+    /**
+     * @param row Which listed entry, from 0 to listedCount().
+     * @param column A column.
+     * @returns The model index showing it, under its group header if the list is grouped.
+     */
+    [[nodiscard]] QModelIndex entryIndex(int row, int column = PathColumn) const;
+
+    /**
+     * @param entry An entry of this model.
+     * @returns Whether it is checked.
+     */
+    [[nodiscard]] bool isChecked(const GitStatusListEntry& entry) const;
 
     /**
      * @returns The listed entries that are checked, in row order.
@@ -252,19 +267,27 @@ Q_SIGNALS:
     void checkedCountChanged();
 
 private:
+    /**
+     * A header row and the entries under it.
+     */
+    struct Group {
+        QString header;
+        QList<qsizetype> rows; // The index in m_rows of each entry
+    };
+
     void rebuildRows();
     void rebuildGroups();
     void emitCheckStatesChanged();
     [[nodiscard]] qsizetype listedRow(const QModelIndex& index) const;
     [[nodiscard]] QVariant groupData(const QModelIndex& index, int role) const;
-    [[nodiscard]] bool isChecked(const GitStatusListEntry& entry) const;
+    [[nodiscard]] QList<Group> preparedGroups(int maxParent) const;
     [[nodiscard]] QVariant displayData(const GitStatusListEntry& entry, int column) const;
     [[nodiscard]] static QVariant sortData(const GitStatusListEntry& entry, int column);
 
     QList<GitStatusListEntry> m_entries;
     QList<qsizetype> m_rows; // TortoiseGit's m_arListArray: the index in m_entries of each listed row
     QStringList m_parentHeaders; // The header of each parent's group
-    QList<QList<qsizetype>> m_groups; // When grouped: the index in m_rows of each entry, per parent
+    QList<Group> m_groups; // When grouped: the groups that have entries, in display order
     QHash<QString, bool> m_checkedByPath; // TortoiseGit's m_mapFilenameToChecked
     QSet<QString> m_directFiles; // TortoiseGit's m_setDirectFiles
     ShowFlags m_show;
