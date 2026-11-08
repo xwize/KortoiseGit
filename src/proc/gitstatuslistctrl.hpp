@@ -265,7 +265,7 @@ private:
     void onDoubleClicked(const QModelIndex& index);
     [[nodiscard]] QList<GitStatusListEntry> selectedEntries() const;
     void startDiff(const GitStatusListEntry& entry);
-    [[nodiscard]] QStringList revisionDiffArguments(int parentNo) const;
+    [[nodiscard]] QString parentRevision(int parentNo) const;
     void showGroups();
     void open(const GitStatusListEntry& entry);
     void openWith(const GitStatusListEntry& entry);

@@ -153,6 +153,7 @@ WcStatus itemStatus(const QString& path, bool isDir, const QString& topDir)
  */
 struct MenuState {
     bool onlyOne = false; // ITEMIS_ONLYONE: one item
+    bool twoFiles = false; // ITEMIS_TWO without ITEMIS_FOLDER: two items, neither a folder
     bool folder = false; // ITEMIS_FOLDER
     bool inGit = false; // ITEMIS_INGIT: in a working tree and versioned
     bool folderInGit = false; // ITEMIS_FOLDERINGIT: a folder in a working tree, versioned or not
@@ -211,6 +212,8 @@ MenuState menuState(const QStringList& paths)
     }
 
     state.onlyOne = paths.size() == 1;
+    // Both items are checked, unlike ITEMIS_FOLDER: comparing folders needs dialogs that aren't ported
+    state.twoFiles = paths.size() == 2 && !isDir && !QFileInfo(paths.constLast()).isDir();
     if (state.onlyOne && isDir) {
         state.folder = true;
         state.inaccessible = !state.bareRepo && !state.inVersionedFolder && QFileInfo::exists(QDir(first).filePath(QStringLiteral(".git")));
@@ -227,6 +230,8 @@ struct MenuEntries {
     bool fetch = false;
     bool push = false;
     bool commit = false;
+    bool diff = false;
+    bool prevDiff = false;
     bool log = false;
     bool refBrowse = false;
     bool rebase = false;
@@ -252,6 +257,17 @@ std::pair<bool, bool> mergeEntries(const MenuState& state)
 }
 
 /**
+ * @param state The selection's state.
+ * @returns MenuInfo's conditions for Diff and Diff with previous version. MenuInfo also offers them on one folder,
+ *          for dialogs that aren't ported yet.
+ */
+std::pair<bool, bool> diffEntries(const MenuState& state)
+{
+    const bool oneVersionedFile = state.inGit && state.onlyOne && !state.folder;
+    return {oneVersionedFile || state.twoFiles, oneVersionedFile && !state.added};
+}
+
+/**
  * The entries' conditions from MenuInfo (src/TortoiseShell/MenuInfo.cpp), matched as CShellExt::ShouldInsertItem
  * does. Its ITEMIS_EXTENDED alternatives (Explorer's Shift+right-click) are left out: Dolphin has no extended menu.
  * @param state The selection's state.
@@ -263,6 +279,7 @@ MenuEntries menuEntries(const MenuState& state)
     const bool outsideRepository = state.folder && !state.inGit && !state.folderInGit && !state.bareRepo && !state.inaccessible;
     const bool ignoredFolder = state.folder && state.ignored;
     const auto [mergeAbort, merge] = mergeEntries(state);
+    const auto [diff, prevDiff] = diffEntries(state);
     const bool oneFolderInGit = state.folderInGit && state.onlyOne;
     return {
         .clone = outsideRepository || ignoredFolder,
@@ -271,6 +288,8 @@ MenuEntries menuEntries(const MenuState& state)
         // MenuInfo also offers Push on a bare repository, which our PushCommand can't push from yet
         .push = (state.folderInGit && state.onlyOne) || state.wcRoot,
         .commit = state.inGit || state.folderInGit,
+        .diff = diff,
+        .prevDiff = prevDiff,
         .log = (state.onlyOne && !state.added && (state.inGit || state.folderInGit)) || state.bareRepo,
         .refBrowse = (state.folderInGit && state.onlyOne) || state.bareRepo,
         .rebase = state.folderInGit && state.onlyOne && !state.bisect && !state.mergeActive,
@@ -294,6 +313,8 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     : KVersionControlPlugin(parent)
     , m_commitAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-commit")), i18n("Git &Commit..."), this))
     , m_createRepoAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-git")), i18n("Git Create repositor&y here..."), this))
+    , m_diffAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-diff")), i18n("&Diff"), this))
+    , m_prevDiffAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-diff")), i18n("&Diff with previous version"), this))
     , m_showLogAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"), this))
     , m_revertAction(new QAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Re&vert..."), this))
     , m_addAction(new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("&Add..."), this))
@@ -315,6 +336,17 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     });
     connect(m_commitAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("commit"), m_commitAction);
+    });
+    m_diffAction->setToolTip(i18n("Compares the file with the last committed revision to show you the changes you made"));
+    connect(m_diffAction, &QAction::triggered, this, [this] {
+        // CShellExt::InvokeCommand: a second selected file goes in /path2
+        const QStringList paths = m_diffAction->data().toStringList();
+        m_diffAction->setData(paths.first(1));
+        runCommand(QStringLiteral("diff"), m_diffAction, paths.size() == 2 ? QStringList{QStringLiteral("--path2"), paths.constLast()} : QStringList{});
+    });
+    m_prevDiffAction->setToolTip(i18n("Diffs the working tree file with the one before the last commit"));
+    connect(m_prevDiffAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("prevdiff"), m_prevDiffAction);
     });
     connect(m_showLogAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("log"), m_showLogAction);
@@ -461,6 +493,8 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
         m_commitAction->setText(commitMenuText(paths.constFirst()));
     }
     add(entries.commit, m_commitAction);
+    add(entries.diff, m_diffAction);
+    add(entries.prevDiff, m_prevDiffAction);
     add(entries.log, m_showLogAction);
     add(entries.refBrowse, m_refBrowseAction);
     add(entries.rebase, m_rebaseAction);

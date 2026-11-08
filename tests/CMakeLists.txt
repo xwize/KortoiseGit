@@ -9,6 +9,7 @@ set(kgt_tests
     commitdlgtest
     createbranchtagtest
     createrepositorytest
+    difftest
     gitadmindirtest
     gitclioutputparsertest
     gitnumstattest

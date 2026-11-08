@@ -52,6 +52,8 @@ target_sources(kgtproc PRIVATE
     commands/commitcommand.hpp
     commands/createrepositorycommand.cpp
     commands/createrepositorycommand.hpp
+    commands/diffcommand.cpp
+    commands/diffcommand.hpp
     commands/command.cpp
     commands/command.hpp
     commands/fetchcommand.cpp
@@ -60,6 +62,8 @@ target_sources(kgtproc PRIVATE
     commands/logcommand.hpp
     commands/mergecommand.cpp
     commands/mergecommand.hpp
+    commands/prevdiffcommand.cpp
+    commands/prevdiffcommand.hpp
     commands/pullcommand.cpp
     commands/pullcommand.hpp
     commands/pushcommand.cpp
@@ -74,6 +78,8 @@ target_sources(kgtproc PRIVATE
     commands/switchcommand.hpp
     gitclioutputparser.cpp
     gitclioutputparser.hpp
+    gitdiff.cpp
+    gitdiff.hpp
     gitloglist.cpp
     gitloglist.hpp
     gitloglistmodel.cpp
