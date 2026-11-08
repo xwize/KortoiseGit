@@ -14,7 +14,6 @@
 #include <Dolphin/KVersionControlPlugin>
 #include <KDirWatch>
 
-#include <QHash>
 #include <QTimer>
 #include <QVariantList>
 
@@ -71,20 +70,17 @@ public:
 
     /**
      * @param items The selected items, or the current directory when nothing is selected.
-     * @returns The context menu actions for items inside a git working tree: Git Clone... (for one ignored
-     *          folder), Push... (for one versioned folder),
-     *          Commit (for versioned items, showing the current branch), Show log, Revert... for changed files and
-     *          versioned folders, and Add... if an item is unversioned or ignored, or is a folder holding
-     *          unversioned files.
+     * @returns The context menu entries TortoiseGit gives them (see menuActions()).
      */
     [[nodiscard]] QList<QAction *> versionControlActions(const KFileItemList& items) const override;
 
     /**
      * Dolphin asks every enabled plugin for these when the folder it shows belongs to no version control system,
      * and lists all their answers. With nothing selected, @p items is the folder shown.
-     * @param items The selected items, outside any git working tree.
-     * @returns "Git Clone..." and "Git Create repository here..." for one folder that is in no repository
-     *          (TortoiseGit's Clone and CreateRepo entries), else nothing.
+     * @param items The selected items. They can still be in a working tree or a bare repository of their own,
+     *        such as a repository's folder seen from its parent.
+     * @returns The context menu entries TortoiseGit gives them (see menuActions()): "Git Clone..." and "Git Create
+     *          repository here..." for a folder in no repository.
      */
     [[nodiscard]] QList<QAction *> outOfVersionControlActions(const KFileItemList& items) const override;
 
@@ -111,50 +107,13 @@ private:
     void watchIndex(const QString& indexFile);
 
     /**
-     * Keeps the state of a folder Dolphin shows for the context menu, next to those of the other folders it shows
-     * (expanded folders in the details view). Runs on the main thread.
-     * @param directory The folder, as given to beginRetrieval().
-     * @param status Its state.
+     * The entries TortoiseGit's menu gives the selection: Clone, Push, Commit, Show log, Revert, Create repository
+     * and Add, each where its MenuInfo condition holds. Decided afresh on every request from the items' own paths,
+     * as CShellExt::Initialize and QueryContextMenu do.
+     * @param selected The selected paths, or the folder shown when nothing is selected.
+     * @returns The actions, in TortoiseGit's menu order, their data set to the paths.
      */
-    void setMenuStatus(const QString& directory, const GitFolderStatus& status);
-
-    /**
-     * @param directory A folder, without a trailing '/'.
-     * @returns Its state as last read, or nullptr if it hasn't been read.
-     */
-    [[nodiscard]] const GitFolderStatus *menuStatus(const QString& directory) const;
-
-    /**
-     * Whether TortoiseGit's Commit entry applies (ITEMIS_INGIT or ITEMIS_FOLDERINGIT): some item is versioned.
-     * Items of a folder whose state isn't known count as versioned.
-     * @param items The selected items.
-     * @returns True if the commit entry is shown.
-     */
-    [[nodiscard]] bool hasVersionedItem(const KFileItemList& items) const;
-
-    /**
-     * Whether TortoiseGit's Revert entry applies (its MenuInfo: a versioned item that is not unchanged, or a folder
-     * in a working tree). A folder whose parent's state isn't known yet counts.
-     * @param items The selected items.
-     * @returns True if the Revert entry is shown.
-     */
-    [[nodiscard]] bool hasRevertableItem(const KFileItemList& items) const;
-
-    /**
-     * Whether TortoiseGit's Add entry applies (its MenuInfo: an unversioned item, a versioned folder, or an
-     * ignored item), narrowed to folders that hold unversioned files. Items of a folder whose state isn't known
-     * don't count.
-     * @param items The selected items.
-     * @returns True if the Add entry is shown.
-     */
-    [[nodiscard]] bool hasAddableItem(const KFileItemList& items) const;
-
-    /**
-     * Whether TortoiseGit's Clone entry applies inside a working tree (ITEMIS_FOLDER | ITEMIS_IGNORED).
-     * @param items The selected items.
-     * @returns True for one folder that git ignores.
-     */
-    [[nodiscard]] bool isIgnoredFolder(const KFileItemList& items) const;
+    [[nodiscard]] QList<QAction *> menuActions(const QStringList& selected) const;
 
     /**
      * Ported from CShellExt::InsertGitMenu: the Commit entry shows the current branch, "Git Commit -> "main"...".
@@ -177,7 +136,6 @@ private:
     KDirWatch m_newRepoWatch; // Watches for the .git of a repository being created
     QString m_watchedNewRepo; // The .git m_newRepoWatch waits for, if any
     QTimer m_refreshTimer; // Collects the several index writes of one git command into one refresh
-    QHash<QString, GitFolderStatus> m_menuStatus; // By folder without a trailing '/', for the context menu; main thread only
 };
 
 } // namespace kgt

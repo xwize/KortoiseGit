@@ -56,6 +56,14 @@ public:
     [[nodiscard]] static GitFolderStatus fetch(const QString& directory);
 
     /**
+     * Like fetch(), but git reads only one item of the folder, as GitStatus::GetStatus does for one path.
+     * @param path The item, a file or folder, absolute and clean.
+     * @returns The state of its folder, in which only itemVersion() of that item is meaningful.
+     * @throws RuntimeError if the item's folder is not inside a working tree (including inside .git) or git fails.
+     */
+    [[nodiscard]] static GitFolderStatus fetchItem(const QString& path);
+
+    /**
      * @param name The item's file name, directly inside the folder.
      * @param isDir Whether the item is a folder, which rolls up what is below it.
      * @returns The state Dolphin draws for it.
@@ -97,6 +105,13 @@ private:
     };
 
     void addEntry(const QString& path, ItemVersion version);
+
+    /**
+     * @param git Runs in the folder.
+     * @param pathspec What git status reads, relative to the folder.
+     * @returns The folder's state, as far as @p pathspec covers it.
+     */
+    [[nodiscard]] static GitFolderStatus fetch(const Git& git, const QString& pathspec);
 
     QString m_prefix;
     QHash<QString, ChildState> m_children;
