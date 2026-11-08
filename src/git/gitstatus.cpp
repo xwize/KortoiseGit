@@ -6,8 +6,13 @@
 
 #include "git/gitstatus.hpp"
 
-#include <QByteArrayView>
+#include "git/gitrevloglist.hpp"
 
+#include <QByteArrayView>
+#include <QHash>
+#include <QSet>
+
+#include <algorithm>
 #include <iterator>
 #include <source_location>
 #include <utility>
@@ -90,6 +95,57 @@ Result<FileState> parseFileState(char letter)
     default:
         return makeError(ErrorCategory::Parse, QStringLiteral("Unexpected git status letter: %1").arg(QLatin1Char(letter)));
     }
+}
+
+/**
+ * @param state A state.
+ * @returns Its porcelain letter.
+ */
+char stateLetter(FileState state)
+{
+    switch (state) {
+    case FileState::Unmodified:
+        return '.';
+    case FileState::Modified:
+        return 'M';
+    case FileState::TypeChanged:
+        return 'T';
+    case FileState::Added:
+        return 'A';
+    case FileState::Deleted:
+        return 'D';
+    case FileState::Renamed:
+        return 'R';
+    case FileState::Copied:
+        return 'C';
+    case FileState::Unmerged:
+        return 'U';
+    }
+    return '.';
+}
+
+/**
+ * @param actions The actions of a raw diff record, which stand for its one status letter.
+ * @returns The state that letter stands for.
+ */
+FileState stateOfActions(TGitPath::Actions actions)
+{
+    if (actions & TGitPath::Action::Unmerged) {
+        return FileState::Unmerged;
+    }
+    if (actions & TGitPath::Action::Added) {
+        return FileState::Added;
+    }
+    if (actions & TGitPath::Action::Deleted) {
+        return FileState::Deleted;
+    }
+    if (actions & TGitPath::Action::Replaced) {
+        return FileState::Renamed;
+    }
+    if (actions & TGitPath::Action::Copy) {
+        return FileState::Copied;
+    }
+    return FileState::Modified;
 }
 
 /**
@@ -217,6 +273,67 @@ Result<QList<GitStatusEntry>> GitStatus::parse(const QByteArray& output)
         entries.append(std::move(*entry));
     }
     return entries;
+}
+
+QStringList GitStatus::indexDiffArguments(const QString& base)
+{
+    // CGit::GetWorkingTreeChanges' "diff-index --cached --raw <head> --numstat -C -M -z", without the line counts
+    return {QStringLiteral("diff-index"),
+            QStringLiteral("--cached"),
+            QStringLiteral("--raw"),
+            QStringLiteral("-z"),
+            QStringLiteral("-C"),
+            QStringLiteral("-M"),
+            base,
+            QStringLiteral("--")};
+}
+
+Result<QList<GitStatusEntry>> GitStatus::withIndexDiff(const QList<GitStatusEntry>& status, const QByteArray& indexDiffOutput)
+{
+    // The same raw records as a commit's diff
+    Result<GitRevFiles> files = GitRevLoglist::parseFiles(indexDiffOutput);
+    if (!files) {
+        return tl::unexpected(std::move(files).error());
+    }
+    QList<GitStatusEntry> indexDiff = std::move(files->status);
+    QHash<QString, qsizetype> diffByPath;
+    qsizetype row = 0;
+    for (GitStatusEntry& entry : indexDiff) {
+        entry.index = stateOfActions(entry.actions);
+        diffByPath.insert(entry.path, row++);
+    }
+
+    QSet<QString> used; // Paths of the diff that the status also has
+    QList<GitStatusEntry> tracked;
+    QList<GitStatusEntry> untracked;
+    for (const GitStatusEntry& entry : status) {
+        if (entry.kind == GitStatusKind::Untracked || entry.kind == GitStatusKind::Ignored) {
+            untracked.append(entry);
+            continue;
+        }
+        const qsizetype diff = diffByPath.value(entry.path, -1);
+        if (diff >= 0) {
+            used.insert(entry.path);
+        }
+        if (entry.kind == GitStatusKind::Unmerged) {
+            tracked.append(entry);
+            continue;
+        }
+        // Unchanged against the other commit, unless the diff says otherwise
+        GitStatusEntry merged = diff >= 0
+            ? indexDiff.at(diff)
+            : GitStatusEntry{.kind = GitStatusKind::Changed, .path = entry.path, .origPath = {}, .index = {}, .worktree = {}, .actions = {}};
+        merged.worktree = entry.worktree;
+        merged.actions |= TGitPath::parseStatus(stateLetter(entry.worktree));
+        if (merged.index != FileState::Unmodified || merged.worktree != FileState::Unmodified) {
+            tracked.append(std::move(merged));
+        }
+    }
+    std::ranges::copy_if(indexDiff, std::back_inserter(tracked), [&used](const GitStatusEntry& entry) {
+        return !used.contains(entry.path);
+    });
+    std::ranges::stable_sort(tracked, {}, &GitStatusEntry::path);
+    return tracked + untracked;
 }
 
 QList<GitStatusEntry> GitStatus::status(const Git& git, IgnoredFiles ignored)
