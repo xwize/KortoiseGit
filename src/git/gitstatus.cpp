@@ -233,6 +233,36 @@ Result<GitStatusEntry> parseRecord(QByteArrayView record)
     }
 }
 
+/**
+ * Like TortoiseGit's GitStatus::GetStatusRanking: when one path has two entries (git rm --cached lists the file
+ * as both deleted and untracked), the higher ranked one is shown.
+ * @param status A file's state.
+ * @returns Its importance; higher wins.
+ */
+int statusRanking(GitWcStatus status)
+{
+    switch (status) {
+    case GitWcStatus::Conflicted:
+        return 6;
+    case GitWcStatus::ModifiedUnstaged:
+    case GitWcStatus::Missing:
+        return 5;
+    case GitWcStatus::Modified:
+    case GitWcStatus::Added:
+    case GitWcStatus::Deleted:
+        return 4;
+    case GitWcStatus::Normal:
+        return 3;
+    case GitWcStatus::Unversioned:
+        return 2;
+    case GitWcStatus::Ignored:
+        return 1;
+    case GitWcStatus::None:
+        break;
+    }
+    return 0;
+}
+
 } // namespace
 
 namespace kgt
@@ -339,6 +369,60 @@ Result<QList<GitStatusEntry>> GitStatus::withIndexDiff(const QList<GitStatusEntr
 QList<GitStatusEntry> GitStatus::status(const Git& git, IgnoredFiles ignored)
 {
     return getOrThrow(parse(git.run(arguments(ignored), RunMode::ReadOnly)));
+}
+
+GitWcStatus GitStatus::wcStatus(const GitStatusEntry& entry)
+{
+    switch (entry.kind) {
+    case GitStatusKind::Unmerged:
+        return GitWcStatus::Conflicted;
+    case GitStatusKind::Untracked:
+        return GitWcStatus::Unversioned;
+    case GitStatusKind::Ignored:
+        return GitWcStatus::Ignored;
+    case GitStatusKind::Changed:
+    case GitStatusKind::RenamedOrCopied:
+        break;
+    }
+    if (entry.worktree == FileState::Deleted) {
+        return GitWcStatus::Missing;
+    }
+    if (entry.worktree != FileState::Unmodified) {
+        return GitWcStatus::ModifiedUnstaged;
+    }
+    switch (entry.index) {
+    case FileState::Unmodified:
+        return GitWcStatus::Normal;
+    case FileState::Deleted:
+        return GitWcStatus::Deleted;
+    case FileState::Added:
+    case FileState::Copied:
+        return GitWcStatus::Added;
+    default:
+        return GitWcStatus::Modified;
+    }
+}
+
+GitWcStatus GitStatus::moreImportant(GitWcStatus first, GitWcStatus second)
+{
+    return statusRanking(first) >= statusRanking(second) ? first : second;
+}
+
+GitWcStatus GitStatus::adjustFolderStatus(GitWcStatus status)
+{
+    switch (status) {
+    case GitWcStatus::Conflicted:
+        return GitWcStatus::Conflicted;
+    case GitWcStatus::ModifiedUnstaged:
+    case GitWcStatus::Missing:
+        return GitWcStatus::ModifiedUnstaged;
+    case GitWcStatus::Modified:
+    case GitWcStatus::Added:
+    case GitWcStatus::Deleted:
+        return GitWcStatus::Modified;
+    default:
+        return GitWcStatus::None;
+    }
 }
 
 } // namespace kgt

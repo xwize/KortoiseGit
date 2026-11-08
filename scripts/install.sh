@@ -54,6 +54,9 @@ main() {
     mkdir -p "$data_dir"
     cp "$tmp/build/install_manifest.txt" "$data_dir/install_manifest.txt"
 
+    # After installing, so that whatever starts the cache next gets the new version
+    stop_status_cache
+
     # Dolphin finds version control plugins in Qt's plugin path; Plasma sources this script at login
     local plugin plugin_dir
     plugin="$(grep -m1 '/dolphin/vcs/kortoisegitplugin\.so$' "$data_dir/install_manifest.txt")"
@@ -104,6 +107,11 @@ check_dependencies() {
             exit 1
         fi
     done
+}
+
+# Stops a running kortoisegitcache. Linux keeps 15 characters of a process's name, so the full name would match nothing
+stop_status_cache() {
+    pkill -x -u "$EUID" kortoisegitcach 2>/dev/null || true
 }
 
 # Removes the files listed in a CMake install manifest, and any directories that leaves empty, staying inside prefix

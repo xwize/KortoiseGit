@@ -17,6 +17,10 @@ target_sources(kgtplugin PRIVATE
     ${kgtplugin_logging}
     gitfolderstatus.cpp
     gitfolderstatus.hpp
+    pathutils.cpp
+    pathutils.hpp
+    remotecachelink.cpp
+    remotecachelink.hpp
     shellext.cpp
     shellext.hpp
 )
@@ -24,7 +28,7 @@ target_sources(kgtplugin PRIVATE
 # Linked into the plugin, which is a shared module
 set_target_properties(kgtplugin PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-# The installed location of kortoisegitproc, for when the plugin is not running from the build tree
+# The installed location of kortoisegitproc and kortoisegitcache, for when the plugin is not running from the build tree
 target_compile_definitions(kgtplugin PRIVATE KGT_INSTALL_BINDIR="${KDE_INSTALL_FULL_BINDIR}")
 
 target_include_directories(kgtplugin PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
@@ -32,6 +36,7 @@ target_link_libraries(kgtplugin PUBLIC
     kgtgit
     kgtutils
     Qt6::Core
+    Qt6::DBus
     Qt6::Widgets
     KF6::CoreAddons
     KF6::I18n

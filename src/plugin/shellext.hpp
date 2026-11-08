@@ -18,6 +18,7 @@
 #include <QTimer>
 #include <QVariantList>
 
+#include <atomic>
 #include <memory>
 #include <optional>
 
@@ -26,12 +27,15 @@ class QAction;
 namespace kgt
 {
 
+class RemoteCacheLink;
+
 /**
  * The Dolphin version control plugin: TortoiseShell's counterpart. It adds TortoiseGit's context menu entries
  * and starts kortoisegitproc, detached, for each one. No dialog ever runs inside Dolphin's process.
  *
  * Overlays come from one git status per folder (GitFolderStatus), read on Dolphin's worker thread. The
- * repository's index file is watched, so staging or committing outside Dolphin refreshes them too.
+ * repository's index file is watched, so staging or committing outside Dolphin refreshes them too. When
+ * kortoisegitcache knows the folder its answer is used instead, and it reports changes anywhere below the folder.
  */
 class ShellExt : public KVersionControlPlugin
 {
@@ -111,6 +115,12 @@ private:
     void runCommand(const QString& command, const QAction *action, const QStringList& switches = {});
 
     /**
+     * Refreshes the overlays if the cache reported a change to an item of the folder shown.
+     * @param paths The items whose status changed.
+     */
+    void onCacheItemsChanged(const QStringList& paths);
+
+    /**
      * Watches one repository's index (replacing the previous one), so git add or commit refreshes the overlays.
      * Runs on the main thread, where m_indexWatch lives.
      * @param indexFile The index file of the repository Dolphin shows.
@@ -162,6 +172,10 @@ private:
     KDirWatch m_newRepoWatch; // Watches for the .git of a repository being created
     QString m_watchedNewRepo; // The .git m_newRepoWatch waits for, if any
     QTimer m_refreshTimer; // Collects the several index writes of one git command into one refresh
+    RemoteCacheLink *m_cacheLink = nullptr; // Null when the status cache is compiled out; a child of the plugin
+    QTimer m_cacheRefreshTimer; // Collects the cache's notifications for the folder shown into one refresh
+    QString m_shownFolder; // The folder of the last retrieval, canonical; touched on the main thread only
+    std::atomic_bool m_indexChanged = false; // The index changed since the last retrieval
 };
 
 } // namespace kgt
