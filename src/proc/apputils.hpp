@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <QIcon>
 #include <QString>
 #include <QStringList>
 
@@ -44,6 +45,11 @@ class AppUtils
 {
 public:
     AppUtils() = delete;
+
+    /**
+     * @returns The app icon: the installed hicolor theme's, or the copy bundled in icons.qrc when running from build/bin.
+     */
+    [[nodiscard]] static QIcon appIcon();
 
     /**
      * Ported from CAppUtils::GetClipboardLink: a repository URL on the clipboard, for prefilling a dialog.

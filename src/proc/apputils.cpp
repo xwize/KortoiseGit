@@ -29,10 +29,29 @@
 #include <QProcess>
 #include <QTemporaryFile>
 
+#include <array>
 #include <tuple>
+
+/**
+ * Registers icons.qrc, which a static library has to do itself. Q_INIT_RESOURCE must be outside any namespace.
+ */
+static void initIconResources()
+{
+    Q_INIT_RESOURCE(icons);
+}
 
 namespace kgt
 {
+
+QIcon AppUtils::appIcon()
+{
+    initIconResources();
+    QIcon bundled;
+    for (const int size : std::array{16, 22, 32, 48, 64, 128, 256}) {
+        bundled.addFile(QStringLiteral(":/kortoisegit/icons/kortoisegit-%1.png").arg(size), QSize(size, size));
+    }
+    return QIcon::fromTheme(QStringLiteral("kortoisegit"), bundled);
+}
 
 QString AppUtils::getClipboardLink(const QString& skipGitPrefix, int paramsCount)
 {

@@ -9,6 +9,12 @@ path = ["CMakePresets.json", "src/plugin/kortoisegitplugin.json", "screenshot.pn
 SPDX-FileCopyrightText = "2026 James Jones <this.verb@gmail.com>"
 SPDX-License-Identifier = "GPL-2.0-or-later"
 
+# The app icon, original artwork built by data/icons/make-icon.sh
+[[annotations]]
+path = ["data/icons/*.png", "data/icons/*.pcraft"]
+SPDX-FileCopyrightText = "2026 James Jones <this.verb@gmail.com>"
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
 # The log list's action icons, converted to PNG from TortoiseGit src/Resources/action*.ico, and that folder's
 # licence notice. license.txt offers them under the GPL or the TortoiseSVN Icon License; we take the GPL. The shipped
 # icons are recoloured by scripts/recolour-icons.sh from the unmodified originals in src/proc/icons/original/.

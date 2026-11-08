@@ -42,5 +42,13 @@ SPDX-License-Identifier: GPL-2.0-or-later
         <file>icons/actionreplaced-24.png</file>
         <file>icons/actionreplaced-32.png</file>
         <file>icons/actionreplaced-64.png</file>
+        <!-- The app icon, for running from build/bin where the installed hicolor theme copy is missing -->
+        <file alias="icons/kortoisegit-16.png">../../data/icons/16-apps-kortoisegit.png</file>
+        <file alias="icons/kortoisegit-22.png">../../data/icons/22-apps-kortoisegit.png</file>
+        <file alias="icons/kortoisegit-32.png">../../data/icons/32-apps-kortoisegit.png</file>
+        <file alias="icons/kortoisegit-48.png">../../data/icons/48-apps-kortoisegit.png</file>
+        <file alias="icons/kortoisegit-64.png">../../data/icons/64-apps-kortoisegit.png</file>
+        <file alias="icons/kortoisegit-128.png">../../data/icons/128-apps-kortoisegit.png</file>
+        <file alias="icons/kortoisegit-256.png">../../data/icons/256-apps-kortoisegit.png</file>
     </qresource>
 </RCC>

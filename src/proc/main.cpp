@@ -7,6 +7,7 @@
  * (CTortoiseProcApp::InitInstance): parse the command line, create the command and run it.
  */
 
+#include "apputils.hpp"
 #include "cmdlineargs.hpp"
 #include "commands/command.hpp"
 #include "kortoisegit_version.hpp"
@@ -96,6 +97,8 @@ int main(int argc, char *argv[])
                          i18n("© 2026 James Jones"));
     aboutData.setLicense(KAboutLicense::GPL_V2, KAboutLicense::OrLaterVersions);
     KAboutData::setApplicationData(aboutData);
+
+    QApplication::setWindowIcon(AppUtils::appIcon());
 
     QCommandLineParser parser;
     aboutData.setupCommandLine(&parser);
