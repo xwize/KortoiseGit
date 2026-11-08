@@ -39,9 +39,6 @@ foreach(test ${kgt_tests})
     set_tests_properties(${test} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endforeach()
 
-# KIO's delete jobs raise notifications that outlive the test
-set_property(TEST gitstatuslistctrltest APPEND PROPERTY ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/knotification.lsan.supp:print_suppressions=0")
-
 # Runs the real executable to check exit codes and --help/--version
 target_compile_definitions(proctest PRIVATE KGT_PROC_EXE="$<TARGET_FILE:kortoisegitproc>")
 add_dependencies(proctest kortoisegitproc)

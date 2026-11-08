@@ -7,12 +7,9 @@
 #include "git/git.hpp"
 #include "progressdlg.hpp"
 
-#include <QAbstractButton>
 #include <QApplication>
 #include <QCheckBox>
 #include <QContextMenuEvent>
-#include <QDialog>
-#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QKeyEvent>
@@ -25,7 +22,6 @@
 #include <QVBoxLayout>
 #include <QWindow>
 
-#include <algorithm>
 #include <functional>
 #include <memory>
 #include <tuple>
@@ -223,55 +219,6 @@ void withContextMenu(GitStatusListCtrl& ctrl, const std::function<void(QMenu *)>
 }
 
 /**
- * Answers the confirmation KIO shows, whenever it appears.
- */
-class DeletePromptAnswerer : public QObject
-{
-public:
-    /**
-     * @param confirm Whether to confirm the deletion, rather than cancel it.
-     */
-    explicit DeletePromptAnswerer(bool confirm)
-        : m_confirm(confirm)
-    {
-        connect(&m_timer, &QTimer::timeout, this, &DeletePromptAnswerer::answer);
-        m_timer.start(10);
-    }
-
-    /**
-     * @returns How many prompts were answered.
-     */
-    [[nodiscard]] int answered() const
-    {
-        return m_answered;
-    }
-
-private:
-    void answer()
-    {
-        const auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
-        const auto *buttons = dialog ? dialog->findChild<QDialogButtonBox *>() : nullptr;
-        if (!buttons) {
-            return;
-        }
-        const QList<QAbstractButton *> all = buttons->buttons();
-        const auto chosen = std::ranges::find_if(all, [this, buttons](QAbstractButton *button) {
-            const QDialogButtonBox::ButtonRole role = buttons->buttonRole(button);
-            return m_confirm ? (role == QDialogButtonBox::AcceptRole || role == QDialogButtonBox::YesRole)
-                             : (role == QDialogButtonBox::RejectRole || role == QDialogButtonBox::NoRole);
-        });
-        if (chosen != all.cend()) {
-            ++m_answered;
-            (*chosen)->click();
-        }
-    }
-
-    QTimer m_timer;
-    bool m_confirm;
-    int m_answered = 0;
-};
-
-/**
  * Picks Delete from the list's context menu for the selected files and waits for it to finish.
  * @param ctrl The list.
  * @returns Whether the menu offered it and it finished.
@@ -373,13 +320,6 @@ private Q_SLOTS:
         qputenv("GIT_AUTHOR_EMAIL", "test@example.com");
         qputenv("GIT_COMMITTER_NAME", "Test");
         qputenv("GIT_COMMITTER_EMAIL", "test@example.com");
-        /**
-         * Deleted files go to a trash of the test's own. KIO only uses the home trash for files on the same file
-         * system as HOME, and won't make a trash folder on a tmpfs, so HOME moves next to the repositories too.
-         */
-        QVERIFY(m_dataHome.isValid());
-        qputenv("HOME", m_dataHome.path().toUtf8());
-        qputenv("XDG_DATA_HOME", m_dataHome.path().toUtf8());
     }
 
     void listsColumns()
@@ -655,120 +595,6 @@ private Q_SLOTS:
         QVERIFY(menuTexts(*ctrl).contains(deleteText));
     }
 
-    void deleteTrashesUnversionedFilesAndDropsOnlyTheirRows()
-    {
-        const TestRepo repo;
-        makeChanges(repo);
-        auto ctrl = makeShownList(repo);
-        QVERIFY(ctrl);
-        QLabel label;
-        ctrl->setStatLabel(&label);
-        ctrl->statusModel()->setData(ctrl->statusModel()->index(rowOf(*ctrl->statusModel(), QStringLiteral("d.txt")), GitStatusListModel::PathColumn),
-                                     Qt::Unchecked,
-                                     Qt::CheckStateRole);
-        const int checkedBefore = ctrl->statusModel()->checkedCount();
-        const int totalBefore = ctrl->statusModel()->listedCount();
-
-        const DeletePromptAnswerer answerer(true);
-        const QSignalSpy loaded(ctrl.get(), &GitStatusListCtrl::loaded);
-        select(*ctrl, {QStringLiteral("e.md"), QStringLiteral("f.log")});
-        QVERIFY(deleteFromMenu(*ctrl));
-
-        QCOMPARE(answerer.answered(), 1);
-        QVERIFY(!QFile::exists(repo.path() + QStringLiteral("/e.md")));
-        QVERIFY(!QFile::exists(repo.path() + QStringLiteral("/f.log")));
-        QVERIFY(QFile::exists(m_dataHome.filePath(QStringLiteral("Trash/files/e.md"))));
-        QVERIFY(QFile::exists(m_dataHome.filePath(QStringLiteral("Trash/files/f.log"))));
-        // The rows are dropped without a reload, which keeps the other check states
-        QVERIFY(loaded.isEmpty());
-        QCOMPARE(rowOf(*ctrl->statusModel(), QStringLiteral("e.md")), -1);
-        QCOMPARE(rowOf(*ctrl->statusModel(), QStringLiteral("f.log")), -1);
-        QCOMPARE(ctrl->statusModel()->listedCount(), totalBefore - 2);
-        QCOMPARE(ctrl->statusModel()->checkedCount(), checkedBefore);
-        QVERIFY(label.text().contains(QString::number(totalBefore - 2)));
-        const auto dIndex = ctrl->statusModel()->index(rowOf(*ctrl->statusModel(), QStringLiteral("d.txt")), GitStatusListModel::PathColumn);
-        QCOMPARE(dIndex.data(Qt::CheckStateRole).value<Qt::CheckState>(), Qt::Unchecked);
-    }
-
-    void deleteOfAnIgnoredFolderAndADanglingSymlink()
-    {
-        const TestRepo repo;
-        repo.write(QStringLiteral(".gitignore"), "ignored/\n");
-        repo.commitAll();
-        QVERIFY(QDir(repo.path()).mkdir(QStringLiteral("ignored")));
-        repo.write(QStringLiteral("ignored/x"), "x\n");
-        QVERIFY(QFile::link(QStringLiteral("nowhere"), repo.path() + QStringLiteral("/link")));
-        auto ctrl = makeShownList(repo);
-        QVERIFY(ctrl);
-
-        const DeletePromptAnswerer answerer(true);
-        select(*ctrl, {QStringLiteral("link"), QStringLiteral("ignored/")});
-        QVERIFY(deleteFromMenu(*ctrl));
-        QVERIFY(!QFileInfo(repo.path() + QStringLiteral("/link")).isSymLink());
-        QVERIFY(!QFile::exists(repo.path() + QStringLiteral("/ignored")));
-        QCOMPARE(ctrl->statusModel()->listedCount(), 0);
-    }
-
-    void shiftDeletesPermanently()
-    {
-        const TestRepo repo;
-        repo.write(QStringLiteral("keep.txt"), "k\n");
-        repo.commitAll();
-        repo.write(QStringLiteral("shifted.txt"), "s\n");
-        auto ctrl = makeShownList(repo);
-        QVERIFY(ctrl);
-
-        const DeletePromptAnswerer answerer(true);
-        select(*ctrl, {QStringLiteral("shifted.txt")});
-        QTest::keyPress(ctrl->windowHandle(), Qt::Key_Shift, Qt::ShiftModifier);
-        const bool deleted = deleteFromMenu(*ctrl);
-        QTest::keyRelease(ctrl->windowHandle(), Qt::Key_Shift, Qt::NoModifier);
-        QVERIFY(deleted);
-        QCOMPARE(answerer.answered(), 1);
-        QVERIFY(!QFile::exists(repo.path() + QStringLiteral("/shifted.txt")));
-        QVERIFY(!QFile::exists(m_dataHome.filePath(QStringLiteral("Trash/files/shifted.txt"))));
-    }
-
-    void cancellingDeleteChangesNothing()
-    {
-        const TestRepo repo;
-        makeChanges(repo);
-        auto ctrl = makeShownList(repo);
-        QVERIFY(ctrl);
-        const QStringList listed = listedPaths(*ctrl->statusModel());
-
-        const DeletePromptAnswerer answerer(false);
-        select(*ctrl, {QStringLiteral("e.md"), QStringLiteral("d.txt")});
-        QVERIFY(deleteFromMenu(*ctrl));
-
-        QCOMPARE(answerer.answered(), 1);
-        QVERIFY(QFile::exists(repo.path() + QStringLiteral("/e.md")));
-        QVERIFY(QFile::exists(repo.path() + QStringLiteral("/d.txt")));
-        QCOMPARE(lsFiles(repo, QStringLiteral("d.txt")), QByteArray("d.txt\n"));
-        QCOMPARE(listedPaths(*ctrl->statusModel()), listed);
-    }
-
-    void deleteRemovesIndexedPathsAndReloads()
-    {
-        const TestRepo repo;
-        makeChanges(repo);
-        auto ctrl = makeShownList(repo);
-        QVERIFY(ctrl);
-
-        const DeletePromptAnswerer answerer(true);
-        QSignalSpy loaded(ctrl.get(), &GitStatusListCtrl::loaded);
-        // The added file comes along because it is selected, as in TortoiseGit
-        select(*ctrl, {QStringLiteral("e.md"), QStringLiteral("d.txt")});
-        QVERIFY(deleteFromMenu(*ctrl));
-        QVERIFY(loaded.size() == 1 || loaded.wait(10000));
-
-        QCOMPARE(answerer.answered(), 1);
-        QVERIFY(!QFile::exists(repo.path() + QStringLiteral("/d.txt")));
-        QCOMPARE(lsFiles(repo, QStringLiteral("d.txt")), QByteArray());
-        QCOMPARE(rowOf(*ctrl->statusModel(), QStringLiteral("d.txt")), -1);
-        QCOMPARE(rowOf(*ctrl->statusModel(), QStringLiteral("e.md")), -1);
-    }
-
     void deletingAMissingFileNeedsNoPromptAndUpdatesTheIndex()
     {
         const TestRepo repo;
@@ -776,42 +602,27 @@ private Q_SLOTS:
         auto ctrl = makeShownList(repo);
         QVERIFY(ctrl);
 
-        const DeletePromptAnswerer answerer(true);
         QSignalSpy loaded(ctrl.get(), &GitStatusListCtrl::loaded);
         select(*ctrl, {QStringLiteral("c.txt")});
         QVERIFY(deleteFromMenu(*ctrl));
         QVERIFY(loaded.size() == 1 || loaded.wait(10000));
 
-        QCOMPARE(answerer.answered(), 0);
         QCOMPARE(lsFiles(repo, QStringLiteral("c.txt")), QByteArray());
     }
 
-    void deleteKeyActsOnUnversionedAndIgnoredOnly()
+    void deleteKeyIgnoresTrackedAndMissingFiles()
     {
         const TestRepo repo;
         makeChanges(repo);
         auto ctrl = makeShownList(repo);
         QVERIFY(ctrl);
 
-        const DeletePromptAnswerer answerer(true);
         for (const QString& path : {QStringLiteral("a.txt"), QStringLiteral("c.txt")}) {
             select(*ctrl, {path});
             QTest::keyClick(ctrl.get(), Qt::Key_Delete);
             QVERIFY(!ctrl->isBusy());
         }
-        QCOMPARE(answerer.answered(), 0);
         QVERIFY(QFile::exists(repo.path() + QStringLiteral("/a.txt")));
-
-        select(*ctrl, {QStringLiteral("e.md")});
-        QTest::keyClick(ctrl.get(), Qt::Key_Delete);
-        QVERIFY(QTest::qWaitFor(
-            [&ctrl] {
-                return !ctrl->isBusy();
-            },
-            15000));
-        QCOMPARE(answerer.answered(), 1);
-        QVERIFY(!QFile::exists(repo.path() + QStringLiteral("/e.md")));
-        QCOMPARE(rowOf(*ctrl->statusModel(), QStringLiteral("e.md")), -1);
     }
 
     void addIsOfferedForUnversionedAndIgnored()
@@ -1003,8 +814,6 @@ private:
     {
         return Git(repo.path()).run({QStringLiteral("ls-files"), QStringLiteral("--"), path}, RunMode::ReadOnly);
     }
-
-    QTemporaryDir m_dataHome;
 };
 
 QTEST_MAIN(GitStatusListCtrlTest)

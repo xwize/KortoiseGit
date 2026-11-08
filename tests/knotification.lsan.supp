@@ -1,6 +1,0 @@
-# SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
-# SPDX-License-Identifier: GPL-2.0-or-later
-
-# KJobWidgets' job tracking raises a KNotification for KIO's delete jobs, still pending when the test process exits.
-leak:KNotification
-leak:KuitFormatterPrivate::finalizeVisualText
