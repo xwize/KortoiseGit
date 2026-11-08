@@ -13,6 +13,7 @@
 #pragma once
 
 #include "gitstatuslistmodel.hpp"
+#include "progresscommands/addprogresscommand.hpp"
 
 #include "utils/error.hpp"
 
@@ -42,7 +43,7 @@ class RevertProgressCommand;
  * The changed-files list. The owning dialog sets the working tree and the show flags, places the Select all
  * checkbox and the counter label, calls reload() and acts on checkedEntries(). Double-clicking a file compares it
  * with HEAD in git difftool, or opens a conflicted one in git mergetool; the context menu offers Edit conflicts,
- * Resolved, Compare with base, Revert..., Open, Open with..., Explore to and Delete; F5 reloads, and the Delete key
+ * Resolved, Add, Compare with base, Revert..., Open, Open with..., Explore to and Delete; F5 reloads, and the Delete key
  * deletes.
  */
 class GitStatusListCtrl : public QTreeView
@@ -58,6 +59,7 @@ public:
         Revert = 0x1, // GITSLC_POPREVERT
         Conflict = 0x2, // GITSLC_POPCONFLICT: Edit conflicts, which runs git mergetool
         Resolve = 0x4, // GITSLC_POPRESOLVE: Resolved
+        Add = 0x8, // GITSLC_POPADD: Add, and with Shift Add as Executable and Add as Symlink
         All = 0xFFFFFFFF, // GITSLC_POPALL
     };
     Q_DECLARE_FLAGS(ContextMenus, ContextMenu)
@@ -177,7 +179,7 @@ public:
     void reload();
 
     /**
-     * @returns Whether a load, or a revert or delete from the context menu, is running.
+     * @returns Whether a load, or a revert, delete or add from the context menu, is running.
      */
     [[nodiscard]] bool isBusy() const;
 
@@ -221,7 +223,7 @@ public:
     void selectFirstConflict();
 
     /**
-     * @returns Whether a Revert, Resolved or Delete started from the context menu is changing the repository.
+     * @returns Whether a Revert, Resolved, Delete or Add started from the context menu is changing the repository.
      */
     [[nodiscard]] bool isModifying() const;
 
@@ -297,6 +299,9 @@ private:
     void onDeleteJobResult(const KJob *job);
     void removeDeletedFromIndex();
     void onDeleteIndexFinished();
+    void addAddEntries(QMenu& menu);
+    void addSelected(AddProgressCommand::FileMode fileMode);
+    void onAddFinished();
     [[nodiscard]] const GitStatusListEntry *focusedEntry() const;
     [[nodiscard]] bool isPathFilterGivenToGit() const;
     [[nodiscard]] QStringList pathSpec() const;
@@ -316,6 +321,7 @@ private:
     std::unique_ptr<RevertProgressCommand> m_revertCommand; // The running revert, if any
     std::unique_ptr<GitCall> m_resolveCall; // The running git add of Resolved, if any
     std::unique_ptr<GitCall> m_deleteCall; // The running git rm --cached of Delete, if any
+    std::unique_ptr<AddProgressCommand> m_addCommand; // The running Add, if any
     QStringList m_deletingPaths; // The paths of the running Delete
     QList<GitStatusEntry> m_pendingStatus; // The status of the running load, waiting for its line counts
     QString m_errorMessage; // Shown in the empty list after a failed load

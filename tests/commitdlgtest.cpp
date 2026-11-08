@@ -180,6 +180,26 @@ bool commitAndWait(const CommitDlg& dlg, const QString& message)
 }
 
 /**
+ * Commits old.txt (and whatever else is in the working tree), then renames it to new.txt outside git.
+ * @param repo The repository.
+ */
+void renameOutsideGit(const TestRepo& repo)
+{
+    repo.write(QStringLiteral("old.txt"), "a file that is renamed\n");
+    repo.commitAll(QStringLiteral("Base"));
+    QVERIFY(QFile::rename(repo.filePath(QStringLiteral("old.txt")), repo.filePath(QStringLiteral("new.txt"))));
+}
+
+/**
+ * @param repo The repository.
+ * @returns What HEAD changed, with renames detected: one "<status>\t<path>..." line per file.
+ */
+QStringList lastCommitNameStatus(const TestRepo& repo)
+{
+    return gitLines(repo, {QStringLiteral("log"), QStringLiteral("-1"), QStringLiteral("-M"), QStringLiteral("--name-status"), QStringLiteral("--format=")});
+}
+
+/**
  * A repository with a.txt and b.txt committed.
  * @param repo The repository to fill.
  */
@@ -304,6 +324,55 @@ private Q_SLOTS:
                  QStringLiteral("Change a\n\nOnly a."));
         QCOMPARE(gitLines(repo, {QStringLiteral("diff"), QStringLiteral("--name-only")}), QStringList{QStringLiteral("b.txt")});
         QVERIFY(stagedFiles(repo).isEmpty());
+    }
+
+    void commitsAnAddedFileAndAMissingOneAsARename()
+    {
+        const TestRepo repo;
+        renameOutsideGit(repo);
+        repo.run({QStringLiteral("add"), QStringLiteral("new.txt")});
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QCOMPARE(listedPaths(dlg), QStringList({QStringLiteral("new.txt"), QStringLiteral("old.txt")}));
+        QVERIFY(commitAndWait(dlg, QStringLiteral("Rename")));
+
+        QCOMPARE(lastCommitNameStatus(repo), QStringList{QStringLiteral("R100\told.txt\tnew.txt")});
+        QVERIFY(gitLines(repo, {QStringLiteral("status"), QStringLiteral("--porcelain")}).isEmpty());
+    }
+
+    void commitsADetectedRename()
+    {
+        const TestRepo repo;
+        renameOutsideGit(repo);
+        repo.run({QStringLiteral("rm"), QStringLiteral("--quiet"), QStringLiteral("--cached"), QStringLiteral("old.txt")});
+        repo.run({QStringLiteral("add"), QStringLiteral("new.txt")});
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QCOMPARE(listedPaths(dlg), QStringList{QStringLiteral("new.txt")});
+        QVERIFY(commitAndWait(dlg, QStringLiteral("Rename")));
+
+        QCOMPARE(lastCommitNameStatus(repo), QStringList{QStringLiteral("R100\told.txt\tnew.txt")});
+        QVERIFY(gitLines(repo, {QStringLiteral("status"), QStringLiteral("--porcelain")}).isEmpty());
+    }
+
+    void leavesAnUncheckedRenameStaged()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        renameOutsideGit(repo);
+        repo.run({QStringLiteral("rm"), QStringLiteral("--quiet"), QStringLiteral("--cached"), QStringLiteral("old.txt")});
+        repo.run({QStringLiteral("add"), QStringLiteral("new.txt")});
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QVERIFY(setChecked(dlg, QStringLiteral("new.txt"), false));
+        QVERIFY(commitAndWait(dlg, QStringLiteral("Only a")));
+
+        QCOMPARE(lastCommitNameStatus(repo), QStringList{QStringLiteral("M\ta.txt")});
+        QCOMPARE(gitLines(repo, {QStringLiteral("status"), QStringLiteral("--porcelain")}), QStringList{QStringLiteral("R  old.txt -> new.txt")});
     }
 
     void commitsCheckedUnversionedFile()

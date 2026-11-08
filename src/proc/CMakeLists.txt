@@ -104,6 +104,8 @@ target_sources(kgtproc PRIVATE
     mergeabortdlg.hpp
     mergedlg.cpp
     mergedlg.hpp
+    progresscommands/addprogresscommand.cpp
+    progresscommands/addprogresscommand.hpp
     progresscommands/revertprogresscommand.cpp
     progresscommands/revertprogresscommand.hpp
     progressdlg.cpp

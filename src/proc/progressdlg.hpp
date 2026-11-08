@@ -57,8 +57,9 @@ public:
     /**
      * Adds a command to run, TortoiseGit's m_GitCmdList. Must be called before the dialog is shown.
      * @param arguments The arguments after "git".
+     * @param input What git reads on stdin, such as the paths of --pathspec-from-file=-. It gets no stdin if empty.
      */
-    void addGitCmd(const QStringList& arguments);
+    void addGitCmd(const QStringList& arguments, const QByteArray& input = {});
 
     /**
      * Called when the commands end, before the result is shown, with the OR-ed exit status and an empty message.
@@ -123,6 +124,14 @@ protected:
 
 private:
     /**
+     * One git command to run.
+     */
+    struct GitCmd {
+        QStringList arguments; // After "git"
+        QByteArray input; // On stdin
+    };
+
+    /**
      * Starts the next command, or finishes if there is none.
      */
     void runNext();
@@ -172,7 +181,7 @@ private:
     QPushButton *m_closeButton;
     QPushButton *m_abortButton;
     QString m_workingDirectory;
-    QList<QStringList> m_gitCmdList;
+    QList<GitCmd> m_gitCmdList;
     PostExecCallback m_postExecCallback;
     qsizetype m_nextCmd = 0; // Index in m_gitCmdList of the command to run next
     std::unique_ptr<QProcess> m_process; // The running command

@@ -70,6 +70,8 @@ AddDlg::AddDlg(const QString& workingTree, const QStringList& paths, QWidget *pa
     m_addListCtrl->setColumnHidden(GitStatusListModel::LinesRemovedColumn, true);
     m_addListCtrl->setWorkingTree(workingTree);
     m_addListCtrl->setPathFilter(relativePaths(workingTree, paths));
+    // GITSLC_POPALL ^ GITSLC_POPADD: everything listed here is being added anyway
+    m_addListCtrl->setContextMenus(GitStatusListCtrl::ContextMenu::All & ~GitStatusListCtrl::ContextMenus(GitStatusListCtrl::ContextMenu::Add));
     m_addListCtrl->setSelectButton(m_selectAll);
     m_addListCtrl->setEmptyString(
         i18n("There is nothing to add.\nAll the files and folders are either under version control,\nhave been ignored or the global ignore configuration "

@@ -149,6 +149,20 @@ private Q_SLOTS:
         TestRepo::isolateGit();
     }
 
+    void writesTheInputToStdin()
+    {
+        const TestRepo repo;
+        ProgressDlg dlg(repo.path());
+        dlg.addGitCmd({QStringLiteral("hash-object"), QStringLiteral("--stdin")}, "hello\n");
+        const QSignalSpy finished(&dlg, &ProgressDlg::commandsFinished);
+        dlg.start();
+        QVERIFY(QTest::qWaitFor([&finished] {
+            return !finished.isEmpty();
+        }));
+        QCOMPARE(dlg.gitStatus(), 0);
+        QVERIFY(dlg.logText().contains(QStringLiteral("ce013625030ba8dba906f756967f9e9ca394464a")));
+    }
+
     void pushArguments()
     {
         QCOMPARE(PushCommand::pushArguments(pushMain()),

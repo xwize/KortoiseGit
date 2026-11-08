@@ -3,7 +3,9 @@
 
 #include "gitstatuslistctrl.hpp"
 
+#include "adddlg.hpp"
 #include "git/git.hpp"
+#include "progressdlg.hpp"
 
 #include <QAbstractButton>
 #include <QApplication>
@@ -293,6 +295,63 @@ private:
                    return !ctrl.isBusy();
                },
                15000);
+}
+
+/**
+ * Picks an Add entry from the list's context menu for the selected files, waits for the progress dialog to succeed,
+ * closes it and waits for the reload.
+ * @param ctrl The list.
+ * @param text The entry.
+ * @param withShift Whether Shift is held as the menu opens, for the entries it reveals.
+ * @returns Whether the menu offered it and git succeeded.
+ */
+[[nodiscard]] bool addFromMenu(GitStatusListCtrl& ctrl, const QString& text, bool withShift = false)
+{
+    if (withShift) {
+        QTest::keyPress(ctrl.windowHandle(), Qt::Key_Shift, Qt::ShiftModifier);
+    }
+    bool triggered = false;
+    withContextMenu(ctrl, [&triggered, &text](const QMenu *menu) {
+        for (QAction *action : menu->actions()) {
+            if (action->text() == text) {
+                triggered = true;
+                action->trigger();
+            }
+        }
+    });
+    if (withShift) {
+        QTest::keyRelease(ctrl.windowHandle(), Qt::Key_Shift, Qt::NoModifier);
+    }
+    if (!triggered) {
+        return false;
+    }
+    ProgressDlg *progress = nullptr;
+    const bool done = QTest::qWaitFor(
+        [&progress] {
+            progress = qobject_cast<ProgressDlg *>(QApplication::activeModalWidget());
+            return progress && progress->isDone();
+        },
+        15000);
+    if (!done || progress->gitStatus() != 0) {
+        return false;
+    }
+    progress->accept();
+    return QTest::qWaitFor(
+        [&ctrl] {
+            return !ctrl.isBusy();
+        },
+        15000);
+}
+
+/**
+ * Commits old.txt, then renames it to new.txt outside git.
+ * @param repo An empty repository.
+ */
+void renameOutsideGit(const TestRepo& repo)
+{
+    repo.write(QStringLiteral("old.txt"), "a file that is renamed\n");
+    repo.commitAll();
+    QVERIFY(QFile::rename(repo.path() + QStringLiteral("/old.txt"), repo.path() + QStringLiteral("/new.txt")));
 }
 
 } // namespace
@@ -755,7 +814,169 @@ private Q_SLOTS:
         QCOMPARE(rowOf(*ctrl->statusModel(), QStringLiteral("e.md")), -1);
     }
 
+    void addIsOfferedForUnversionedAndIgnored()
+    {
+        const TestRepo repo;
+        makeChanges(repo);
+        auto ctrl = makeShownList(repo);
+        QVERIFY(ctrl);
+        const QString addText = QStringLiteral("Add");
+        for (const QString& path : {QStringLiteral("e.md"), QStringLiteral("f.log")}) {
+            select(*ctrl, {path});
+            QCOMPARE(menuTexts(*ctrl).constFirst(), addText);
+        }
+        for (const QString& path : {QStringLiteral("a.txt"), QStringLiteral("c.txt"), QStringLiteral("d.txt")}) {
+            select(*ctrl, {path});
+            QVERIFY(!menuTexts(*ctrl).contains(addText));
+        }
+        // It comes before Compare, and the entry the menu is opened on decides
+        select(*ctrl, {QStringLiteral("e.md"), QStringLiteral("a.txt")});
+        QCOMPARE(menuTexts(*ctrl).mid(0, 2), QStringList({addText, QStringLiteral("Compare with b&ase")}));
+        select(*ctrl, {QStringLiteral("a.txt"), QStringLiteral("e.md")});
+        QVERIFY(!menuTexts(*ctrl).contains(addText));
+    }
+
+    void addIsNotOfferedInTheAddDialog()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll();
+        repo.write(QStringLiteral("new.txt"), "n\n");
+        AddDlg dlg(repo.path(), {repo.path()});
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&dlg));
+        QVERIFY(QTest::qWaitFor([&dlg] {
+            return !dlg.listCtrl()->isBusy();
+        }));
+        select(*dlg.listCtrl(), {QStringLiteral("new.txt")});
+        const QStringList texts = menuTexts(*dlg.listCtrl());
+        QVERIFY(texts.contains(QStringLiteral("&Delete")));
+        QVERIFY(!texts.contains(QStringLiteral("Add")));
+    }
+
+    void shiftOffersTheFileModes()
+    {
+        const TestRepo repo;
+        makeChanges(repo);
+        auto ctrl = makeShownList(repo);
+        QVERIFY(ctrl);
+        select(*ctrl, {QStringLiteral("e.md")});
+        QVERIFY(!menuTexts(*ctrl).contains(QStringLiteral("Add as Executable (+x)")));
+        QTest::keyPress(ctrl->windowHandle(), Qt::Key_Shift, Qt::ShiftModifier);
+        const QStringList texts = menuTexts(*ctrl);
+        QTest::keyRelease(ctrl->windowHandle(), Qt::Key_Shift, Qt::NoModifier);
+        QCOMPARE(texts.mid(0, 3), QStringList({QStringLiteral("Add"), QStringLiteral("Add as Executable (+x)"), QStringLiteral("Add as Symlink")}));
+    }
+
+    void addSetsTheChosenFileMode()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll();
+        repo.write(QStringLiteral("tool.sh"), "#!/bin/sh\n");
+        repo.write(QStringLiteral("link.txt"), "a.txt");
+        auto ctrl = makeShownList(repo);
+        QVERIFY(ctrl);
+
+        select(*ctrl, {QStringLiteral("tool.sh")});
+        QVERIFY(addFromMenu(*ctrl, QStringLiteral("Add as Executable (+x)"), true));
+        QVERIFY(indexEntry(repo, QStringLiteral("tool.sh")).startsWith("100755 "));
+
+        select(*ctrl, {QStringLiteral("link.txt")});
+        QVERIFY(addFromMenu(*ctrl, QStringLiteral("Add as Symlink"), true));
+        QVERIFY(indexEntry(repo, QStringLiteral("link.txt")).startsWith("120000 "));
+    }
+
+    void addActsOnTheSelectionAndChecksTheFiles()
+    {
+        const TestRepo repo;
+        makeChanges(repo);
+        auto ctrl = makeShownList(repo);
+        QVERIFY(ctrl);
+        const GitStatusListModel *model = ctrl->statusModel();
+        const QModelIndex before = model->index(rowOf(*model, QStringLiteral("e.md")), GitStatusListModel::PathColumn);
+        QCOMPARE(before.data(Qt::CheckStateRole).value<Qt::CheckState>(), Qt::Unchecked);
+
+        select(*ctrl, {QStringLiteral("e.md"), QStringLiteral("f.log")});
+        QVERIFY(addFromMenu(*ctrl, QStringLiteral("Add")));
+
+        QCOMPARE(lsFiles(repo, QStringLiteral("e.md")), QByteArray("e.md\n"));
+        QCOMPARE(lsFiles(repo, QStringLiteral("f.log")), QByteArray("f.log\n"));
+        for (const QString& path : {QStringLiteral("e.md"), QStringLiteral("f.log")}) {
+            QCOMPARE(cell(*model, path, GitStatusListModel::StatusColumn), GitStatusListModel::actionName(TGitPath::Action::Added));
+            const QModelIndex after = model->index(rowOf(*model, path), GitStatusListModel::PathColumn);
+            QCOMPARE(after.data(Qt::CheckStateRole).value<Qt::CheckState>(), Qt::Checked);
+        }
+    }
+
+    void deleteThenAddShowsARename()
+    {
+        const TestRepo repo;
+        renameOutsideGit(repo);
+        auto ctrl = makeShownList(repo);
+        QVERIFY(ctrl);
+        select(*ctrl, {QStringLiteral("old.txt")});
+        QVERIFY(deleteFromMenu(*ctrl));
+        select(*ctrl, {QStringLiteral("new.txt")});
+        QVERIFY(addFromMenu(*ctrl, QStringLiteral("Add")));
+        verifyShowsRename(*ctrl);
+    }
+
+    void addThenDeleteShowsARename()
+    {
+        const TestRepo repo;
+        renameOutsideGit(repo);
+        auto ctrl = makeShownList(repo);
+        QVERIFY(ctrl);
+        const GitStatusListModel& model = *ctrl->statusModel();
+        select(*ctrl, {QStringLiteral("new.txt")});
+        QVERIFY(addFromMenu(*ctrl, QStringLiteral("Add")));
+        // With only the add done, TortoiseGit shows the two halves separately
+        QCOMPARE(cell(model, QStringLiteral("new.txt"), GitStatusListModel::PathColumn), QStringLiteral("new.txt"));
+        QCOMPARE(cell(model, QStringLiteral("new.txt"), GitStatusListModel::StatusColumn), GitStatusListModel::actionName(TGitPath::Action::Added));
+        QCOMPARE(cell(model, QStringLiteral("old.txt"), GitStatusListModel::StatusColumn),
+                 GitStatusListModel::actionName(TGitPath::Actions(TGitPath::Action::Deleted) | TGitPath::Action::Missing));
+
+        select(*ctrl, {QStringLiteral("old.txt")});
+        QVERIFY(deleteFromMenu(*ctrl));
+        verifyShowsRename(*ctrl);
+    }
+
+    void renameIsDetectedWithStatusRenamesOff()
+    {
+        const TestRepo repo;
+        renameOutsideGit(repo);
+        repo.git({QStringLiteral("config"), QStringLiteral("status.renames"), QStringLiteral("false")});
+        repo.git({QStringLiteral("rm"), QStringLiteral("--quiet"), QStringLiteral("--cached"), QStringLiteral("old.txt")});
+        repo.git({QStringLiteral("add"), QStringLiteral("new.txt")});
+        auto ctrl = makeShownList(repo);
+        QVERIFY(ctrl);
+        verifyShowsRename(*ctrl);
+    }
+
 private:
+    /**
+     * Checks that the list shows old.txt's rename to new.txt as one entry.
+     * @param ctrl The list.
+     */
+    static void verifyShowsRename(GitStatusListCtrl& ctrl)
+    {
+        const GitStatusListModel& model = *ctrl.statusModel();
+        QCOMPARE(listedPaths(model), QStringList{QStringLiteral("new.txt")});
+        QCOMPARE(cell(model, QStringLiteral("new.txt"), GitStatusListModel::PathColumn), QStringLiteral("new.txt (from old.txt)"));
+        QCOMPARE(cell(model, QStringLiteral("new.txt"), GitStatusListModel::StatusColumn), GitStatusListModel::actionName(TGitPath::Action::Replaced));
+    }
+
+    /**
+     * @param repo A repository.
+     * @param path A path relative to its root.
+     * @returns Its line of git ls-files --stage, which starts with its mode.
+     */
+    [[nodiscard]] static QByteArray indexEntry(const TestRepo& repo, const QString& path)
+    {
+        return Git(repo.path()).run({QStringLiteral("ls-files"), QStringLiteral("--stage"), QStringLiteral("--"), path}, RunMode::ReadOnly);
+    }
+
     /**
      * @param repo A repository.
      * @returns A shown list of everything in it, tracked files checked and loaded, or nullptr if it didn't load.
