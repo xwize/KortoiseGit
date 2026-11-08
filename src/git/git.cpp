@@ -99,6 +99,18 @@ QString Git::stripRefName(const QString& ref)
     return ref;
 }
 
+bool Git::isHash(QByteArrayView text)
+{
+    constexpr qsizetype sha1Length = 40;
+    constexpr qsizetype sha256Length = 64;
+    if (text.size() != sha1Length && text.size() != sha256Length) {
+        return false;
+    }
+    return std::ranges::all_of(text, [](char digit) {
+        return (digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f');
+    });
+}
+
 bool Git::hasWorkingTreeConflicts() const
 {
     return !run({QStringLiteral("ls-files"), QStringLiteral("-u")}, RunMode::ReadOnly).isEmpty();

@@ -6,6 +6,8 @@
 
 #include "git/gitrevloglist.hpp"
 
+#include "git/git.hpp"
+
 #include <QByteArrayView>
 #include <QLatin1StringView>
 
@@ -57,22 +59,6 @@ tl::unexpected<Error> badRecord(QLatin1StringView command, const QByteArray& buf
 }
 
 /**
- * @param text A field.
- * @returns Whether it is a full commit hash (SHA-1 or SHA-256).
- */
-bool isHash(QByteArrayView text)
-{
-    constexpr qsizetype sha1Length = 40;
-    constexpr qsizetype sha256Length = 64;
-    if (text.size() != sha1Length && text.size() != sha256Length) {
-        return false;
-    }
-    return std::ranges::all_of(text, [](char digit) {
-        return (digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f');
-    });
-}
-
-/**
  * Builds a commit from the fields of one record.
  * @param fields The record's fields, in Field order.
  * @returns The commit, or nothing if a field is malformed.
@@ -82,7 +68,7 @@ std::optional<GitRevLoglist> makeRev(const std::array<QByteArrayView, fieldCount
     const auto field = [&fields](Field which) {
         return fields.at(static_cast<std::size_t>(which));
     };
-    if (!isHash(field(Field::Hash))) {
+    if (!Git::isHash(field(Field::Hash))) {
         return std::nullopt;
     }
     bool isNumber = false;
