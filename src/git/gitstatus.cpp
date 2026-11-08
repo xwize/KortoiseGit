@@ -270,7 +270,12 @@ namespace kgt
 
 QStringList GitStatus::arguments(IgnoredFiles ignored)
 {
-    QStringList arguments{QStringLiteral("status"), QStringLiteral("--porcelain=v2"), QStringLiteral("-z"), QStringLiteral("--untracked-files=all")};
+    // --find-renames: CGit::GetWorkingTreeChanges' -M, which detects renames whatever status.renames says
+    QStringList arguments{QStringLiteral("status"),
+                          QStringLiteral("--porcelain=v2"),
+                          QStringLiteral("-z"),
+                          QStringLiteral("--untracked-files=all"),
+                          QStringLiteral("--find-renames")};
     if (ignored == IgnoredFiles::Include) {
         arguments.append(QStringLiteral("--ignored=matching"));
     }

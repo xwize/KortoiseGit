@@ -150,6 +150,13 @@ public:
     void setDirectFiles(const QStringList& paths);
 
     /**
+     * Forgets the remembered check state of some paths, so the next setEntries() gives them the default for their
+     * status (m_mapFilenameToChecked.erase).
+     * @param paths Paths relative to the working tree root.
+     */
+    void resetCheckStates(const QStringList& paths);
+
+    /**
      * @returns The kinds of entries that are listed.
      */
     [[nodiscard]] ShowFlags showFlags() const;

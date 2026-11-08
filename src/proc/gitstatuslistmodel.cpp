@@ -128,6 +128,13 @@ void GitStatusListModel::setShowFlags(ShowFlags show, ShowFlags check)
     Q_EMIT checkedCountChanged();
 }
 
+void GitStatusListModel::resetCheckStates(const QStringList& paths)
+{
+    for (const QString& path : paths) {
+        m_checkedByPath.remove(path);
+    }
+}
+
 GitStatusListModel::ShowFlags GitStatusListModel::showFlags() const
 {
     return m_show;

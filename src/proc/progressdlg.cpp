@@ -124,10 +124,10 @@ ProgressDlg::~ProgressDlg()
     killProcess();
 }
 
-void ProgressDlg::addGitCmd(const QStringList& arguments)
+void ProgressDlg::addGitCmd(const QStringList& arguments, const QByteArray& input)
 {
     Q_ASSERT(!m_started);
-    m_gitCmdList.append(arguments);
+    m_gitCmdList.append(GitCmd{.arguments = arguments, .input = input});
 }
 
 void ProgressDlg::setPostExecCallback(PostExecCallback callback)
@@ -197,7 +197,7 @@ void ProgressDlg::runNext()
         finish(m_gitCmdList.isEmpty() ? -1 : static_cast<int>(m_combinedStatus));
         return;
     }
-    const QStringList arguments = m_gitCmdList.at(m_nextCmd);
+    const auto& [arguments, input] = m_gitCmdList.at(m_nextCmd);
 
     // TortoiseGit's m_bShowCommand, on by default: the command line goes into the log first
     m_parser.appendChunk(((m_nextCmd > 0 ? QStringLiteral("\n") : QString()) + GitCall::formatCommandLine(arguments) + QLatin1Char('\n')).toUtf8());
@@ -209,7 +209,9 @@ void ProgressDlg::runNext()
     m_process->setWorkingDirectory(m_workingDirectory);
     m_process->setProcessEnvironment(GitCall::environment(RunMode::ReadWrite));
     m_process->setProcessChannelMode(QProcess::MergedChannels);
-    m_process->setStandardInputFile(QProcess::nullDevice());
+    if (input.isEmpty()) {
+        m_process->setStandardInputFile(QProcess::nullDevice());
+    }
     // Its own process group, so Abort can kill the ssh and hooks git starts too (TortoiseGit's KillProcessTree)
     m_process->setChildProcessModifier([] {
         ::setpgid(0, 0);
@@ -224,6 +226,10 @@ void ProgressDlg::runNext()
         finish(-1);
     });
     m_process->start();
+    if (!input.isEmpty()) {
+        m_process->write(input);
+        m_process->closeWriteChannel();
+    }
 }
 
 void ProgressDlg::onReadyRead()

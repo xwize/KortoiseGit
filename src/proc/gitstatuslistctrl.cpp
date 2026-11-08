@@ -301,7 +301,7 @@ void GitStatusListCtrl::reload()
 
 bool GitStatusListCtrl::isBusy() const
 {
-    return m_isBusy || m_statusCall || m_indexDiffCall || m_numStatCall || m_revertCommand || m_resolveCall || m_isDeleting;
+    return m_isBusy || m_statusCall || m_indexDiffCall || m_numStatCall || isModifying();
 }
 
 void GitStatusListCtrl::setSelectButton(QCheckBox *button)
@@ -355,7 +355,7 @@ void GitStatusListCtrl::selectFirstConflict()
 
 bool GitStatusListCtrl::isModifying() const
 {
-    return m_revertCommand || m_resolveCall || m_isDeleting;
+    return m_revertCommand || m_resolveCall || m_isDeleting || m_addCommand;
 }
 
 QString GitStatusListCtrl::absolutePath(const GitStatusListEntry& entry) const
@@ -388,6 +388,7 @@ void GitStatusListCtrl::contextMenuEvent(QContextMenuEvent *event)
     }
     QMenu menu(this);
     addConflictEntries(menu, static_cast<int>(selected.size()));
+    addAddEntries(menu);
     QList<GitStatusListEntry> tracked;
     std::copy_if(selected.cbegin(), selected.cend(), std::back_inserter(tracked), isTracked);
     if (!tracked.isEmpty()) {
@@ -647,6 +648,63 @@ void GitStatusListCtrl::addConflictEntries(QMenu& menu, int selectedCount)
     if (m_contextMenus & (ContextMenu::Conflict | ContextMenu::Resolve)) {
         menu.addSeparator();
     }
+}
+
+void GitStatusListCtrl::addAddEntries(QMenu& menu)
+{
+    // CGitStatusListCtrl::OnContextMenuList: the entry the menu was opened on decides
+    const GitStatusListEntry *focused = focusedEntry();
+    if (!focused || !(focused->actions & (Action::Unversioned | Action::Ignore)) || !m_contextMenus.testFlag(ContextMenu::Add) || m_addCommand) {
+        return;
+    }
+    const auto addEntry = [this, &menu](const QString& text, AddProgressCommand::FileMode fileMode) {
+        menu.addAction(QIcon::fromTheme(QStringLiteral("list-add")), text, this, [this, fileMode] {
+            // After the menu has closed, so the progress dialog isn't nested in it
+            QMetaObject::invokeMethod(
+                this,
+                [this, fileMode] {
+                    addSelected(fileMode);
+                },
+                Qt::QueuedConnection);
+        });
+    };
+    addEntry(i18n("Add"), AddProgressCommand::FileMode::Unchanged);
+    if (QGuiApplication::queryKeyboardModifiers().testFlag(Qt::ShiftModifier) && !QFileInfo(absolutePath(*focused)).isDir()) {
+        addEntry(i18n("Add as Executable (+x)"), AddProgressCommand::FileMode::Executable);
+        addEntry(i18n("Add as Symlink"), AddProgressCommand::FileMode::Symlink);
+    }
+}
+
+void GitStatusListCtrl::addSelected(AddProgressCommand::FileMode fileMode)
+{
+    // The IDGITLC_ADD handler of CGitStatusListCtrl::OnContextMenuList
+    const QList<GitStatusListEntry> selected = selectedEntries();
+    if (selected.isEmpty() || m_addCommand) {
+        return;
+    }
+    QStringList paths;
+    paths.reserve(selected.size());
+    for (const GitStatusListEntry& entry : selected) {
+        paths.append(entry.path);
+    }
+    m_addCommand = std::make_unique<AddProgressCommand>(fileMode);
+    m_addCommand->setPathList(paths);
+    connect(m_addCommand.get(), &AddProgressCommand::finished, this, &GitStatusListCtrl::onAddFinished);
+    Q_EMIT checkedCountChanged();
+    m_addCommand->run(m_workingTree, this);
+}
+
+void GitStatusListCtrl::onAddFinished()
+{
+    // Deleted from the event loop: it is still emitting
+    AddProgressCommand *command = m_addCommand.release();
+    command->deleteLater();
+    if (const std::optional<Error>& error = command->error()) {
+        showError(this, error->message);
+    }
+    // Reset the unchecked status, so the files take the default for their new status, and RefreshParent
+    m_model->resetCheckStates(command->pathList());
+    reload();
 }
 
 void GitStatusListCtrl::editConflict(const GitStatusListEntry& entry)
