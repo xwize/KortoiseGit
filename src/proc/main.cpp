@@ -10,10 +10,10 @@
 #include "apputils.hpp"
 #include "cmdlineargs.hpp"
 #include "commands/command.hpp"
-#include "kortoisegit_version.hpp"
 #include "kortoisegitproc_debug.hpp"
 #include "utils/result.hpp"
 #include "utils/runtimeerror.hpp"
+#include "utils/version.hpp"
 
 #include <KAboutData>
 #include <KLocalizedString>
@@ -94,7 +94,7 @@ int main(int argc, char *argv[])
 
     KAboutData aboutData(QStringLiteral("kortoisegitproc"),
                          i18n("KortoiseGit"),
-                         QStringLiteral(KORTOISEGIT_VERSION_STRING),
+                         kgt::versionString(),
                          i18n("A port of TortoiseGit to KDE. Not affiliated with the TortoiseGit project."),
                          KAboutLicense::GPL_V2,
                          i18n("© 2026 James Jones"));

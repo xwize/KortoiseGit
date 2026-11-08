@@ -3,7 +3,8 @@
 
 cmake_minimum_required(VERSION 3.27)
 
-project(kortoisegit VERSION 0.1.0 LANGUAGES CXX)
+# The one place the version is set: scripts/release.sh changes it and creates the matching tag
+project(kortoisegit VERSION 0.5.0 LANGUAGES CXX)
 
 set(QT_MIN_VERSION "6.7.0")
 set(KF_MIN_VERSION "6.0.0")
@@ -19,7 +20,6 @@ include(KDEInstallDirs)
 include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 include(ECMQtDeclareLoggingCategory)
-include(ECMSetupVersion)
 include(ECMAddTests)
 include(ECMInstallIcons)
 include(FeatureSummary)

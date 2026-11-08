@@ -1,11 +1,6 @@
 # SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-ecm_setup_version(${PROJECT_VERSION}
-    VARIABLE_PREFIX KORTOISEGIT
-    VERSION_HEADER ${CMAKE_CURRENT_BINARY_DIR}/kortoisegit_version.hpp
-)
-
 ecm_qt_declare_logging_category(kgtproc_logging
     HEADER kortoisegitproc_debug.hpp
     IDENTIFIER KGT_PROC

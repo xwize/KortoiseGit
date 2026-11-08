@@ -10,6 +10,7 @@
 #include "remotecachelink.hpp"
 #include "utils/buildconfig.hpp"
 #include "utils/runtimeerror.hpp"
+#include "utils/version.hpp"
 
 #include <KFileItem>
 #include <KLocalizedString>
@@ -376,6 +377,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_gitMenuAction(new QAction(submenuIcon(), i18n("&KortoiseGit"), this))
 {
     Q_UNUSED(args)
+    qCDebug(KGT_PLUGIN) << "KortoiseGit" << versionString();
     m_gitMenuAction->setMenu(m_gitMenu.get());
     connect(m_createRepoAction, &QAction::triggered, this, [this] {
         watchForNewRepository(m_createRepoAction->data().toStringList().constFirst());
