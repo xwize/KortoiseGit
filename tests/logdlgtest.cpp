@@ -15,6 +15,8 @@
 #include <QSignalSpy>
 #include <QTest>
 
+#include <algorithm>
+#include <cstddef>
 #include <initializer_list>
 #include <vector>
 
@@ -119,6 +121,34 @@ void makeBranchyHistory(const TestRepo& repo)
     git({"merge", "--quiet", "--no-ff", "-m", "Merge topic", "topic"});
     commit(QStringLiteral("Main 2"));
     git({"merge", "--quiet", "--no-ff", "-m", "Merge feature again", "feature"});
+}
+
+/**
+ * Fills a repository with nine branches that fork from the root and merge back into main one by one, so the graph
+ * has enough lanes to show every lane colour.
+ * @param repo An empty repository.
+ */
+void makeWideHistory(const TestRepo& repo)
+{
+    constexpr int branches = 9;
+    repo.write(QStringLiteral("root.txt"), "x");
+    repo.commitAll(QStringLiteral("Root"));
+    for (int i = 0; i < branches; ++i) {
+        const QString branch = QStringLiteral("b%1").arg(i);
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), branch, QStringLiteral("main")});
+        repo.write(QStringLiteral("%1.txt").arg(branch), "x");
+        repo.commitAll(QStringLiteral("Branch %1").arg(i));
+    }
+    repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("main")});
+    for (int i = 0; i < branches; ++i) {
+        const QString branch = QStringLiteral("b%1").arg(i);
+        repo.run({QStringLiteral("merge"),
+                  QStringLiteral("--quiet"),
+                  QStringLiteral("--no-ff"),
+                  QStringLiteral("-m"),
+                  QStringLiteral("Merge %1").arg(branch),
+                  branch});
+    }
 }
 
 /**
@@ -320,6 +350,41 @@ private Q_SLOTS:
         const QString screenshotDir = qEnvironmentVariable("KGT_SCREENSHOT_DIR");
         if (!screenshotDir.isEmpty()) {
             const QString name = isDark ? QStringLiteral("logdlg-graph-dark.png") : QStringLiteral("logdlg-graph-light.png");
+            QVERIFY(dlg.grab().save(QDir(screenshotDir).absoluteFilePath(name)));
+        }
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void drawsEveryLaneColour_data()
+    {
+        drawsGraph_data();
+    }
+
+    void drawsEveryLaneColour()
+    {
+        QFETCH(const bool, isDark);
+        const TestRepo repo;
+        makeWideHistory(repo);
+        LogDlg dlg({repo.path()});
+        if (isDark) {
+            dlg.setPalette(darkPalette());
+        }
+        QVERIFY(waitForLog(dlg));
+        const GitLogListModel *model = dlg.logList()->logModel();
+        std::size_t widest = 0;
+        for (int row = 0; row < model->rowCount(); ++row) {
+            widest = std::max(widest, model->lanes(row).size());
+        }
+        QVERIFY(widest > Lanes::colorsNum);
+
+        dlg.resize(900, 1100);
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&dlg));
+        // Wide enough for every lane, so the screenshot shows each colour
+        constexpr int graphWidth = 180;
+        dlg.logList()->setColumnWidth(GitLogListModel::GraphColumn, graphWidth);
+        const QString screenshotDir = qEnvironmentVariable("KGT_SCREENSHOT_DIR");
+        if (!screenshotDir.isEmpty()) {
+            const QString name = isDark ? QStringLiteral("logdlg-lanes-dark.png") : QStringLiteral("logdlg-lanes-light.png");
             QVERIFY(dlg.grab().save(QDir(screenshotDir).absoluteFilePath(name)));
         }
     }
