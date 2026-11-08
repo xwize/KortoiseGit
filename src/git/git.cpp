@@ -121,6 +121,17 @@ QString Git::configValue(const QString& name) const
     }
 }
 
+void Git::setConfigValue(const QString& name, const QString& value) const
+{
+    // After --: a value may start with a dash
+    std::ignore = run({QStringLiteral("config"), QStringLiteral("--local"), QStringLiteral("--"), name, value});
+}
+
+void Git::unsetConfigValue(const QString& name) const
+{
+    std::ignore = run({QStringLiteral("config"), QStringLiteral("--local"), QStringLiteral("--unset"), QStringLiteral("--"), name});
+}
+
 QString Git::currentBranch() const
 {
     const QString branch = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(m_workingDirectory));

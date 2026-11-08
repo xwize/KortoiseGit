@@ -38,10 +38,14 @@ target_sources(kgtproc PRIVATE
     commitdlg.hpp
     createrepodlg.cpp
     createrepodlg.hpp
+    createbranchtagdlg.cpp
+    createbranchtagdlg.hpp
     filterhelper.cpp
     filterhelper.hpp
     commands/addcommand.cpp
     commands/addcommand.hpp
+    commands/branchcommand.cpp
+    commands/branchcommand.hpp
     commands/clonecommand.cpp
     commands/clonecommand.hpp
     commands/commitcommand.cpp

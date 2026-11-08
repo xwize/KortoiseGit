@@ -107,6 +107,21 @@ public:
     [[nodiscard]] QString configValue(const QString& name) const;
 
     /**
+     * Ported from CGit::SetConfigValue, for the repository's own configuration.
+     * @param name A configuration key, such as branch.main.description.
+     * @param value Its new value.
+     * @throws RuntimeError (category Git) if git fails.
+     */
+    void setConfigValue(const QString& name, const QString& value) const;
+
+    /**
+     * Ported from CGit::UnsetConfigValue, for the repository's own configuration.
+     * @param name A configuration key.
+     * @throws RuntimeError (category Git) if git fails, which includes the key not being set.
+     */
+    void unsetConfigValue(const QString& name) const;
+
+    /**
      * Ported from CGit::GetCurrentBranch.
      * @returns The current branch's name, or "(no branch)" for a detached HEAD.
      */
