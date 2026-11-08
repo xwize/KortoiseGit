@@ -102,6 +102,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_addAction(new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("&Add..."), this))
     , m_pushAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-push")), i18n("Pus&h..."), this))
     , m_cloneAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-download")), i18n("Git Clone..."), this))
+    , m_refBrowseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Browse References"), this))
 {
     Q_UNUSED(args)
     connect(m_createRepoAction, &QAction::triggered, this, [this] {
@@ -121,6 +122,10 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_pushAction->setToolTip(i18n("Push commits to a remote repository."));
     connect(m_pushAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("push"), m_pushAction);
+    });
+    m_refBrowseAction->setToolTip(i18n("Opens the Reference Browser dialog."));
+    connect(m_refBrowseAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("refbrowse"), m_refBrowseAction);
     });
     m_revertAction->setToolTip(i18n("Reverts all changes you made since the last update"));
     connect(m_revertAction, &QAction::triggered, this, [this] {
@@ -194,8 +199,10 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
         m_cloneAction->setData(paths);
         actions.append(m_cloneAction);
     }
-    // TortoiseGit's Push: one folder in the working tree, or the folder shown when nothing is selected
-    if (items.size() == 1 && items.constFirst().isDir() && hasVersionedItem(items)) {
+    // TortoiseGit's Push and Browse References: one folder in the working tree, or the folder shown when nothing
+    // is selected
+    const bool oneVersionedFolder = items.size() == 1 && items.constFirst().isDir() && hasVersionedItem(items);
+    if (oneVersionedFolder) {
         m_pushAction->setData(paths);
         actions.append(m_pushAction);
     }
@@ -206,7 +213,11 @@ QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) con
     }
     m_showLogAction->setData(paths);
     actions.append(m_showLogAction);
-    // TortoiseGit's menu order: Clone, Push, Commit, Show log, ..., Revert, ..., Add
+    if (oneVersionedFolder) {
+        m_refBrowseAction->setData(paths);
+        actions.append(m_refBrowseAction);
+    }
+    // TortoiseGit's menu order: Clone, Push, Commit, Show log, Browse References, ..., Revert, ..., Add
     if (hasRevertableItem(items)) {
         m_revertAction->setData(paths);
         actions.append(m_revertAction);

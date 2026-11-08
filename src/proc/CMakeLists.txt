@@ -24,6 +24,10 @@ target_sources(kgtproc PRIVATE
     adddlg.hpp
     apputils.cpp
     apputils.hpp
+    browserefsdlg.cpp
+    browserefsdlg.hpp
+    browserefsdlgfilter.cpp
+    browserefsdlgfilter.hpp
     clonedlg.cpp
     clonedlg.hpp
     cmdlineargs.cpp
@@ -32,6 +36,8 @@ target_sources(kgtproc PRIVATE
     commitdlg.hpp
     createrepodlg.cpp
     createrepodlg.hpp
+    filterhelper.cpp
+    filterhelper.hpp
     commands/addcommand.cpp
     commands/addcommand.hpp
     commands/clonecommand.cpp
@@ -46,6 +52,8 @@ target_sources(kgtproc PRIVATE
     commands/logcommand.hpp
     commands/pushcommand.cpp
     commands/pushcommand.hpp
+    commands/refbrowsecommand.cpp
+    commands/refbrowsecommand.hpp
     commands/revertcommand.cpp
     commands/revertcommand.hpp
     gitclioutputparser.cpp
@@ -66,8 +74,12 @@ target_sources(kgtproc PRIVATE
     progressdlg.hpp
     pushdlg.cpp
     pushdlg.hpp
+    refleaflistmodel.cpp
+    refleaflistmodel.hpp
     revertdlg.cpp
     revertdlg.hpp
+    shadowtree.cpp
+    shadowtree.hpp
 )
 
 target_include_directories(kgtproc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})

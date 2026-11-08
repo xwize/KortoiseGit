@@ -12,6 +12,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 namespace kgt
 {
@@ -40,6 +41,13 @@ public:
      * @returns The URL, or an empty string if the text holds none.
      */
     [[nodiscard]] static QString clipboardLink(QString clipboardText, const QString& skipGitPrefix = {}, int paramsCount = 0);
+
+    /**
+     * Ported from CAppUtils::RunTortoiseGitProc: starts another kortoisegitproc, detached.
+     * @param arguments Its arguments, such as --command log --path /repo.
+     * @returns Whether it started.
+     */
+    static bool runTortoiseGitProc(const QStringList& arguments);
 };
 
 } // namespace kgt

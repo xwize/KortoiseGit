@@ -129,20 +129,21 @@ private Q_SLOTS:
         const QString log = QStringLiteral("Show &log");
         const QString add = QStringLiteral("&Add...");
         const QString push = QStringLiteral("Pus&h...");
+        const QString refs = QStringLiteral("Browse References");
         // TortoiseGit offers Revert on every versioned folder
         const QString revert = QStringLiteral("Re&vert...");
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("tracked.txt")))}), (QStringList{commit, log}));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{push, commit, log, revert}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{push, commit, log, refs, revert}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral(".git")))}), QStringList{log});
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{log, add}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("build.log")))}), (QStringList{log, add}));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("withnew")))}), (QStringList{push, commit, log, revert, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("withnew")))}), (QStringList{push, commit, log, refs, revert, add}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("untracked")))}), (QStringList{log, add}));
         // One addable item among others is enough, as in TortoiseGit
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("tracked.txt"))), item(repo.filePath(QStringLiteral("new.txt")))}),
                  (QStringList{commit, log, add}));
         // Nothing selected: Dolphin asks about the folder it shows
-        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{push, commit, log, revert, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{push, commit, log, refs, revert, add}));
         // Push is for one folder only, as TortoiseGit's ITEMIS_ONLYONE
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean"))), item(repo.filePath(QStringLiteral("withnew")))}),
                  (QStringList{commit, log, revert, add}));
@@ -151,7 +152,7 @@ private Q_SLOTS:
         QVERIFY(retrieve(plugin, repo.filePath(QStringLiteral("clean"))));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean/a.txt")))}), (QStringList{commit, log}));
         QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("new.txt")))}), (QStringList{log, add}));
-        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{push, commit, log, revert}));
+        QCOMPARE(menuTexts(plugin, {item(repo.filePath(QStringLiteral("clean")))}), (QStringList{push, commit, log, refs, revert}));
 
         // Once the file is added, the next retrieval no longer offers it
         repo.run({QStringLiteral("add"), QStringLiteral("new.txt")});
@@ -212,7 +213,7 @@ private Q_SLOTS:
 
         // The folder shown, when nothing is selected
         actions = plugin.versionControlActions({item(repo.path())});
-        QCOMPARE(actions.size(), 5); // Push, Commit, Show log, Revert, and Add for new.txt
+        QCOMPARE(actions.size(), 6); // Push, Commit, Show log, Browse References, Revert, and Add for new.txt
         QCOMPARE(actions.at(0)->text(), QStringLiteral("Pus&h..."));
         QCOMPARE(actions.at(0)->data().toStringList(), QStringList{repo.path()});
         QCOMPARE(actions.at(1)->text(), QStringLiteral("Git &Commit -> \"main\"..."));

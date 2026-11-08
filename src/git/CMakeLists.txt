@@ -16,6 +16,8 @@ target_sources(kgtgit PRIVATE
     gitnumstat.hpp
     gitrevloglist.cpp
     gitrevloglist.hpp
+    gitrevrefbrowser.cpp
+    gitrevrefbrowser.hpp
     gitstatus.cpp
     gitstatus.hpp
     massivegittask.cpp
