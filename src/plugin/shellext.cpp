@@ -219,6 +219,7 @@ struct MenuEntries {
     bool push = false;
     bool commit = false;
     bool log = false;
+    bool refBrowse = false;
     bool revert = false;
     bool createRepo = false;
     bool add = false;
@@ -241,6 +242,7 @@ MenuEntries menuEntries(const MenuState& state)
         .push = (state.folderInGit && state.onlyOne) || state.wcRoot,
         .commit = state.inGit || state.folderInGit,
         .log = (state.onlyOne && !state.added && (state.inGit || state.folderInGit)) || state.bareRepo,
+        .refBrowse = (state.folderInGit && state.onlyOne) || state.bareRepo,
         .revert = (state.inGit && !state.normal) || state.folderInGit,
         .createRepo = outsideRepository || ignoredFolder,
         .add =
@@ -262,6 +264,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_addAction(new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("&Add..."), this))
     , m_pushAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-push")), i18n("Pus&h..."), this))
     , m_cloneAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-download")), i18n("Git Clone..."), this))
+    , m_refBrowseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Browse References"), this))
 {
     Q_UNUSED(args)
     connect(m_createRepoAction, &QAction::triggered, this, [this] {
@@ -281,6 +284,10 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_pushAction->setToolTip(i18n("Push commits to a remote repository."));
     connect(m_pushAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("push"), m_pushAction);
+    });
+    m_refBrowseAction->setToolTip(i18n("Opens the Reference Browser dialog."));
+    connect(m_refBrowseAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("refbrowse"), m_refBrowseAction);
     });
     m_revertAction->setToolTip(i18n("Reverts all changes you made since the last update"));
     connect(m_revertAction, &QAction::triggered, this, [this] {
@@ -382,6 +389,7 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
     }
     add(entries.commit, m_commitAction);
     add(entries.log, m_showLogAction);
+    add(entries.refBrowse, m_refBrowseAction);
     add(entries.revert, m_revertAction);
     add(entries.createRepo, m_createRepoAction);
     add(entries.add, m_addAction);

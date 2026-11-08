@@ -8,7 +8,9 @@
 #include "apputils.hpp"
 
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QGuiApplication>
+#include <QProcess>
 
 namespace kgt
 {
@@ -68,6 +70,11 @@ QString AppUtils::clipboardLink(QString clipboardText, const QString& skipGitPre
         return clipboardText;
     }
     return {};
+}
+
+bool AppUtils::runTortoiseGitProc(const QStringList& arguments)
+{
+    return QProcess::startDetached(QCoreApplication::applicationFilePath(), arguments);
 }
 
 } // namespace kgt

@@ -1,0 +1,273 @@
+// SPDX-FileCopyrightText: 2009-2026 TortoiseGit
+// SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+/**
+ * @file
+ * Ported from TortoiseGit src/TortoiseProc/BrowseRefsDlg.h (CBrowseRefsDlg): the "Browse references" dialog, also
+ * used as a ref picker by other dialogs. This is its first cut: the tree, the list with its columns, the filter, and
+ * a context menu with Show log, the deletes and copying. Renaming, switching, merging, diffs, fetch, upstream and the
+ * tree's own menu come later.
+ */
+
+#pragma once
+
+#include "browserefsdlgfilter.hpp"
+#include "git/git.hpp"
+#include "refleaflistmodel.hpp"
+#include "shadowtree.hpp"
+
+#include <QDialog>
+#include <QHash>
+#include <QList>
+#include <QString>
+#include <QStringList>
+#include <QTimer>
+
+#include <memory>
+#include <optional>
+
+class QCheckBox;
+class QComboBox;
+class QLabel;
+class QLineEdit;
+class QMenu;
+class QStandardItem;
+class QStandardItemModel;
+class QTreeView;
+
+namespace kgt
+{
+
+class GitCall;
+
+/**
+ * Which kinds of ref the dialog lists, TortoiseGit's gPickRef_* values.
+ */
+enum PickRefKind : unsigned int { // NOLINT(cppcoreguidelines-use-enum-class): Combined as bit flags, as in TortoiseGit
+    PickRefHead = 1, // gPickRef_Head: local branches
+    PickRefTag = 2, // gPickRef_Tag: tags
+    PickRefRemote = 4, // gPickRef_Remote: remote-tracking branches
+    PickRefAll = PickRefHead | PickRefTag | PickRefRemote, // gPickRef_All
+    PickRefNoTag = PickRefAll & ~PickRefTag, // gPickRef_NoTag
+};
+
+/**
+ * A remote-tracking branch split into its remote and its name there.
+ */
+struct RemoteBranch {
+    QString remote; // Such as origin
+    QString branch; // Such as feature/x; empty for the remote itself
+};
+
+/**
+ * How PickRef sets the dialog up as a picker.
+ */
+struct PickRefOptions {
+    QString initialRef = QStringLiteral("HEAD"); // The ref to select first; HEAD for the current branch
+    unsigned int pickRefKind = PickRefAll; // Which kinds of ref to list, PickRefKind bits
+    bool pickMultipleRefs = false; // Whether several refs may be picked, returned separated by spaces
+};
+
+/**
+ * The ref browser: a tree of the repository's refs split at their slashes on the left, and on the right the refs
+ * under the selected node with their last commit. Refs load in the background from one git for-each-ref.
+ */
+class BrowseRefsDlg : public QDialog
+{
+    Q_OBJECT
+
+public:
+    /**
+     * Opens the dialog and starts loading the refs.
+     * @param workingTree The working tree root or bare repository git runs in.
+     * @param parent Parent widget, or nullptr for a top-level dialog.
+     */
+    explicit BrowseRefsDlg(const QString& workingTree, QWidget *parent = nullptr);
+    ~BrowseRefsDlg() override;
+
+    BrowseRefsDlg(const BrowseRefsDlg&) = delete;
+    BrowseRefsDlg& operator=(const BrowseRefsDlg&) = delete;
+    BrowseRefsDlg(BrowseRefsDlg&&) = delete;
+    BrowseRefsDlg& operator=(BrowseRefsDlg&&) = delete;
+
+    /**
+     * Ported from CBrowseRefsDlg::PickRef: shows the dialog as a picker and waits for the user.
+     * @param workingTree The working tree root or bare repository.
+     * @param options What to select first and what may be picked; an empty initialRef means HEAD.
+     * @param parent Parent widget.
+     * @returns The picked ref's full name, such as refs/heads/main, several short names separated by spaces, or an
+     *          empty string if cancelled.
+     */
+    [[nodiscard]] static QString pickRef(const QString& workingTree, const PickRefOptions& options = {}, QWidget *parent = nullptr);
+
+    /**
+     * Turns the dialog into a picker, as PickRef sets it up. Must be called before the refs have loaded.
+     * @param options What to select first and what may be picked.
+     */
+    void setPickMode(const PickRefOptions& options);
+
+    /**
+     * @returns The ref chosen when the dialog closed: the selected ref (several separated by spaces), or the
+     *          current branch for Current Branch. Empty before the dialog closes or if nothing was selected.
+     */
+    [[nodiscard]] const QString& pickedRef() const;
+
+    /**
+     * Reloads the refs in the background, TortoiseGit's Refresh. refreshed() is emitted when done.
+     * @param selectRef The ref or tree node to select then: HEAD for the current branch, or empty to keep the
+     *                  selection.
+     */
+    void refresh(const QString& selectRef = {});
+
+    /**
+     * @returns Whether refs are being loaded.
+     */
+    [[nodiscard]] bool isLoading() const;
+
+    /**
+     * Ported from CBrowseRefsDlg::SelectRef: selects a tree node, or a ref in the list under its parent node.
+     * @param refName A full name such as refs/heads/main, or, if not exact, a partial one such as main.
+     * @param exactMatch Whether @p refName is a full name.
+     * @returns Whether something was selected.
+     */
+    bool selectRef(const QString& refName, bool exactMatch);
+
+    /**
+     * Ported from CBrowseRefsDlg::GetSelectedRef.
+     * @param onlyIfLeaf Whether only a ref selected in the list counts, not a tree node.
+     * @param pickFirstSelIfMultiSel Whether to return the first of several selected refs, rather than all of them.
+     * @returns The selected ref's full name, several short names separated by spaces, or an empty string.
+     */
+    [[nodiscard]] QString selectedRef(bool onlyIfLeaf, bool pickFirstSelIfMultiSel) const;
+
+    /**
+     * Applies a filter at once rather than after typing pauses.
+     * @param text The filter text.
+     * @param selectedFilters Which parts of a ref it looks at, LogFilter bits.
+     */
+    void setFilter(const QString& text, unsigned int selectedFilters);
+
+    /**
+     * @returns The tree of ref name components.
+     */
+    [[nodiscard]] QTreeView *refTree() const;
+
+    /**
+     * @returns The list of refs under the selected tree node.
+     */
+    [[nodiscard]] QTreeView *refList() const;
+
+    /**
+     * @returns The list's model.
+     */
+    [[nodiscard]] RefLeafListModel *listModel() const;
+
+    /**
+     * @returns The text under the list, such as "Showing 2 ref(s), 1 ref(s) selected".
+     */
+    [[nodiscard]] QString infoText() const;
+
+    /**
+     * Builds the context menu for the refs selected in the list, ShowContextMenu's first cut.
+     * @returns The menu; its actions do their work when triggered.
+     */
+    [[nodiscard]] std::unique_ptr<QMenu> createListContextMenu();
+
+    /**
+     * Ported from CBrowseRefsDlg::GetFullRefName.
+     * @param partialRefName A name such as main or origin/main.
+     * @returns The full name of the first ref ending in it, or an empty string.
+     */
+    [[nodiscard]] QString fullRefName(const QString& partialRefName) const;
+
+    /**
+     * The git command that deletes branches on a remote, CGit::DeleteRemoteRefs.
+     * @param remote The remote.
+     * @param branches The branch names on the remote.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList deleteRemoteRefsArguments(const QString& remote, const QStringList& branches);
+
+    /**
+     * Ported from SplitRemoteBranchName.
+     * @param ref A remote-tracking ref, such as refs/remotes/origin/feature/x.
+     * @param remotes The repository's remotes.
+     * @returns The remote and the branch on it, such as origin and feature/x, or nothing if @p ref is under none
+     *          of @p remotes.
+     */
+    [[nodiscard]] static std::optional<RemoteBranch> splitRemoteBranchName(QString ref, const QStringList& remotes);
+
+    /**
+     * Records the picked ref when the dialog closes, as TortoiseGit's OnDestroy.
+     * @param result The dialog's result.
+     */
+    void done(int result) override;
+
+Q_SIGNALS:
+    /**
+     * The refs have been reloaded (or failed to load) and the tree and list filled.
+     */
+    void refreshed();
+
+private:
+    using VectorShadowTree = QList<const ShadowTree *>;
+
+    void createWidgets();
+    void onLoadFinished();
+    void populate(const QByteArray& refsOutput, const RefBrowserConfig& config);
+    [[nodiscard]] bool isRefKindShown(const QString& refName) const;
+    ShadowTree& treeNode(QString refName, ShadowTree *treePos, bool createIfNotExist);
+    void fillListCtrlForTreeNode();
+    void fillListCtrlForShadowTree(const ShadowTree& tree,
+                                   const QString& refNamePrefix,
+                                   bool isFirstLevel,
+                                   const BrowseRefsDlgFilter& filter,
+                                   QList<RefLeafListEntry>& entries);
+    [[nodiscard]] const ShadowTree *selectedTreeNode() const;
+    [[nodiscard]] VectorShadowTree selectedLeaves() const;
+    void updateInfoLabel();
+    void setFilterCueText();
+    void showFilterMenu();
+    void onListContextMenu(const QPoint& pos);
+    void onListDoubleClicked();
+    void showLog(const QString& refName);
+    void deleteRefs(const VectorShadowTree& leaves);
+    [[nodiscard]] bool confirmDeleteRef(const VectorShadowTree& leaves);
+    bool doDeleteRefs(const VectorShadowTree& leaves);
+    bool doDeleteRef(const QString& completeRefName);
+    bool deleteRemoteRefs(const QString& remote, const QStringList& branches);
+    [[nodiscard]] bool isFastForward(const QString& from, const QString& target) const;
+    void onCurrentBranchClicked();
+
+    Git m_git;
+    QString m_currentBranch; // The current branch's name, "HEAD" when detached, or empty if unknown
+    QStringList m_remotes;
+    ShadowTree m_treeRoot;
+    const ShadowTree *m_listCtrlRoot = nullptr; // The tree node whose refs the list shows
+    QHash<const ShadowTree *, QStandardItem *> m_treeItems; // CShadowTree::m_hTree
+    QHash<const QStandardItem *, const ShadowTree *> m_treeNodes; // The tree control's item data
+    std::unique_ptr<GitCall> m_refsCall;
+    std::unique_ptr<GitCall> m_configCall;
+    QString m_pendingSelectRef; // What to select once the running load ends
+
+    QLineEdit *m_filter = nullptr;
+    QComboBox *m_branchFilter = nullptr;
+    QTreeView *m_refTree = nullptr;
+    QStandardItemModel *m_treeModel = nullptr;
+    QTreeView *m_listRefLeafs = nullptr;
+    RefLeafListModel *m_listModel = nullptr;
+    QCheckBox *m_includeNestedRefs = nullptr;
+    QLabel *m_infoLabel = nullptr;
+    QTimer m_filterTimer; // IDT_FILTER: applies the filter a second after typing stops
+    unsigned int m_selectedFilters = LogFilterAll;
+
+    QString m_initialRef;
+    unsigned int m_pickRefKind = PickRefAll;
+    QString m_pickedRef;
+    bool m_wantPick = false;
+    bool m_pickOne = false;
+    bool m_pickedRefSet = false;
+};
+
+} // namespace kgt

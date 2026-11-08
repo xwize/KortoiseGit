@@ -129,6 +129,7 @@ private:
     QAction *m_addAction;
     QAction *m_pushAction;
     QAction *m_cloneAction;
+    QAction *m_refBrowseAction;
     std::optional<GitFolderStatus> m_folderStatus; // Only touched on Dolphin's retrieval thread
     KDirWatch m_indexWatch;
     QString m_watchedIndex; // The file m_indexWatch watches, if any

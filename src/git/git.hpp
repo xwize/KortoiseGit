@@ -65,6 +65,13 @@ public:
      */
     [[nodiscard]] static QString workingTreeRoot(const QString& path);
 
+    /**
+     * Ported from CGit::StripRefName.
+     * @param ref A ref such as refs/heads/main or refs/tags/v1.
+     * @returns Its short name, such as main or tags/v1.
+     */
+    [[nodiscard]] static QString stripRefName(const QString& ref);
+
 private:
     QString m_workingDirectory;
 };
