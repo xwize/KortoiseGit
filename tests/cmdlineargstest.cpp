@@ -50,6 +50,16 @@ private Q_SLOTS:
         QCOMPARE(args->paths, QStringList({QStringLiteral("/repo/a"), QStringLiteral("/repo/b")}));
     }
 
+    void parsesSwitches()
+    {
+        Result<CmdLineArgs> args = parse({QStringLiteral("--command"), QStringLiteral("merge"), QStringLiteral("--abort")});
+        QVERIFY(args);
+        QCOMPARE(args->switches, QStringList{QStringLiteral("abort")});
+        args = parse({QStringLiteral("--command"), QStringLiteral("merge")});
+        QVERIFY(args);
+        QVERIFY(args->switches.isEmpty());
+    }
+
     void makesRelativePathsAbsolute()
     {
         const Result<CmdLineArgs> args = parse({QStringLiteral("--command"), QStringLiteral("log"), QStringLiteral("--path"), QStringLiteral("sub/../file")});

@@ -96,8 +96,9 @@ private:
      * Starts kortoisegitproc for the paths stored in @p action's data.
      * @param command TortoiseGit's command name, passed as --command.
      * @param action The triggered action; its data holds the selected paths.
+     * @param switches Switches after the paths, such as --abort.
      */
-    void runCommand(const QString& command, const QAction *action);
+    void runCommand(const QString& command, const QAction *action, const QStringList& switches = {});
 
     /**
      * Watches one repository's index (replacing the previous one), so git add or commit refreshes the overlays.
@@ -132,6 +133,8 @@ private:
     QAction *m_pushAction;
     QAction *m_cloneAction;
     QAction *m_refBrowseAction;
+    QAction *m_mergeAction;
+    QAction *m_mergeAbortAction;
     std::optional<GitFolderStatus> m_folderStatus; // Only touched on Dolphin's retrieval thread
     KDirWatch m_indexWatch;
     QString m_watchedIndex; // The file m_indexWatch watches, if any

@@ -41,7 +41,7 @@ void printError(const QString& message)
 }
 
 /**
- * Creates the command named on the command line and gives it its paths.
+ * Creates the command named on the command line and gives it its paths and switches.
  * @param args The parsed command line.
  * @returns The command, ready to execute, or a CommandLine error.
  */
@@ -54,6 +54,7 @@ Result<std::unique_ptr<Command>> createCommand(const CmdLineArgs& args)
             paths.append(QDir::currentPath());
         }
         command->setPaths(paths);
+        command->setSwitches(args.switches);
         return command;
     });
 }

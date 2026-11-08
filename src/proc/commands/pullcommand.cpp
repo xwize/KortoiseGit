@@ -121,15 +121,7 @@ bool PullCommand::pull(const QString& workingTree)
         }
         try {
             if (git.hasWorkingTreeConflicts()) {
-                KMessageBox::information(
-                    &progress,
-                    i18n("While merging, i.e. integrating changes of another (remote) branch into your local branch, a conflict in at least one file "
-                         "occurred. This means that you need to resolve this manually (i.e., you need to integrate your changes into a file which was "
-                         "also modified on another branch).\n\nAfter resolving all files, you need to perform a commit in order to complete the "
-                         "merge.\n\nIf you want to abort the merge, do a hard reset on HEAD or select abort merge on the context menu.\n\nSee help for "
-                         "more information."),
-                    QString(),
-                    QStringLiteral("MergeConflictsNeedsCommit"));
+                AppUtils::showMergeConflictsHint(&progress);
             }
         } catch (const RuntimeError& e) {
             KMessageBox::error(&progress, i18n("Checking for conflicts failed.") + QLatin1Char('\n') + e.error().message, QString(), KMessageBox::Options());

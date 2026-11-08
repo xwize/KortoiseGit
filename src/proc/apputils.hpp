@@ -19,6 +19,8 @@ class QWidget;
 namespace kgt
 {
 
+enum class ResetType;
+
 /**
  * Helpers shared by several dialogs and commands, TortoiseGit's CAppUtils.
  */
@@ -59,6 +61,39 @@ public:
      * @returns True if the lock stays, so the caller must not go on.
      */
     [[nodiscard]] static bool isTGitRebaseActive(const QString& workingTree, QWidget *parent = nullptr);
+
+    /**
+     * Shows IDS_NEED_TO_RESOLVE_CONFLICTS_HINT after a merge or pull stopped on conflicts, unless the user asked
+     * not to see it again ("MergeConflictsNeedsCommit").
+     * @param parent Parent of the message.
+     */
+    static void showMergeConflictsHint(QWidget *parent);
+
+    /**
+     * The git command of CAppUtils's static Reset.
+     * @param type How to reset; Merge ignores @p resetTo, as "git reset --merge" resets to HEAD.
+     * @param resetTo The commit to reset to.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList resetArguments(ResetType type, const QString& resetTo);
+
+    /**
+     * Ported from CAppUtils's static Reset, without its post-command buttons: runs the reset in ProgressDlg.
+     * @param workingTree The working tree.
+     * @param type How to reset.
+     * @param resetTo The commit to reset to.
+     * @param parent Parent of the progress dialog.
+     * @returns True if the reset succeeded and the dialog was closed with Close.
+     */
+    static bool reset(const QString& workingTree, ResetType type, const QString& resetTo, QWidget *parent = nullptr);
+
+    /**
+     * Ported from CAppUtils::MergeAbort: asks how in MergeAbortDlg, then resets to HEAD.
+     * @param workingTree The working tree.
+     * @param parent Parent of the dialogs.
+     * @returns True if the merge was aborted.
+     */
+    static bool mergeAbort(const QString& workingTree, QWidget *parent = nullptr);
 };
 
 } // namespace kgt

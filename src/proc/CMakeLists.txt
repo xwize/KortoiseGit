@@ -28,6 +28,8 @@ target_sources(kgtproc PRIVATE
     browserefsdlg.hpp
     browserefsdlgfilter.cpp
     browserefsdlgfilter.hpp
+    chooseversion.cpp
+    chooseversion.hpp
     clonedlg.cpp
     clonedlg.hpp
     cmdlineargs.cpp
@@ -52,6 +54,8 @@ target_sources(kgtproc PRIVATE
     commands/fetchcommand.hpp
     commands/logcommand.cpp
     commands/logcommand.hpp
+    commands/mergecommand.cpp
+    commands/mergecommand.hpp
     commands/pullcommand.cpp
     commands/pullcommand.hpp
     commands/pushcommand.cpp
@@ -73,6 +77,10 @@ target_sources(kgtproc PRIVATE
     icons.qrc
     logdlg.cpp
     logdlg.hpp
+    mergeabortdlg.cpp
+    mergeabortdlg.hpp
+    mergedlg.cpp
+    mergedlg.hpp
     progresscommands/revertprogresscommand.cpp
     progresscommands/revertprogresscommand.hpp
     progressdlg.cpp

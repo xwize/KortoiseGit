@@ -16,6 +16,8 @@ using namespace Qt::StringLiterals;
 
 constexpr auto commandOption = "command"_L1;
 constexpr auto pathOption = "path"_L1;
+// TortoiseGit's /abort: MergeCommand aborts a merge instead of starting one
+constexpr auto abortSwitch = "abort"_L1;
 
 } // namespace
 
@@ -27,6 +29,7 @@ void addCmdLineOptions(QCommandLineParser& parser)
     parser.addOption(QCommandLineOption(commandOption, i18n("The command to run, such as log."), i18nc("@info:shell", "name")));
     parser.addOption(
         QCommandLineOption(pathOption, i18n("A file or folder to run the command on. Can be given more than once."), i18nc("@info:shell", "path")));
+    parser.addOption(QCommandLineOption(abortSwitch, i18n("With --command merge: abort the merge in progress.")));
 }
 
 Result<CmdLineArgs> parseCmdLine(const QCommandLineParser& parser)
@@ -41,7 +44,13 @@ Result<CmdLineArgs> parseCmdLine(const QCommandLineParser& parser)
     for (const QString& path : parser.values(pathOption)) {
         paths.append(QDir::cleanPath(current.absoluteFilePath(path)));
     }
-    return CmdLineArgs{.command = command, .paths = paths};
+    QStringList switches;
+    for (const QLatin1StringView name : {abortSwitch}) {
+        if (parser.isSet(name)) {
+            switches.append(name);
+        }
+    }
+    return CmdLineArgs{.command = command, .paths = paths, .switches = switches};
 }
 
 } // namespace kgt

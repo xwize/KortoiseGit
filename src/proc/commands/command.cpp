@@ -16,6 +16,7 @@
 #include "commands/createrepositorycommand.hpp"
 #include "commands/fetchcommand.hpp"
 #include "commands/logcommand.hpp"
+#include "commands/mergecommand.hpp"
 #include "commands/pullcommand.hpp"
 #include "commands/pushcommand.hpp"
 #include "commands/refbrowsecommand.hpp"
@@ -54,6 +55,7 @@ constexpr std::array commands{
     CommandEntry{.name = u"commit", .create = &create<kgt::CommitCommand>},
     CommandEntry{.name = u"fetch", .create = &create<kgt::FetchCommand>},
     CommandEntry{.name = u"log", .create = &create<kgt::LogCommand>},
+    CommandEntry{.name = u"merge", .create = &create<kgt::MergeCommand>},
     CommandEntry{.name = u"pull", .create = &create<kgt::PullCommand>},
     CommandEntry{.name = u"push", .create = &create<kgt::PushCommand>},
     CommandEntry{.name = u"refbrowse", .create = &create<kgt::RefBrowseCommand>},
@@ -89,6 +91,16 @@ void Command::setPaths(const QStringList& paths)
 const QStringList& Command::paths() const
 {
     return m_paths;
+}
+
+void Command::setSwitches(const QStringList& switches)
+{
+    m_switches = switches;
+}
+
+bool Command::hasKey(const QString& name) const
+{
+    return m_switches.contains(name);
 }
 
 QString Command::repositoryRoot(const QString& path)

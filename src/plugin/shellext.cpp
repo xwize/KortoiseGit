@@ -21,6 +21,7 @@
 
 #include <chrono>
 #include <exception>
+#include <utility>
 
 namespace
 {
@@ -228,10 +229,24 @@ struct MenuEntries {
     bool commit = false;
     bool log = false;
     bool refBrowse = false;
+    bool mergeAbort = false;
     bool revert = false;
+    bool merge = false;
     bool createRepo = false;
     bool add = false;
 };
+
+/**
+ * @param state The selection's state.
+ * @returns MenuInfo's conditions for Abort Merge and Merge, which only differ while a merge is in progress.
+ */
+std::pair<bool, bool> mergeEntries(const MenuState& state)
+{
+    return {
+        (state.inGit || state.folderInGit) && state.mergeActive,
+        state.folderInGit && state.onlyOne && !state.bisect && !state.mergeActive,
+    };
+}
 
 /**
  * The entries' conditions from MenuInfo (src/TortoiseShell/MenuInfo.cpp), matched as CShellExt::ShouldInsertItem
@@ -244,6 +259,7 @@ MenuEntries menuEntries(const MenuState& state)
     // Clone and CreateRepo: a folder in no repository, or one git ignores
     const bool outsideRepository = state.folder && !state.inGit && !state.folderInGit && !state.bareRepo && !state.inaccessible;
     const bool ignoredFolder = state.folder && state.ignored;
+    const auto [mergeAbort, merge] = mergeEntries(state);
     return {
         .clone = outsideRepository || ignoredFolder,
         .pull = ((state.folderInGit && state.onlyOne) || state.wcRoot) && !state.bisect && !state.mergeActive,
@@ -253,7 +269,9 @@ MenuEntries menuEntries(const MenuState& state)
         .commit = state.inGit || state.folderInGit,
         .log = (state.onlyOne && !state.added && (state.inGit || state.folderInGit)) || state.bareRepo,
         .refBrowse = (state.folderInGit && state.onlyOne) || state.bareRepo,
+        .mergeAbort = mergeAbort,
         .revert = (state.inGit && !state.normal) || state.folderInGit,
+        .merge = merge,
         .createRepo = outsideRepository || ignoredFolder,
         .add =
             (state.inVersionedFolder && !state.inGit) || (state.inGit && state.folder) || state.ignored || (state.deleted && !state.folder && !state.onlyOne),
@@ -277,6 +295,8 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_pushAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-push")), i18n("Pus&h..."), this))
     , m_cloneAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-download")), i18n("Git Clone..."), this))
     , m_refBrowseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Browse References"), this))
+    , m_mergeAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge..."), this))
+    , m_mergeAbortAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Abort &Merge"), this))
 {
     Q_UNUSED(args)
     connect(m_createRepoAction, &QAction::triggered, this, [this] {
@@ -308,6 +328,14 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_refBrowseAction->setToolTip(i18n("Opens the Reference Browser dialog."));
     connect(m_refBrowseAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("refbrowse"), m_refBrowseAction);
+    });
+    m_mergeAction->setToolTip(i18n("Merges another branch"));
+    connect(m_mergeAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("merge"), m_mergeAction);
+    });
+    m_mergeAbortAction->setToolTip(i18n("Aborts a running merge."));
+    connect(m_mergeAbortAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("merge"), m_mergeAbortAction, {QStringLiteral("--abort")});
     });
     m_revertAction->setToolTip(i18n("Reverts all changes you made since the last update"));
     connect(m_revertAction, &QAction::triggered, this, [this] {
@@ -412,7 +440,9 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
     add(entries.commit, m_commitAction);
     add(entries.log, m_showLogAction);
     add(entries.refBrowse, m_refBrowseAction);
+    add(entries.mergeAbort, m_mergeAbortAction);
     add(entries.revert, m_revertAction);
+    add(entries.merge, m_mergeAction);
     add(entries.createRepo, m_createRepoAction);
     add(entries.add, m_addAction);
     return actions;
@@ -427,7 +457,7 @@ void ShellExt::watchForNewRepository(const QString& folder)
     m_newRepoWatch.addDir(m_watchedNewRepo);
 }
 
-void ShellExt::runCommand(const QString& command, const QAction *action)
+void ShellExt::runCommand(const QString& command, const QAction *action, const QStringList& switches)
 {
     const QStringList paths = action->data().toStringList();
     Q_ASSERT(!paths.isEmpty());
@@ -443,6 +473,7 @@ void ShellExt::runCommand(const QString& command, const QAction *action)
     for (const QString& path : paths) {
         arguments << QStringLiteral("--path") << path;
     }
+    arguments << switches;
 
     // Run from the first item's folder, as TortoiseGitProc gets Explorer's current folder
     const QFileInfo first(paths.constFirst());
