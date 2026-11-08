@@ -7,9 +7,12 @@
 
 #include "apputils.hpp"
 
+#include "git/git.hpp"
 #include "git/gitadmindir.hpp"
+#include "gitswitchdlg.hpp"
 #include "mergeabortdlg.hpp"
 #include "progressdlg.hpp"
+#include "utils/runtimeerror.hpp"
 
 #include <KGuiItem>
 #include <KLocalizedString>
@@ -161,6 +164,82 @@ bool AppUtils::mergeAbort(const QString& workingTree, QWidget *parent)
         return false;
     }
     return reset(workingTree, dlg.resetType(), QStringLiteral("HEAD"), parent);
+}
+
+bool AppUtils::switchTo(const QString& workingTree, const QString& initialRefName, QWidget *parent)
+{
+    GitSwitchDlg dlg(Git(workingTree), initialRefName, parent);
+    if (dlg.exec() != QDialog::Accepted) {
+        return false;
+    }
+    return performSwitch(workingTree, switchOptions(dlg.options()), parent);
+}
+
+SwitchOptions AppUtils::switchOptions(const GitSwitchOptions& chosen)
+{
+    // If refs/heads/ is not stripped, checkout will detach HEAD; checkout prefers branches on name clashes (with tags)
+    QString ref = chosen.versionName;
+    constexpr QLatin1StringView headsPrefix("refs/heads/");
+    if (ref.startsWith(headsPrefix) && !chosen.branchOverride) {
+        ref = ref.mid(headsPrefix.size());
+    }
+    return SwitchOptions{
+        .ref = ref,
+        .force = chosen.force,
+        .newBranch = chosen.isNewBranch ? chosen.newBranch : QString(),
+        .branchOverride = chosen.branchOverride,
+        .track = chosen.track,
+        .merge = chosen.merge,
+    };
+}
+
+QStringList AppUtils::switchArguments(const SwitchOptions& options)
+{
+    QStringList arguments{QStringLiteral("checkout")};
+    if (options.force) {
+        arguments.append(QStringLiteral("-f"));
+    }
+    if (!options.newBranch.isEmpty()) {
+        if (options.track == Qt::Checked) {
+            arguments.append(QStringLiteral("--track"));
+        } else if (options.track == Qt::Unchecked) {
+            arguments.append(QStringLiteral("--no-track"));
+        }
+        arguments << (options.branchOverride ? QStringLiteral("-B") : QStringLiteral("-b")) << options.newBranch;
+    }
+    if (options.merge) {
+        arguments.append(QStringLiteral("--merge"));
+    }
+    arguments << QStringLiteral("--end-of-options") << options.ref << QStringLiteral("--");
+    return arguments;
+}
+
+bool AppUtils::performSwitch(const QString& workingTree, const SwitchOptions& options, QWidget *parent)
+{
+    const Git git(workingTree);
+    SwitchOptions fixed = options;
+    fixed.ref = git.fixBranchName(options.ref);
+
+    ProgressDlg progress(workingTree, parent);
+    progress.addGitCmd(switchArguments(fixed));
+    // m_PostExecCallback: git checkout --merge succeeds even when it leaves conflicts
+    progress.setPostExecCallback([&git, merge = options.merge](int& exitCode, QString& extraMsg) {
+        if (!merge || exitCode != 0) {
+            return;
+        }
+        try {
+            if (git.hasWorkingTreeConflicts()) {
+                exitCode = 1; // Treat it as failure
+                extraMsg = i18n("Has merge conflict");
+            }
+        } catch (const RuntimeError& e) {
+            if (e.error().category != ErrorCategory::Git) {
+                throw;
+            }
+            // CGit::HasWorkingTreeConflicts returns -1 on an error, which the check takes as no conflicts
+        }
+    });
+    return progress.exec() == QDialog::Accepted && progress.gitStatus() == 0;
 }
 
 } // namespace kgt

@@ -12,6 +12,7 @@
 
 #include "utils/result.hpp"
 
+#include <QMap>
 #include <QString>
 #include <QStringList>
 
@@ -27,10 +28,11 @@ struct CmdLineArgs {
     QString command; // TortoiseGit's command name, such as "log"
     QStringList paths; // Absolute paths, in the order given; empty if no --path was given
     QStringList switches; // The switches given without a value, such as "abort" for --abort
+    QMap<QString, QString> values; // The options given with a value, such as "rev" for --rev <ref>
 };
 
 /**
- * Adds --command, --path and the switches (--abort) to @p parser. --help and --version come from KAboutData::setupCommandLine().
+ * Adds --command, --path, the switches (--abort) and the valued options (--rev) to @p parser. --help and --version come from KAboutData::setupCommandLine().
  * @param[in,out] parser The parser to add the options to.
  */
 void addCmdLineOptions(QCommandLineParser& parser);

@@ -21,6 +21,7 @@
 #include "commands/pushcommand.hpp"
 #include "commands/refbrowsecommand.hpp"
 #include "commands/revertcommand.hpp"
+#include "commands/switchcommand.hpp"
 
 #include "git/git.hpp"
 #include "utils/runtimeerror.hpp"
@@ -61,6 +62,7 @@ constexpr std::array commands{
     CommandEntry{.name = u"refbrowse", .create = &create<kgt::RefBrowseCommand>},
     CommandEntry{.name = u"repocreate", .create = &create<kgt::CreateRepositoryCommand>},
     CommandEntry{.name = u"revert", .create = &create<kgt::RevertCommand>},
+    CommandEntry{.name = u"switch", .create = &create<kgt::SwitchCommand>},
 };
 
 } // namespace
@@ -101,6 +103,16 @@ void Command::setSwitches(const QStringList& switches)
 bool Command::hasKey(const QString& name) const
 {
     return m_switches.contains(name);
+}
+
+void Command::setValues(const QMap<QString, QString>& values)
+{
+    m_values = values;
+}
+
+QString Command::value(const QString& name) const
+{
+    return m_values.value(name);
 }
 
 QString Command::repositoryRoot(const QString& path)

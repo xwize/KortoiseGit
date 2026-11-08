@@ -24,6 +24,7 @@ set(kgt_tests
     pushdlgtest
     resulttest
     reverttest
+    switchtest
 )
 
 foreach(test ${kgt_tests})

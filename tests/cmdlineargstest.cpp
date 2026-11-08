@@ -58,6 +58,14 @@ private Q_SLOTS:
         args = parse({QStringLiteral("--command"), QStringLiteral("merge")});
         QVERIFY(args);
         QVERIFY(args->switches.isEmpty());
+        QVERIFY(args->values.isEmpty());
+    }
+
+    void parsesValues()
+    {
+        const Result<CmdLineArgs> args = parse({QStringLiteral("--command"), QStringLiteral("switch"), QStringLiteral("--rev"), QStringLiteral("v1")});
+        QVERIFY(args);
+        QCOMPARE(args->values.value(QStringLiteral("rev")), QStringLiteral("v1"));
     }
 
     void makesRelativePathsAbsolute()

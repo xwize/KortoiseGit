@@ -127,6 +127,21 @@ public:
     [[nodiscard]] bool isBranchTagNameUnique(const QString& name) const;
 
     /**
+     * Ported from CGit::BranchTagExists.
+     * @param name A short name.
+     * @param isBranch Whether to look for a branch (refs/heads/) rather than a tag (refs/tags/).
+     * @returns Whether a branch, or a tag, has that name.
+     */
+    [[nodiscard]] bool branchTagExists(const QString& name, bool isBranch = true) const;
+
+    /**
+     * Ported from CGit::IsBranchNameValid, with git check-ref-format in place of libgit2.
+     * @param name A branch name.
+     * @returns Whether git accepts it.
+     */
+    [[nodiscard]] static bool isBranchNameValid(const QString& name);
+
+    /**
      * Ported from CGit::DerefFetchHead: the commit FETCH_HEAD asks to merge.
      * @returns Its hash, or an empty string if FETCH_HEAD names none or several.
      */

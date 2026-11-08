@@ -64,6 +64,8 @@ target_sources(kgtproc PRIVATE
     commands/refbrowsecommand.hpp
     commands/revertcommand.cpp
     commands/revertcommand.hpp
+    commands/switchcommand.cpp
+    commands/switchcommand.hpp
     gitclioutputparser.cpp
     gitclioutputparser.hpp
     gitloglist.cpp
@@ -74,6 +76,8 @@ target_sources(kgtproc PRIVATE
     gitstatuslistctrl.hpp
     gitstatuslistmodel.cpp
     gitstatuslistmodel.hpp
+    gitswitchdlg.cpp
+    gitswitchdlg.hpp
     icons.qrc
     logdlg.cpp
     logdlg.hpp
