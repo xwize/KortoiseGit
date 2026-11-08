@@ -66,6 +66,7 @@ target_sources(kgtproc PRIVATE
     gitstatuslistctrl.hpp
     gitstatuslistmodel.cpp
     gitstatuslistmodel.hpp
+    icons.qrc
     logdlg.cpp
     logdlg.hpp
     progresscommands/revertprogresscommand.cpp

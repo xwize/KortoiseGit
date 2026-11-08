@@ -79,3 +79,7 @@ run configuration that starts `/usr/bin/dolphin` with the environment variable
 
 GPL-2.0-or-later; see [LICENSES/](LICENSES/). Files ported from TortoiseGit keep its copyright lines and say which
 file they come from.
+
+The log list's action icons in `src/proc/icons/` are TortoiseGit's (`src/Resources/action*.ico`, converted to PNG),
+derived from the [TortoiseSVN](https://tortoisesvn.net/) project's icons. TortoiseGit offers them under the GPL or
+the TortoiseSVN Icon License (see `src/proc/icons/license.txt`); KortoiseGit uses them under the GPL.

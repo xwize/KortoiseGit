@@ -23,6 +23,14 @@
 #include <tuple>
 #include <utility>
 
+/**
+ * Registers icons.qrc, which a static library has to do itself. Q_INIT_RESOURCE must be outside any namespace.
+ */
+static void initIconResources()
+{
+    Q_INIT_RESOURCE(icons);
+}
+
 namespace
 {
 
@@ -64,24 +72,59 @@ QColor labelColor(const GitRef& ref)
 }
 
 /**
- * @param action One of the actions the Actions column shows.
- * @returns The icon TortoiseGit draws for it (IDI_ACTIONMODIFIED, ...), from the icon theme.
+ * @param name The icon's name in TortoiseGit src/Resources, without ".ico".
+ * @returns The icon, with every size the .ico holds, from icons.qrc.
  */
-QIcon actionIcon(Action action)
+QIcon tortoiseGitIcon(const QString& name)
 {
+    QIcon icon;
+    for (const int size : {16, 20, 24, 32, 64}) {
+        icon.addFile(QStringLiteral(":/kortoisegit/icons/%1-%2.png").arg(name).arg(size), QSize(size, size));
+    }
+    return icon;
+}
+
+/**
+ * The icons CGitLogListBase's constructor loads for the Actions column (IDI_ACTION*).
+ */
+struct ActionIcons {
+    QIcon modified = tortoiseGitIcon(QStringLiteral("actionmodified"));
+    QIcon replaced = tortoiseGitIcon(QStringLiteral("actionreplaced"));
+    QIcon conflicted = tortoiseGitIcon(QStringLiteral("actionconflicted"));
+    QIcon added = tortoiseGitIcon(QStringLiteral("actionadded"));
+    QIcon deleted = tortoiseGitIcon(QStringLiteral("actiondeleted"));
+    QIcon fetching = tortoiseGitIcon(QStringLiteral("actionfetching"));
+    QIcon error = tortoiseGitIcon(QStringLiteral("actionerror"));
+
+    /**
+     * @returns The icons, loaded once.
+     */
+    static const ActionIcons& instance()
+    {
+        static const ActionIcons icons;
+        return icons;
+    }
+};
+
+/**
+ * @param action One of the actions the Actions column shows.
+ * @returns The icon TortoiseGit draws for it.
+ */
+const QIcon& actionIcon(Action action)
+{
+    const ActionIcons& icons = ActionIcons::instance();
     switch (action) {
     case Action::Modified:
-        return QIcon::fromTheme(QStringLiteral("vcs-locally-modified"));
+        return icons.modified;
     case Action::Added:
-        return QIcon::fromTheme(QStringLiteral("vcs-added"));
+        return icons.added;
     case Action::Deleted:
-        return QIcon::fromTheme(QStringLiteral("vcs-removed"));
+        return icons.deleted;
     case Action::Replaced:
-        return QIcon::fromTheme(QStringLiteral("edit-rename"));
+        return icons.replaced;
     case Action::Unmerged:
-        return QIcon::fromTheme(QStringLiteral("vcs-conflicting"));
     default:
-        return {};
+        return icons.conflicted;
     }
 }
 
@@ -112,7 +155,7 @@ public:
         const GitRevLoglist& rev = model->rev(index.row());
         painter->save();
         if (column == GitLogListModel::ActionsColumn) {
-            drawActions(painter, rect, rev.actions);
+            drawActions(painter, rect, rev);
         } else {
             const QRect textRect = drawRefs(painter, rect, rev.refs, opt);
             const bool isSelected = opt.state.testFlag(QStyle::State_Selected);
@@ -126,21 +169,36 @@ public:
 
 private:
     /**
+     * Draws the icons as CGitLogListBase::OnNMCustomdrawLoglist does: the fetching or error icon until the
+     * commit's files are known, then one icon per action in a fixed slot, so each kind lines up down the column.
      * @param painter Draws.
      * @param rect The cell's text area.
-     * @param actions What the commit did to its files.
+     * @param rev The commit.
      */
-    static void drawActions(QPainter *painter, const QRect& rect, TGitPath::Actions actions)
+    static void drawActions(QPainter *painter, const QRect& rect, const GitRevLoglist& rev)
     {
         const int size = std::min(maxIconSize, rect.height());
-        int left = rect.left();
+        const auto slotRect = [&](int slot) {
+            return QRect(rect.left() + (slot * (size + iconSpacing)), rect.top() + ((rect.height() - size) / 2), size, size);
+        };
+        switch (rev.filesState) {
+        case GitRevLoglist::FilesState::NotLoaded:
+            ActionIcons::instance().fetching.paint(painter, slotRect(0));
+            return;
+        case GitRevLoglist::FilesState::Failed:
+            ActionIcons::instance().error.paint(painter, slotRect(0));
+            return;
+        case GitRevLoglist::FilesState::Loaded:
+            break;
+        }
+        int slot = 0;
         for (const Action action : GitLogListModel::shownActions()) {
-            if (!(actions & action)) {
-                continue;
+            // A copy shares the added icon (LOGACTIONS_ADDED | LOGACTIONS_COPY)
+            const TGitPath::Actions matches = action == Action::Added ? (Action::Added | Action::Copy) : TGitPath::Actions(action);
+            if (rev.actions & matches) {
+                actionIcon(action).paint(painter, slotRect(slot));
             }
-            const QRect iconRect(left, rect.top() + ((rect.height() - size) / 2), size, size);
-            actionIcon(action).paint(painter, iconRect);
-            left += size + iconSpacing;
+            ++slot;
         }
     }
 
@@ -183,6 +241,7 @@ GitLogList::GitLogList(QWidget *parent)
     : QTreeView(parent)
     , m_model(new GitLogListModel(this))
 {
+    initIconResources();
     setModel(m_model);
     setItemDelegate(new GitLogListDelegate(this));
     setRootIsDecorated(false);
