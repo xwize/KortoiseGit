@@ -107,7 +107,7 @@ private:
     void watchIndex(const QString& indexFile);
 
     /**
-     * The entries TortoiseGit's menu gives the selection: Clone, Push, Commit, Show log, Revert, Create repository
+     * The entries TortoiseGit's menu gives the selection: Clone, Pull, Fetch, Push, Commit, Show log, Revert, Create repository
      * and Add, each where its MenuInfo condition holds. Decided afresh on every request from the items' own paths,
      * as CShellExt::Initialize and QueryContextMenu do.
      * @param selected The selected paths, or the folder shown when nothing is selected.
@@ -127,6 +127,8 @@ private:
     QAction *m_showLogAction;
     QAction *m_revertAction;
     QAction *m_addAction;
+    QAction *m_pullAction;
+    QAction *m_fetchAction;
     QAction *m_pushAction;
     QAction *m_cloneAction;
     QAction *m_refBrowseAction;

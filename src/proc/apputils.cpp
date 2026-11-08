@@ -7,10 +7,19 @@
 
 #include "apputils.hpp"
 
+#include "git/gitadmindir.hpp"
+
+#include <KGuiItem>
+#include <KLocalizedString>
+#include <KMessageBox>
+
 #include <QClipboard>
 #include <QCoreApplication>
+#include <QDir>
 #include <QGuiApplication>
 #include <QProcess>
+
+#include <tuple>
 
 namespace kgt
 {
@@ -75,6 +84,33 @@ QString AppUtils::clipboardLink(QString clipboardText, const QString& skipGitPre
 bool AppUtils::runTortoiseGitProc(const QStringList& arguments)
 {
     return QProcess::startDetached(QCoreApplication::applicationFilePath(), arguments);
+}
+
+bool AppUtils::isTGitRebaseActive(const QString& workingTree, QWidget *parent)
+{
+    const QString adminDir = GitAdminDir::worktreeAdminDirPath(workingTree);
+    if (adminDir.isEmpty()) {
+        return false;
+    }
+    const QDir lock(QDir(adminDir).filePath(QStringLiteral("tgitrebase.active")));
+    if (!lock.exists()) {
+        return false;
+    }
+    const auto answer = KMessageBox::warningTwoActions(parent,
+                                                       i18n("Found a lock file indicating that a TortoiseGit rebase process is running. This blocks "
+                                                            "this operation.\n\nIf you are not running a TortoiseGit rebase process right now, you "
+                                                            "can remove the stale lock file in order to continue."),
+                                                       QString(),
+                                                       KGuiItem(i18n("Remove stale lock file")),
+                                                       KGuiItem(i18n("A&bort")),
+                                                       QString(),
+                                                       KMessageBox::Options());
+    if (answer != KMessageBox::PrimaryAction) {
+        return true;
+    }
+    // RemoveDirectory: only an empty directory goes
+    std::ignore = lock.rmdir(lock.absolutePath());
+    return false;
 }
 
 } // namespace kgt

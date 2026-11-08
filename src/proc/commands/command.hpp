@@ -78,6 +78,12 @@ protected:
      */
     explicit Command(PathRequirement requirement);
 
+    /**
+     * @param path A path in a working tree or a bare repository.
+     * @returns The working tree's root holding it, or, for a bare repository, which has none, the path itself.
+     */
+    [[nodiscard]] static QString repositoryRoot(const QString& path);
+
 private:
     PathRequirement m_pathRequirement;
     QStringList m_paths;
