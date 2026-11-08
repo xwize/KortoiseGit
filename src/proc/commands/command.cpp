@@ -11,6 +11,7 @@
 #include "commands/command.hpp"
 
 #include "commands/addcommand.hpp"
+#include "commands/branchcommand.hpp"
 #include "commands/clonecommand.hpp"
 #include "commands/commitcommand.hpp"
 #include "commands/createrepositorycommand.hpp"
@@ -55,6 +56,7 @@ std::unique_ptr<kgt::Command> create()
 
 constexpr std::array commands{
     CommandEntry{.name = u"add", .create = &create<kgt::AddCommand>},
+    CommandEntry{.name = u"branch", .create = &create<kgt::BranchCommand>},
     CommandEntry{.name = u"clone", .create = &create<kgt::CloneCommand>},
     CommandEntry{.name = u"commit", .create = &create<kgt::CommitCommand>},
     CommandEntry{.name = u"diff", .create = &create<kgt::DiffCommand>},

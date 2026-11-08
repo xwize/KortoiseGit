@@ -85,6 +85,7 @@ struct MenuTexts {
     QString rebase = QStringLiteral("Rebase...");
     QString diff = QStringLiteral("&Diff");
     QString prevDiff = QStringLiteral("&Diff with previous version");
+    QString branch = QStringLiteral("Create &Branch...");
 };
 
 } // namespace
@@ -134,7 +135,8 @@ private Q_SLOTS:
 
     void menuForItemKinds()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff, branch] =
+            MenuTexts();
         const TestRepo repo;
         repo.write(QStringLiteral(".gitignore"), "*.log\nvendor/\n");
         repo.write(QStringLiteral("tracked.txt"), "a\n");
@@ -159,13 +161,13 @@ private Q_SLOTS:
             return menuTexts(plugin, items);
         };
         // The working tree root, as when nothing is selected, and every folder in it, versioned or not
-        const QStringList versionedFolder{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, add};
+        const QStringList versionedFolder{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, branch, add};
         QCOMPARE(menu({QString()}), versionedFolder);
         QCOMPARE(menu({QStringLiteral("clean")}), versionedFolder);
         QCOMPARE(menu({QStringLiteral("untracked")}), versionedFolder);
         // An ignored folder is where a nested repository belongs
         QCOMPARE(menu({QStringLiteral("vendor")}),
-                 (QStringList{clone, pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, createRepo, add}));
+                 (QStringList{clone, pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, branch, createRepo, add}));
 
         QCOMPARE(menu({QStringLiteral("tracked.txt")}), (QStringList{commit, diff, prevDiff, log}));
         QCOMPARE(menu({QStringLiteral("modified.txt")}), (QStringList{commit, diff, prevDiff, log, revert}));
@@ -196,7 +198,8 @@ private Q_SLOTS:
 
     void menuFollowsRepositoryMovedIntoNewFolder()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff, branch] =
+            MenuTexts();
         // The repository is browsed while a new folder sits in it, then everything, .git included, is moved into
         // that folder: the folder is now a working tree's root, and the old root is in no repository
         const TestRepo repo;
@@ -208,20 +211,20 @@ private Q_SLOTS:
 
         ShellExt plugin(nullptr, {});
         QVERIFY(retrieve(plugin, repo.path()));
-        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, branch, add}));
 
         for (const QString& name : {QStringLiteral(".git"), QStringLiteral("a.txt"), QStringLiteral("dir")}) {
             QVERIFY(QDir(repo.path()).rename(name, QStringLiteral("moved/") + name));
         }
 
         // Shown, or seen from the old root, which Dolphin then asks through outOfVersionControlActions()
-        const QStringList root{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, add};
+        const QStringList root{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, branch, add};
         QCOMPARE(menuTexts(plugin, {item(moved)}), root);
         QCOMPARE(plugin.outOfVersionControlActions({item(moved)}).size(), root.size());
         QCOMPARE(plugin.outOfVersionControlActions({item(moved)}).at(3)->text(), commit);
         QCOMPARE(menuTexts(plugin, {item(QDir(moved).filePath(QStringLiteral("a.txt")))}), (QStringList{commit, diff, prevDiff, log}));
         QCOMPARE(menuTexts(plugin, {item(QDir(moved).filePath(QStringLiteral("dir")))}),
-                 (QStringList{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, add}));
+                 (QStringList{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, branch, add}));
         // The old root is a plain folder now
         QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{clone, createRepo}));
 
@@ -263,7 +266,8 @@ private Q_SLOTS:
 
     void commitEntryShowsBranch()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff, branch] =
+            MenuTexts();
         const TestRepo repo;
         repo.write(QStringLiteral("a.txt"), "a\n");
         repo.commitAll(QStringLiteral("initial"));
@@ -287,7 +291,8 @@ private Q_SLOTS:
 
         // The folder shown, when nothing is selected
         actions = plugin.versionControlActions({item(repo.path())});
-        QCOMPARE(actions.size(), 11); // Pull, Fetch, Push, Commit, Show log, Browse References, Rebase, Revert, Switch/Checkout, Merge, and Add for new.txt
+        QCOMPARE(actions.size(),
+                 12); // Pull, Fetch, Push, Commit, Show log, Browse References, Rebase, Revert, Switch/Checkout, Merge, Create Branch, and Add for new.txt
         QCOMPARE(actions.at(0)->text(), QStringLiteral("&Pull..."));
         QCOMPARE(actions.at(0)->data().toStringList(), QStringList{repo.path()});
         QCOMPARE(actions.at(1)->text(), QStringLiteral("F&etch..."));
@@ -297,7 +302,8 @@ private Q_SLOTS:
 
     void createRepositoryEntryOutsideRepositories()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff, branch] =
+            MenuTexts();
         const ShellExt plugin(nullptr, {});
         const QTemporaryDir plain;
         const QList<QAction *> actions = plugin.outOfVersionControlActions({item(plain.path())});
@@ -330,7 +336,8 @@ private Q_SLOTS:
 
     void noPullDuringMergeOrBisect()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff, branch] =
+            MenuTexts();
         const TestRepo repo;
         repo.write(QStringLiteral("a.txt"), "a\n");
         repo.commitAll(QStringLiteral("initial"));
@@ -349,7 +356,8 @@ private Q_SLOTS:
 
     void mergeEntries()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff, branch] =
+            MenuTexts();
         const TestRepo repo;
         repo.write(QStringLiteral("a.txt"), "a\n");
         repo.write(QStringLiteral("dir/b.txt"), "b\n");
@@ -367,11 +375,15 @@ private Q_SLOTS:
         QVERIFY(menu(QStringLiteral("dir")).contains(switchTo));
         QVERIFY(!menu(QStringLiteral("a.txt")).contains(switchTo));
         QVERIFY(!menuTexts(plugin, {item(repo.path()), item(repo.filePath(QStringLiteral("dir")))}).contains(switchTo));
+        // MenuInfo: Create Branch likewise
+        QVERIFY(menu(QStringLiteral("dir")).contains(branch));
+        QVERIFY(!menu(QStringLiteral("a.txt")).contains(branch));
+        QVERIFY(!menuTexts(plugin, {item(repo.path()), item(repo.filePath(QStringLiteral("dir")))}).contains(branch));
         QVERIFY(!menu({}).contains(mergeAbort));
 
         // While a merge awaits its commit: Abort Merge, before Revert, for versioned files and folders, and no Merge
         repo.write(QStringLiteral(".git/MERGE_HEAD"), "x\n");
-        QCOMPARE(menu({}), (QStringList{fetch, push, commit, log, refs, mergeAbort, revert, switchTo, add}));
+        QCOMPARE(menu({}), (QStringList{fetch, push, commit, log, refs, mergeAbort, revert, switchTo, branch, add}));
         QCOMPARE(menu(QStringLiteral("a.txt")), (QStringList{commit, diff, prevDiff, log, mergeAbort}));
         repo.remove(QStringLiteral(".git/MERGE_HEAD"));
 

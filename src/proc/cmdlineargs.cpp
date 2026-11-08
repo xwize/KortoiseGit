@@ -18,8 +18,10 @@ constexpr auto commandOption = "command"_L1;
 constexpr auto pathOption = "path"_L1;
 // TortoiseGit's /abort: MergeCommand aborts a merge instead of starting one
 constexpr auto abortSwitch = "abort"_L1;
-// TortoiseGit's /rev: SwitchCommand preselects this ref
+// TortoiseGit's /rev: SwitchCommand and BranchCommand preselect this ref
 constexpr auto revOption = "rev"_L1;
+// TortoiseGit's /name: BranchCommand fills in this name
+constexpr auto nameOption = "name"_L1;
 // TortoiseGit's /force: RebaseCommand starts with "Force Rebase" checked
 constexpr auto forceSwitch = "force"_L1;
 // TortoiseGit's /upstream: RebaseCommand preselects this upstream
@@ -41,7 +43,9 @@ void addCmdLineOptions(QCommandLineParser& parser)
     parser.addOption(
         QCommandLineOption(pathOption, i18n("A file or folder to run the command on. Can be given more than once."), i18nc("@info:shell", "path")));
     parser.addOption(QCommandLineOption(abortSwitch, i18n("With --command merge: abort the merge in progress.")));
-    parser.addOption(QCommandLineOption(revOption, i18n("With --command switch: the branch, tag or commit to preselect."), i18nc("@info:shell", "ref")));
+    parser.addOption(
+        QCommandLineOption(revOption, i18n("With --command switch or branch: the branch, tag or commit to preselect."), i18nc("@info:shell", "ref")));
+    parser.addOption(QCommandLineOption(nameOption, i18n("With --command branch: the new branch's name."), i18nc("@info:shell", "name")));
     parser.addOption(QCommandLineOption(forceSwitch, i18n("With --command rebase: check \"Force Rebase\".")));
     parser.addOption(QCommandLineOption(upstreamOption, i18n("With --command rebase: the upstream to preselect."), i18nc("@info:shell", "ref")));
     parser.addOption(QCommandLineOption(path2Option, i18n("With --command diff: a second file to compare with --path."), i18nc("@info:shell", "path")));
@@ -68,7 +72,7 @@ Result<CmdLineArgs> parseCmdLine(const QCommandLineParser& parser)
         }
     }
     QMap<QString, QString> values;
-    for (const QLatin1StringView name : {revOption, upstreamOption, startRevOption, endRevOption}) {
+    for (const QLatin1StringView name : {revOption, nameOption, upstreamOption, startRevOption, endRevOption}) {
         if (parser.isSet(name)) {
             values.insert(name, parser.value(name));
         }

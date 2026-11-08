@@ -72,6 +72,7 @@ namespace kgt
 ChooseVersion::ChooseVersion(Git git, const QString& title, QWidget *parent)
     : QGroupBox(title, parent)
     , m_git(std::move(git))
+    , m_radioHead(new QRadioButton(i18n("&HEAD"), this))
     , m_radioBranch(new QRadioButton(i18n("&Branch"), this))
     , m_radioTag(new QRadioButton(i18n("&Tag"), this))
     , m_radioVersion(new QRadioButton(i18n("&Commit"), this))
@@ -94,17 +95,19 @@ ChooseVersion::ChooseVersion(Git git, const QString& title, QWidget *parent)
     m_showLog->setToolTip(i18n("Type a commit hash; picking it from the log is not available yet."));
 
     auto *layout = new QGridLayout(this);
-    layout->addWidget(m_radioBranch, 0, 0);
-    layout->addWidget(m_branch, 0, 1);
-    layout->addWidget(m_browseRef, 0, 2);
-    layout->addWidget(m_radioTag, 1, 0);
-    layout->addWidget(m_tags, 1, 1);
-    layout->addWidget(m_radioVersion, 2, 0);
-    layout->addWidget(m_version, 2, 1);
-    layout->addWidget(m_showLog, 2, 2);
+    m_radioHead->hide();
+    layout->addWidget(m_radioHead, 0, 0, 1, 3);
+    layout->addWidget(m_radioBranch, 1, 0);
+    layout->addWidget(m_branch, 1, 1);
+    layout->addWidget(m_browseRef, 1, 2);
+    layout->addWidget(m_radioTag, 2, 0);
+    layout->addWidget(m_tags, 2, 1);
+    layout->addWidget(m_radioVersion, 3, 0);
+    layout->addWidget(m_version, 3, 1);
+    layout->addWidget(m_showLog, 3, 2);
     layout->setColumnStretch(1, 1);
 
-    for (const QRadioButton *button : {m_radioBranch, m_radioTag, m_radioVersion}) {
+    for (const QRadioButton *button : {m_radioHead, m_radioBranch, m_radioTag, m_radioVersion}) {
         connect(button, &QRadioButton::toggled, this, [this](bool checked) {
             if (checked) {
                 onChooseRadio();
@@ -166,6 +169,9 @@ void ChooseVersion::setDefaultChoose(Choice choice)
 
 ChooseVersion::Choice ChooseVersion::choice() const
 {
+    if (m_radioHead->isChecked()) {
+        return Choice::Head;
+    }
     if (m_radioTag->isChecked()) {
         return Choice::Tag;
     }
@@ -178,6 +184,8 @@ ChooseVersion::Choice ChooseVersion::choice() const
 QString ChooseVersion::versionName() const
 {
     switch (choice()) {
+    case Choice::Head:
+        return QStringLiteral("HEAD");
     case Choice::Branch: {
         const QString name = m_branch->currentIndex() < 0 ? QString() : m_branch->currentText();
         if (!name.isEmpty() && !m_git.isBranchTagNameUnique(name)) {
@@ -250,6 +258,11 @@ void ChooseVersion::selectRef(QString refName, bool refNameIsPossiblyNotFullName
 const QString& ChooseVersion::currentBranch() const
 {
     return m_currentBranch;
+}
+
+QRadioButton *ChooseVersion::headRadio() const
+{
+    return m_radioHead;
 }
 
 QComboBox *ChooseVersion::branchCombo() const
@@ -350,6 +363,8 @@ void ChooseVersion::updateGui(const BranchList& branches, const QStringList& tag
 QRadioButton *ChooseVersion::radio(Choice choice) const
 {
     switch (choice) {
+    case Choice::Head:
+        return m_radioHead;
     case Choice::Branch:
         return m_radioBranch;
     case Choice::Tag:

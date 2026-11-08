@@ -19,7 +19,10 @@ class QWidget;
 namespace kgt
 {
 
+class Git;
 enum class ResetType;
+struct CreateBranchTagOptions;
+struct CreateBranchTagParams;
 struct GitSwitchOptions;
 
 /**
@@ -141,6 +144,33 @@ public:
      * @returns True if the switch succeeded and the dialog was closed with Close.
      */
     static bool performSwitch(const QString& workingTree, const SwitchOptions& options, QWidget *parent = nullptr);
+
+    /**
+     * Ported from CAppUtils::CreateBranchTag, for branches: asks how in CreateBranchTagDlg, runs git branch,
+     * switches to the branch if asked to, and stores its description.
+     * @param workingTree The working tree's root or the bare repository.
+     * @param params What the dialog starts with.
+     * @param parent Parent of the dialogs.
+     * @returns True if the branch was created.
+     */
+    static bool createBranchTag(const QString& workingTree, const CreateBranchTagParams& params, QWidget *parent = nullptr);
+
+    /**
+     * CAppUtils::CreateBranchTag's command line for a branch.
+     * @param options What the user chose in CreateBranchTagDlg; options.versionName must already be FixBranchName'd.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList createBranchArguments(const CreateBranchTagOptions& options);
+
+    /**
+     * Ported from CAppUtils::UpdateBranchDescription: sets branch.<branch>.description, or removes it if the
+     * description is blank. Like TortoiseGit it carries on if git refuses, which is only logged.
+     * @param git Runs git in the working tree's root or the bare repository.
+     * @param branch The branch.
+     * @param description The description.
+     * @returns False if no branch was given.
+     */
+    static bool updateBranchDescription(const Git& git, const QString& branch, QString description);
 };
 
 } // namespace kgt

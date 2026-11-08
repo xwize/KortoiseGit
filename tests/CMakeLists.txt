@@ -7,6 +7,7 @@ set(kgt_tests
     clonetest
     cmdlineargstest
     commitdlgtest
+    createbranchtagtest
     createrepositorytest
     difftest
     gitadmindirtest

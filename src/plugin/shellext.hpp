@@ -139,6 +139,7 @@ private:
     QAction *m_rebaseAction;
     QAction *m_switchAction;
     QAction *m_mergeAction;
+    QAction *m_branchAction;
     QAction *m_mergeAbortAction;
     std::optional<GitFolderStatus> m_folderStatus; // Only touched on Dolphin's retrieval thread
     KDirWatch m_indexWatch;
