@@ -76,6 +76,7 @@ struct MenuTexts {
     QString add = QStringLiteral("&Add...");
     QString clone = QStringLiteral("Git Clone...");
     QString createRepo = QStringLiteral("Git Create repositor&y here...");
+    QString refs = QStringLiteral("Browse References");
 };
 
 } // namespace
@@ -125,7 +126,7 @@ private Q_SLOTS:
 
     void menuForItemKinds()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs] = MenuTexts();
         const TestRepo repo;
         repo.write(QStringLiteral(".gitignore"), "*.log\nvendor/\n");
         repo.write(QStringLiteral("tracked.txt"), "a\n");
@@ -150,12 +151,12 @@ private Q_SLOTS:
             return menuTexts(plugin, items);
         };
         // The working tree root, as when nothing is selected, and every folder in it, versioned or not
-        const QStringList versionedFolder{push, commit, log, revert, add};
+        const QStringList versionedFolder{push, commit, log, refs, revert, add};
         QCOMPARE(menu({QString()}), versionedFolder);
         QCOMPARE(menu({QStringLiteral("clean")}), versionedFolder);
         QCOMPARE(menu({QStringLiteral("untracked")}), versionedFolder);
         // An ignored folder is where a nested repository belongs
-        QCOMPARE(menu({QStringLiteral("vendor")}), (QStringList{clone, push, commit, log, revert, createRepo, add}));
+        QCOMPARE(menu({QStringLiteral("vendor")}), (QStringList{clone, push, commit, log, refs, revert, createRepo, add}));
 
         QCOMPARE(menu({QStringLiteral("tracked.txt")}), (QStringList{commit, log}));
         QCOMPARE(menu({QStringLiteral("modified.txt")}), (QStringList{commit, log, revert}));
@@ -183,7 +184,7 @@ private Q_SLOTS:
 
     void menuFollowsRepositoryMovedIntoNewFolder()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs] = MenuTexts();
         // The repository is browsed while a new folder sits in it, then everything, .git included, is moved into
         // that folder: the folder is now a working tree's root, and the old root is in no repository
         const TestRepo repo;
@@ -195,19 +196,19 @@ private Q_SLOTS:
 
         ShellExt plugin(nullptr, {});
         QVERIFY(retrieve(plugin, repo.path()));
-        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{push, commit, log, revert, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{push, commit, log, refs, revert, add}));
 
         for (const QString& name : {QStringLiteral(".git"), QStringLiteral("a.txt"), QStringLiteral("dir")}) {
             QVERIFY(QDir(repo.path()).rename(name, QStringLiteral("moved/") + name));
         }
 
         // Shown, or seen from the old root, which Dolphin then asks through outOfVersionControlActions()
-        const QStringList root{push, commit, log, revert, add};
+        const QStringList root{push, commit, log, refs, revert, add};
         QCOMPARE(menuTexts(plugin, {item(moved)}), root);
         QCOMPARE(plugin.outOfVersionControlActions({item(moved)}).size(), root.size());
         QCOMPARE(plugin.outOfVersionControlActions({item(moved)}).at(1)->text(), commit);
         QCOMPARE(menuTexts(plugin, {item(QDir(moved).filePath(QStringLiteral("a.txt")))}), (QStringList{commit, log}));
-        QCOMPARE(menuTexts(plugin, {item(QDir(moved).filePath(QStringLiteral("dir")))}), (QStringList{push, commit, log, revert, add}));
+        QCOMPARE(menuTexts(plugin, {item(QDir(moved).filePath(QStringLiteral("dir")))}), (QStringList{push, commit, log, refs, revert, add}));
         // The old root is a plain folder now
         QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{clone, createRepo}));
 
@@ -249,7 +250,7 @@ private Q_SLOTS:
 
     void commitEntryShowsBranch()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs] = MenuTexts();
         const TestRepo repo;
         repo.write(QStringLiteral("a.txt"), "a\n");
         repo.commitAll(QStringLiteral("initial"));
@@ -273,7 +274,7 @@ private Q_SLOTS:
 
         // The folder shown, when nothing is selected
         actions = plugin.versionControlActions({item(repo.path())});
-        QCOMPARE(actions.size(), 5); // Push, Commit, Show log, Revert, and Add for new.txt
+        QCOMPARE(actions.size(), 6); // Push, Commit, Show log, Browse References, Revert, and Add for new.txt
         QCOMPARE(actions.at(0)->text(), QStringLiteral("Pus&h..."));
         QCOMPARE(actions.at(0)->data().toStringList(), QStringList{repo.path()});
         QCOMPARE(actions.at(1)->text(), QStringLiteral("Git &Commit -> \"main\"..."));
@@ -281,7 +282,7 @@ private Q_SLOTS:
 
     void createRepositoryEntryOutsideRepositories()
     {
-        const auto [commit, log, push, revert, add, clone, createRepo] = MenuTexts();
+        const auto [commit, log, push, revert, add, clone, createRepo, refs] = MenuTexts();
         const ShellExt plugin(nullptr, {});
         const QTemporaryDir plain;
         const QList<QAction *> actions = plugin.outOfVersionControlActions({item(plain.path())});
@@ -301,10 +302,11 @@ private Q_SLOTS:
         // A working tree seen from outside gets its own menu
         const TestRepo repo;
         QCOMPARE(plugin.outOfVersionControlActions({item(repo.path())}).at(1)->text(), commit);
-        // A bare repository: Show log (TortoiseGit's Push too, which PushCommand doesn't support yet)
+        // A bare repository: Show log and Browse References (TortoiseGit's Push too, which PushCommand doesn't
+        // support yet)
         const QString bare = plain.filePath(QStringLiteral("bare.git"));
         repo.run({QStringLiteral("init"), QStringLiteral("--quiet"), QStringLiteral("--bare"), bare});
-        QCOMPARE(menuTexts(plugin, {item(bare)}), QStringList{log});
+        QCOMPARE(menuTexts(plugin, {item(bare)}), (QStringList{log, refs}));
         // A folder whose .git isn't a repository: nothing
         const QString broken = plain.filePath(QStringLiteral("broken"));
         QVERIFY(QDir().mkpath(broken + QStringLiteral("/.git")));

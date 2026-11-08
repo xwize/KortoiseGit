@@ -43,21 +43,6 @@ QStringList lines(const QByteArray& output)
 }
 
 /**
- * Ported from CGit::StripRefName.
- * @param ref A ref such as refs/heads/main.
- * @returns Its short name, such as main.
- */
-QString stripRefName(const QString& ref)
-{
-    for (const QLatin1String prefix : {QLatin1String("refs/heads/"), QLatin1String("refs/")}) {
-        if (ref.startsWith(prefix)) {
-            return ref.mid(prefix.size());
-        }
-    }
-    return ref;
-}
-
-/**
  * @param combo A combo box.
  * @param text An entry's text.
  */
@@ -231,7 +216,7 @@ void PushDlg::selectRemoteBranch(const QString& localBranch)
     // Not stripped, for gerrit's refs/for/..., as TortoiseGit's issue #1609
     QString pushBranch = configValue(QStringLiteral("branch.%1.pushbranch").arg(branch));
     if (pushBranch.isEmpty()) {
-        pushBranch = stripRefName(configValue(QStringLiteral("branch.%1.merge").arg(branch)));
+        pushBranch = Git::stripRefName(configValue(QStringLiteral("branch.%1.merge").arg(branch)));
     }
 
     if (const int index = m_remote->findText(pushRemote); !pushRemote.isEmpty() && index >= 0) {

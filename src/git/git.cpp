@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// Ported from TortoiseGit src/Git/Git.cpp (CGit::Run)
+// Ported from TortoiseGit src/Git/Git.cpp (CGit::Run, CGit::StripRefName)
 
 #include "git/git.hpp"
 
@@ -45,6 +45,16 @@ QString Git::workingTreeRoot(const QString& path)
         root.chop(1);
     }
     return QString::fromUtf8(root);
+}
+
+QString Git::stripRefName(const QString& ref)
+{
+    for (const QLatin1StringView prefix : {QLatin1StringView("refs/heads/"), QLatin1StringView("refs/")}) {
+        if (ref.startsWith(prefix)) {
+            return ref.mid(prefix.size());
+        }
+    }
+    return ref;
 }
 
 } // namespace kgt
