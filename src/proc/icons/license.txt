@@ -1,3 +1,13 @@
+KortoiseGit modification notice
+====================================================================
+The action*.png icons in this folder are modified versions of TortoiseGit's
+src/Resources/action*.ico (converted to PNG). Their shapes are unchanged; their
+colours have been recoloured to pastel shades so that they read on both light
+and dark themes. scripts/recolour-icons.sh regenerates them from the
+unmodified originals, kept in the original/ folder. The licence below covers
+both the originals and the modified icons.
+
+====================================================================
 The icons in these folders are available either under the terms
 of the GNU General Public License, or under the terms of the TortoiseSVN
 Icon License below, unless the folder contains an alternative
