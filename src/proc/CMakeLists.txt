@@ -15,6 +15,8 @@ add_library(kgtproc STATIC)
 
 target_sources(kgtproc PRIVATE
     ${kgtproc_logging}
+    aboutdlg.cpp
+    aboutdlg.hpp
     adddlg.cpp
     adddlg.hpp
     apputils.cpp
@@ -37,6 +39,8 @@ target_sources(kgtproc PRIVATE
     createbranchtagdlg.hpp
     filterhelper.cpp
     filterhelper.hpp
+    commands/aboutcommand.cpp
+    commands/aboutcommand.hpp
     commands/addcommand.cpp
     commands/addcommand.hpp
     commands/branchcommand.cpp

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "shellext.hpp"
+#include "pathutils.hpp"
 #include "testrepo.hpp"
 
 #include <KFileItem>
@@ -14,6 +15,7 @@
 #include <QImage>
 #include <QMenu>
 #include <QPointer>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -55,7 +57,7 @@ QStringList submenuLayout(const QList<QAction *>& actions)
 /**
  * @param actions Actions the plugin returned.
  * @returns Their texts, with the "KortoiseGit" submenu replaced by its entries and separators left out: the top-level entries
- *          come first, then the submenu's.
+ *          come first, then the submenu's. About, which is on every menu, is left out too.
  */
 QStringList flatTexts(const QList<QAction *>& actions)
 {
@@ -67,6 +69,7 @@ QStringList flatTexts(const QList<QAction *>& actions)
     }
     texts += submenuLayout(actions);
     texts.removeAll(QStringLiteral("-"));
+    texts.removeAll(QStringLiteral("A&bout"));
     return texts;
 }
 
@@ -144,6 +147,25 @@ struct MenuTexts {
 QString gitMenu()
 {
     return QStringLiteral("&KortoiseGit");
+}
+
+/**
+ * @returns The About entry's text.
+ */
+QString about()
+{
+    return QStringLiteral("A&bout");
+}
+
+/**
+ * @param plugin The plugin.
+ * @param path A local file or folder.
+ * @returns Whether the submenu ends with About, whichever of Dolphin's two calls asks.
+ */
+bool endsWithAbout(const ShellExt& plugin, const QString& path)
+{
+    const QStringList layout = submenuLayout(plugin.versionControlActions({item(path)}));
+    return !layout.isEmpty() && layout.constLast() == about() && submenuLayout(plugin.outOfVersionControlActions({item(path)})) == layout;
 }
 
 /**
@@ -411,33 +433,66 @@ private Q_SLOTS:
         // Commit stays at the top level; the separators around it are one in the submenu
         QList<QAction *> actions = actionsFor({});
         QCOMPARE(topLevelTexts(actions), (QStringList{commit, gitMenu()}));
-        QCOMPARE(
-            submenuLayout(actions),
-            (QStringList{pull, fetch, push, separator(), log, refs, rebase, separator(), revert, separator(), switchTo, merge, branch, tag, separator(), add}));
+        QCOMPARE(submenuLayout(actions),
+                 (QStringList{pull,
+                              fetch,
+                              push,
+                              separator(),
+                              log,
+                              refs,
+                              rebase,
+                              separator(),
+                              revert,
+                              separator(),
+                              switchTo,
+                              merge,
+                              branch,
+                              tag,
+                              separator(),
+                              add,
+                              separator(),
+                              about()}));
 
         // The separator after Commit's group comes first among the submenu's, and is dropped; none trails either
         actions = actionsFor(QStringLiteral("tracked.txt"));
         QCOMPARE(topLevelTexts(actions), (QStringList{commit, gitMenu()}));
-        QCOMPARE(submenuLayout(actions), (QStringList{diff, prevDiff, separator(), log}));
-        QCOMPARE(submenuLayout(actionsFor(QStringLiteral("modified.txt"))), (QStringList{diff, prevDiff, separator(), log, separator(), revert}));
+        QCOMPARE(submenuLayout(actions), (QStringList{diff, prevDiff, separator(), log, separator(), about()}));
+        QCOMPARE(submenuLayout(actionsFor(QStringLiteral("modified.txt"))),
+                 (QStringList{diff, prevDiff, separator(), log, separator(), revert, separator(), about()}));
 
         // Only submenu entries
         actions = actionsFor(QStringLiteral("new.txt"));
         QCOMPARE(topLevelTexts(actions), QStringList{gitMenu()});
-        QCOMPARE(submenuLayout(actions), QStringList{add});
+        QCOMPARE(submenuLayout(actions), (QStringList{add, separator(), about()}));
 
         // All three top-level entries that exist, in MenuInfo's order, the submenu after them
         actions = actionsFor(QStringLiteral("vendor"));
         QCOMPARE(topLevelTexts(actions), (QStringList{clone, commit, createRepo, gitMenu()}));
-        QCOMPARE(
-            submenuLayout(actions),
-            (QStringList{pull, fetch, push, separator(), log, refs, rebase, separator(), revert, separator(), switchTo, merge, branch, tag, separator(), add}));
+        QCOMPARE(submenuLayout(actions),
+                 (QStringList{pull,
+                              fetch,
+                              push,
+                              separator(),
+                              log,
+                              refs,
+                              rebase,
+                              separator(),
+                              revert,
+                              separator(),
+                              switchTo,
+                              merge,
+                              branch,
+                              tag,
+                              separator(),
+                              add,
+                              separator(),
+                              about()}));
 
-        // Nothing for the submenu: it is left out
+        // Only About for the submenu: no separator comes first
         const QTemporaryDir plain;
         actions = plugin.outOfVersionControlActions({item(plain.path())});
-        QCOMPARE(topLevelTexts(actions), (QStringList{clone, createRepo}));
-        QVERIFY(submenuLayout(actions).isEmpty());
+        QCOMPARE(topLevelTexts(actions), (QStringList{clone, createRepo, gitMenu()}));
+        QCOMPARE(submenuLayout(actions), QStringList{about()});
     }
 
     void submenuCarriesTheAppIcon()
@@ -488,7 +543,7 @@ private Q_SLOTS:
         const ShellExt plugin(nullptr, {});
         const QTemporaryDir plain;
         const QList<QAction *> actions = plugin.outOfVersionControlActions({item(plain.path())});
-        QCOMPARE(actions.size(), 2);
+        QCOMPARE(actions.size(), 3);
         QCOMPARE(actions.at(0)->text(), QStringLiteral("Git Clone..."));
         QCOMPARE(actions.at(0)->data().toStringList(), QStringList{plain.path()});
         QCOMPARE(actions.at(1)->text(), QStringLiteral("Git Create repositor&y here..."));
@@ -498,8 +553,8 @@ private Q_SLOTS:
         const QString file = plain.filePath(QStringLiteral("file.txt"));
         QFile created(file);
         QVERIFY(created.open(QIODevice::WriteOnly));
-        QVERIFY(plugin.outOfVersionControlActions({item(file)}).isEmpty());
-        QVERIFY(plugin.outOfVersionControlActions({item(plain.path()), item(file)}).isEmpty());
+        QVERIFY(flatTexts(plugin.outOfVersionControlActions({item(file)})).isEmpty());
+        QVERIFY(flatTexts(plugin.outOfVersionControlActions({item(plain.path()), item(file)})).isEmpty());
 
         // A working tree seen from outside gets its own menu
         const TestRepo repo;
@@ -509,10 +564,10 @@ private Q_SLOTS:
         const QString bare = plain.filePath(QStringLiteral("bare.git"));
         repo.run({QStringLiteral("init"), QStringLiteral("--quiet"), QStringLiteral("--bare"), bare});
         QCOMPARE(menuTexts(plugin, {item(bare)}), (QStringList{fetch, log, refs}));
-        // A folder whose .git isn't a repository: nothing
+        // A folder whose .git isn't a repository: nothing but About
         const QString broken = plain.filePath(QStringLiteral("broken"));
         QVERIFY(QDir().mkpath(broken + QStringLiteral("/.git")));
-        QVERIFY(plugin.outOfVersionControlActions({item(broken)}).isEmpty());
+        QVERIFY(flatTexts(plugin.outOfVersionControlActions({item(broken)})).isEmpty());
     }
 
     void noPullDuringMergeOrBisect()
@@ -598,6 +653,61 @@ private Q_SLOTS:
         for (const QString& path : {repo.filePath(QStringLiteral("src")), repo.filePath(QStringLiteral(".gitignore"))}) {
             QVERIFY(!menuTexts(plugin, {item(path)}).contains(QStringLiteral("Git Clone...")));
         }
+    }
+
+    void aboutEndsEveryMenu()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        const QTemporaryDir plain;
+        QFile outside(plain.filePath(QStringLiteral("file.txt")));
+        QVERIFY(outside.open(QIODevice::WriteOnly));
+
+        const ShellExt plugin(nullptr, {});
+        for (const QString& path : {repo.path(), repo.filePath(QStringLiteral("a.txt")), plain.path(), outside.fileName()}) {
+            QVERIFY(endsWithAbout(plugin, path));
+        }
+        // CShellExt::Initialize still gives .git and what is in it no menu at all
+        QVERIFY(plugin.versionControlActions({item(repo.filePath(QStringLiteral(".git")))}).isEmpty());
+
+        const QList<QAction *> actions = plugin.versionControlActions({item(repo.path())});
+        const QAction *entry = actions.constLast()->menu()->actions().constLast();
+        QCOMPARE(entry->toolTip(), QStringLiteral("Shows information about KortoiseGit"));
+    }
+
+    void aboutStartsTheCommandWithoutPaths()
+    {
+        // A stand-in for kortoisegitproc that records its arguments: the real one would open a dialog nobody closes
+        const QTemporaryDir bin;
+        const QString record = bin.filePath(QStringLiteral("arguments"));
+        const QString script = bin.filePath(QStringLiteral("kortoisegitproc"));
+        QFile file(script);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QStringLiteral("#!/bin/sh\nprintf '%s\\n' \"$@\" > '%1.tmp'\nmv '%1.tmp' '%1'\n").arg(record).toUtf8());
+        file.close();
+        QVERIFY(file.setPermissions(file.permissions() | QFile::ExeOwner));
+
+        const QByteArray path = qgetenv("PATH");
+        const auto restorePath = qScopeGuard([&path] {
+            qputenv("PATH", path);
+        });
+        qputenv("PATH", QByteArray(QFile::encodeName(bin.path()) + ':' + path));
+        if (findSiblingExecutable(QStringLiteral("kortoisegitproc")) != QFileInfo(script).canonicalFilePath()) {
+            QSKIP("An installed kortoisegitproc would be started instead of the stand-in");
+        }
+
+        const TestRepo repo;
+        const ShellExt plugin(nullptr, {});
+        const QList<QAction *> actions = plugin.versionControlActions({item(repo.path())});
+        actions.constLast()->menu()->actions().constLast()->trigger();
+
+        QVERIFY(QTest::qWaitFor([&record] {
+            return QFile::exists(record);
+        }));
+        QFile arguments(record);
+        QVERIFY(arguments.open(QIODevice::ReadOnly));
+        QCOMPARE(arguments.readAll(), QByteArray("--command\nabout\n"));
     }
 
     void newRepositoryRefreshesDolphin()
