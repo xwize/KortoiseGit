@@ -8,6 +8,7 @@
 #include "testrepo.hpp"
 
 #include <QDir>
+#include <QFile>
 #include <QPixmap>
 #include <QSignalSpy>
 #include <QTest>
@@ -184,6 +185,9 @@ private Q_SLOTS:
         QCOMPARE(files->rowCount(), 1);
         QCOMPARE(files->entry(0).path, QStringLiteral("other.txt"));
         QCOMPARE(dlg.changedFileList()->currentVersion(), model->rev(0).hash);
+
+        // The Actions column draws TortoiseGit's own icons, bundled in icons.qrc
+        QVERIFY(QFile::exists(QStringLiteral(":/kortoisegit/icons/actionmodified-16.png")));
 
         dlg.show();
         QVERIFY(QTest::qWaitForWindowExposed(&dlg));

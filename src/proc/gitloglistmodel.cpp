@@ -76,6 +76,8 @@ void GitLogListModel::setFilesFailed(int row)
 {
     Q_ASSERT(row >= 0 && row < m_revs.size());
     std::next(m_revs.begin(), row)->filesState = GitRevLoglist::FilesState::Failed;
+    const QModelIndex cell = index(row, ActionsColumn);
+    Q_EMIT dataChanged(cell, cell); // The Actions column shows the error icon
 }
 
 QList<TGitPath::Action> GitLogListModel::shownActions()

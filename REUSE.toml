@@ -8,3 +8,10 @@ version = 1
 path = ["CMakePresets.json", "src/plugin/kortoisegitplugin.json"]
 SPDX-FileCopyrightText = "2026 James Jones <this.verb@gmail.com>"
 SPDX-License-Identifier = "GPL-2.0-or-later"
+
+# The log list's action icons, converted to PNG from TortoiseGit src/Resources/action*.ico, and that folder's
+# licence notice. license.txt offers them under the GPL or the TortoiseSVN Icon License; we take the GPL.
+[[annotations]]
+path = ["src/proc/icons/*.png", "src/proc/icons/license.txt"]
+SPDX-FileCopyrightText = ["2006-2007 The TortoiseSVN Project", "2008-2026 TortoiseGit"]
+SPDX-License-Identifier = "GPL-2.0-or-later"
