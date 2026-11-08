@@ -3,7 +3,8 @@
 SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
-<!-- The log list's action icons, from TortoiseGit src/Resources/action*.ico (see icons/license.txt) -->
+<!-- The log list's action icons, from TortoiseGit src/Resources/action*.ico (see icons/license.txt), recoloured from
+     icons/original/ by scripts/recolour-icons.sh -->
 <RCC version="1.0">
     <qresource prefix="/kortoisegit">
         <file>icons/actionadded-16.png</file>
