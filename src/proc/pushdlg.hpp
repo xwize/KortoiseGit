@@ -95,6 +95,7 @@ private:
     [[nodiscard]] bool isBranchNameValid(const QString& name) const;
 
     Git m_git;
+    QString m_selectLocalBranch; // m_BranchSourceName, kept for F5
     QComboBox *m_branchSource;
     QComboBox *m_branchRemote;
     QComboBox *m_remote;

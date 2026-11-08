@@ -11,6 +11,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalSpy>
@@ -384,6 +385,101 @@ private Q_SLOTS:
         QVERIFY(stagedFiles(repo).contains(QStringLiteral("staged.txt")));
         QVERIFY(waitForList(dlg));
         QVERIFY(dlg.commitButton()->isEnabled());
+    }
+
+    void f5RefreshesFromTheMessageEditor()
+    {
+        const TestRepo repo;
+        commitTwoFiles(repo);
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+        CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowActive(&dlg));
+        QVERIFY(dlg.messageEdit()->hasFocus());
+        const auto *commitTo = dlg.findChild<QLineEdit *>();
+        QVERIFY(commitTo);
+        QCOMPARE(commitTo->text(), QStringLiteral("main"));
+
+        repo.write(QStringLiteral("b.txt"), "changed\n");
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("other")});
+        QSignalSpy loaded(dlg.fileList(), &GitStatusListCtrl::loaded);
+        QTest::keyClick(dlg.messageEdit(), Qt::Key_F5);
+        QVERIFY(loaded.wait(timeout));
+
+        QCOMPARE(listedPaths(dlg), (QStringList{QStringLiteral("a.txt"), QStringLiteral("b.txt")}));
+        QCOMPARE(commitTo->text(), QStringLiteral("other"));
+    }
+
+    void f5IsIgnoredWhileCommitting()
+    {
+        const TestRepo repo;
+        commitTwoFiles(repo);
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+        CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowActive(&dlg));
+
+        QSignalSpy accepted(&dlg, &QDialog::accepted);
+        typeAndCommit(dlg, QStringLiteral("Committed"));
+        QVERIFY(dlg.isCommitting());
+        QTest::keyClick(dlg.messageEdit(), Qt::Key_F5);
+        QVERIFY(!dlg.fileList()->isBusy());
+        QVERIFY(accepted.wait(timeout));
+    }
+
+    void failedCommitLeavesCheckedFilesStaged()
+    {
+        const TestRepo repo;
+        commitTwoFiles(repo);
+        const QByteArray original = repo.git().run({QStringLiteral("show"), QStringLiteral("HEAD:a.txt")});
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+        const QString hook = repo.filePath(QStringLiteral(".git/hooks/pre-commit"));
+        repo.write(QStringLiteral(".git/hooks/pre-commit"), "#!/bin/sh\nexit 1\n");
+        QVERIFY(QFile::setPermissions(hook, QFile::permissions(hook) | QFile::ExeOwner));
+
+        CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowActive(&dlg));
+        QSignalSpy failed(&dlg, &CommitDlg::commitFailed);
+        typeAndCommit(dlg, QStringLiteral("Rejected"));
+        QVERIFY(failed.wait(timeout));
+        QVERIFY(waitForList(dlg));
+
+        // CCommitDlg::OnOK doesn't unstage what it staged, so the file is still a change once the edit is undone
+        QCOMPARE(stagedFiles(repo), QStringList{QStringLiteral("a.txt")});
+        repo.write(QStringLiteral("a.txt"), original);
+        QSignalSpy loaded(dlg.fileList(), &GitStatusListCtrl::loaded);
+        QTest::keyClick(dlg.messageEdit(), Qt::Key_F5);
+        QVERIFY(loaded.wait(timeout));
+        QVERIFY(listedPaths(dlg).contains(QStringLiteral("a.txt")));
+    }
+
+    void failedPreparationDoesNotStageUncheckedFilesAgain()
+    {
+        const TestRepo repo;
+        commitTwoFiles(repo);
+        repo.write(QStringLiteral("staged.txt"), "staged\n");
+        repo.run({QStringLiteral("add"), QStringLiteral("staged.txt")});
+        repo.write(QStringLiteral("staged.txt"), "edited\n");
+        repo.write(QStringLiteral("gone.txt"), "gone\n");
+        const QString head = headHash(repo);
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QVERIFY(setChecked(dlg, QStringLiteral("staged.txt"), false));
+        QVERIFY(setChecked(dlg, QStringLiteral("gone.txt"), true));
+        // git add then fails, before anything else has touched the index
+        QVERIFY(QFile::remove(repo.filePath(QStringLiteral("gone.txt"))));
+        QSignalSpy failed(&dlg, &CommitDlg::commitFailed);
+        typeAndCommit(dlg, QStringLiteral("Never committed"));
+        QVERIFY(failed.wait(timeout));
+
+        QCOMPARE(headHash(repo), head);
+        // bAddSuccess is false, so mgtReAddAfterCommit doesn't run and the edit isn't staged
+        QCOMPARE(repo.git().run({QStringLiteral("show"), QStringLiteral(":staged.txt")}), QByteArray("staged\n"));
     }
 
     void commitsInRepositoryWithoutCommits()

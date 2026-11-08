@@ -268,6 +268,25 @@ private Q_SLOTS:
         QCOMPARE((*command)->pathRequirement(), PathRequirement::WorkingTreeRequired);
     }
 
+    void f5RefreshesWhereverTheFocusIs()
+    {
+        const RebaseSetup setup;
+        const std::unique_ptr<RebaseDlg> dlg = openDlg(setup.repo);
+        QVERIFY(dlg);
+        dlg->show();
+        QVERIFY(QTest::qWaitForWindowActive(dlg.get()));
+        dlg->upstreamCombo()->setFocus();
+        QCOMPARE(dlg->branchCombo()->findText(QStringLiteral("later")), -1);
+
+        setup.repo.run({QStringLiteral("branch"), QStringLiteral("later")});
+        QTest::keyClick(dlg->upstreamCombo(), Qt::Key_F5);
+        QVERIFY(QTest::qWaitFor(
+            [&dlg] {
+                return dlg->branchCombo()->findText(QStringLiteral("later")) >= 0;
+            },
+            timeout));
+    }
+
     void setupDefaults()
     {
         const RebaseSetup setup;

@@ -45,7 +45,7 @@ struct CommitStep {
     QStringList arguments; // After "git"
     QByteArray input; // What git reads on stdin: the paths, which may not fit on a command line
     bool ignoreErrors = false; // A failure doesn't stop the commit (CMassiveGitTask's ignoreErrors)
-    bool always = false; // Runs even after an earlier step failed: puts the index back as it was
+    bool afterCommit = false; // Follows git commit and runs even if git commit failed, but not if preparing the index did
 };
 
 /**

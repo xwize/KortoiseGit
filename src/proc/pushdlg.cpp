@@ -21,6 +21,7 @@
 #include <QDir>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QShortcut>
 #include <QVBoxLayout>
 
 #include <tuple>
@@ -78,6 +79,7 @@ namespace kgt
 PushDlg::PushDlg(const QString& workingTree, QWidget *parent, const QString& selectLocalBranch)
     : QDialog(parent)
     , m_git(workingTree)
+    , m_selectLocalBranch(selectLocalBranch)
     , m_branchSource(new QComboBox(this))
     , m_branchRemote(new QComboBox(this))
     , m_remote(new QComboBox(this))
@@ -123,6 +125,15 @@ PushDlg::PushDlg(const QString& workingTree, QWidget *parent, const QString& sel
     connect(m_branchSource, &QComboBox::currentTextChanged, this, &PushDlg::selectRemoteBranch);
     connect(m_forceWithLease, &QCheckBox::toggled, this, &PushDlg::updateOptionStates);
     connect(m_tags, &QCheckBox::toggled, this, &PushDlg::updateOptionStates);
+
+    // PreTranslateMessage's VK_F5. A failure is shown, as Refresh does, since nothing above the event loop catches it
+    connect(new QShortcut(QKeySequence(Qt::Key_F5), this), &QShortcut::activated, this, [this] {
+        try {
+            refresh(m_selectLocalBranch);
+        } catch (const RuntimeError& e) {
+            KMessageBox::error(this, e.error().message, QString(), noNotify);
+        }
+    });
 
     refresh(selectLocalBranch);
     resize(520, sizeHint().height());
