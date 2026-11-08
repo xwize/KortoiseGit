@@ -9,6 +9,7 @@
 
 #include "git/git.hpp"
 #include "git/gitcall.hpp"
+#include "git/massivegittask.hpp"
 #include "progresscommands/revertprogresscommand.hpp"
 #include "utils/runtimeerror.hpp"
 
@@ -35,6 +36,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <tuple>
 #include <utility>
 
 namespace
@@ -255,7 +257,7 @@ void GitStatusListCtrl::reload()
 
 bool GitStatusListCtrl::isBusy() const
 {
-    return m_isBusy || m_statusCall || m_numStatCall || m_revertCommand;
+    return m_isBusy || m_statusCall || m_numStatCall || m_revertCommand || m_resolveCall;
 }
 
 void GitStatusListCtrl::setSelectButton(QCheckBox *button)
@@ -305,6 +307,7 @@ void GitStatusListCtrl::contextMenuEvent(QContextMenuEvent *event)
         return;
     }
     QMenu menu(this);
+    addConflictEntries(menu, static_cast<int>(selected.size()));
     QList<GitStatusListEntry> tracked;
     std::copy_if(selected.cbegin(), selected.cend(), std::back_inserter(tracked), isTracked);
     if (!tracked.isEmpty()) {
@@ -313,7 +316,10 @@ void GitStatusListCtrl::contextMenuEvent(QContextMenuEvent *event)
                 startDiff(entry);
             }
         });
-        menu.setDefaultAction(compare);
+        // Edit conflicts stays the default for a single conflicted file
+        if (!menu.defaultAction()) {
+            menu.setDefaultAction(compare);
+        }
         menu.addSeparator();
     }
     // The entry the menu was opened on decides, as TortoiseGit's wcStatus does
@@ -484,11 +490,99 @@ void GitStatusListCtrl::showGroups()
 void GitStatusListCtrl::onDoubleClicked(const QModelIndex& index)
 {
     const GitStatusListEntry *entry = m_model->entry(m_proxy->mapToSource(index));
-    // TortoiseGit edits conflicts and diffs unversioned files against nothing here; neither is ported yet
-    if (!entry || !isTracked(*entry) || (entry->actions & Action::Unmerged)) {
+    // TortoiseGit diffs unversioned files against nothing here; that is not ported yet
+    if (!entry || !isTracked(*entry)) {
+        return;
+    }
+    if (entry->actions & Action::Unmerged) {
+        editConflict(*entry);
         return;
     }
     startDiff(*entry);
+}
+
+void GitStatusListCtrl::addConflictEntries(QMenu& menu, int selectedCount)
+{
+    // The entry the menu was opened on decides, as TortoiseGit's wcStatus does
+    const GitStatusListEntry *focused = focusedEntry();
+    if (!focused || !(focused->actions & Action::Unmerged) || !m_currentVersion.isEmpty()) {
+        return;
+    }
+    if (selectedCount == 1 && m_contextMenus.testFlag(ContextMenu::Conflict)) {
+        const GitStatusListEntry entry = *focused;
+        QAction *edit = menu.addAction(QIcon::fromTheme(QStringLiteral("merge")), i18n("&Edit conflicts"), this, [this, entry] {
+            editConflict(entry);
+        });
+        menu.setDefaultAction(edit);
+    }
+    // TortoiseGit's "Resolve conflict using 'theirs'/'mine'" entries are not ported yet
+    if (m_contextMenus.testFlag(ContextMenu::Resolve) && !m_resolveCall) {
+        menu.addAction(QIcon::fromTheme(QStringLiteral("dialog-ok-apply")), i18n("Resolved"), this, [this] {
+            // After the menu has closed, so the confirmation isn't nested in it
+            QMetaObject::invokeMethod(this, &GitStatusListCtrl::resolveSelected, Qt::QueuedConnection);
+        });
+    }
+    if (m_contextMenus & (ContextMenu::Conflict | ContextMenu::Resolve)) {
+        menu.addSeparator();
+    }
+}
+
+void GitStatusListCtrl::editConflict(const GitStatusListEntry& entry)
+{
+    /**
+     * TortoiseGit's CAppUtils::ConflictEdit opens TortoiseMerge; here git mergetool runs the user's merge tool,
+     * detached, and marks the file resolved itself when the tool reports success. F5 shows the result.
+     */
+    const QStringList arguments{QStringLiteral("mergetool"), QStringLiteral("--no-prompt"), QStringLiteral("--"), entry.path};
+    if (!QProcess::startDetached(QStringLiteral("git"), arguments, m_workingTree)) {
+        QMessageBox::warning(this, i18n("Edit conflicts"), i18n("Could not start git mergetool."));
+    }
+}
+
+void GitStatusListCtrl::resolveSelected()
+{
+    if (m_resolveCall) {
+        return;
+    }
+    QStringList paths;
+    for (const GitStatusListEntry& entry : selectedEntries()) {
+        if (entry.actions & Action::Unmerged) {
+            paths.append(entry.path);
+        }
+    }
+    if (paths.isEmpty()) {
+        return;
+    }
+    const QString question = i18n("Are you sure you want to mark the conflicted file(s) as resolved?");
+    if (QMessageBox::question(this, i18n("KortoiseGit"), question, QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+    // ResolveProgressCommand: git add -f on the conflicted files (CAppUtils::RemoveTempMergeFile has nothing to remove here)
+    MassiveGitTask addTask({QStringLiteral("add"), QStringLiteral("-f")});
+    addTask.setPaths(paths);
+    m_resolveCall = addTask.runAsync(Git(m_workingTree));
+    connect(m_resolveCall.get(), &GitCall::finished, this, &GitStatusListCtrl::onResolveFinished);
+    setCursor(Qt::BusyCursor);
+}
+
+void GitStatusListCtrl::onResolveFinished()
+{
+    const GitCall *call = takeFinished(m_resolveCall);
+    unsetCursor();
+    try {
+        std::ignore = call->output();
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        // Window-modal without a nested event loop
+        auto *box = new QMessageBox(QMessageBox::Critical, i18n("KortoiseGit"), e.error().message, QMessageBox::Ok, this);
+        box->setAttribute(Qt::WA_DeleteOnClose);
+        box->open();
+    }
+    // TortoiseGit marks the entries modified, or refreshes the parent after an error; reloading does both
+    reload();
+    Q_EMIT resolved();
 }
 
 const GitStatusListEntry *GitStatusListCtrl::focusedEntry() const

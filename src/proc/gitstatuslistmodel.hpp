@@ -13,6 +13,7 @@
 #pragma once
 
 #include "git/gitnumstat.hpp"
+#include "git/gitrevloglist.hpp"
 #include "git/gitstatus.hpp"
 #include "git/tgitpath.hpp"
 
@@ -117,6 +118,14 @@ public:
      * @returns An entry per status entry, in the same order.
      */
     [[nodiscard]] static QList<GitStatusListEntry> makeEntries(const QList<GitStatusEntry>& status, const QList<NumStatEntry>& numStat);
+
+    /**
+     * The entries of a commit's file list, as the log shows them: the changes against each parent, each entry
+     * marked with its parent (TortoiseGit's m_ParentNo).
+     * @param files A commit's files, one GitRevFiles per parent.
+     * @returns The entries, parent by parent.
+     */
+    [[nodiscard]] static QList<GitStatusListEntry> makeRevisionEntries(const QList<GitRevFiles>& files);
 
     /**
      * Replaces every entry, keeping the remembered check state of paths seen before.

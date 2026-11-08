@@ -229,6 +229,7 @@ struct MenuEntries {
     bool commit = false;
     bool log = false;
     bool refBrowse = false;
+    bool rebase = false;
     bool mergeAbort = false;
     bool revert = false;
     bool switchTo = false;
@@ -270,6 +271,7 @@ MenuEntries menuEntries(const MenuState& state)
         .commit = state.inGit || state.folderInGit,
         .log = (state.onlyOne && !state.added && (state.inGit || state.folderInGit)) || state.bareRepo,
         .refBrowse = (state.folderInGit && state.onlyOne) || state.bareRepo,
+        .rebase = state.folderInGit && state.onlyOne && !state.bisect && !state.mergeActive,
         .mergeAbort = mergeAbort,
         .revert = (state.inGit && !state.normal) || state.folderInGit,
         .switchTo = state.folderInGit && state.onlyOne,
@@ -297,6 +299,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_pushAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-push")), i18n("Pus&h..."), this))
     , m_cloneAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-download")), i18n("Git Clone..."), this))
     , m_refBrowseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Browse References"), this))
+    , m_rebaseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-rebase")), i18n("Rebase..."), this))
     , m_switchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("S&witch/Checkout..."), this))
     , m_mergeAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge..."), this))
     , m_mergeAbortAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Abort &Merge"), this))
@@ -331,6 +334,11 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_refBrowseAction->setToolTip(i18n("Opens the Reference Browser dialog."));
     connect(m_refBrowseAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("refbrowse"), m_refBrowseAction);
+    });
+    // TortoiseGit's description of Rebase is its menu text (IDS_MENUREBASE)
+    m_rebaseAction->setToolTip(i18n("Rebase..."));
+    connect(m_rebaseAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("rebase"), m_rebaseAction);
     });
     m_switchAction->setToolTip(i18n("Switch/Checkout working tree to another branch/tag"));
     connect(m_switchAction, &QAction::triggered, this, [this] {
@@ -447,6 +455,7 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
     add(entries.commit, m_commitAction);
     add(entries.log, m_showLogAction);
     add(entries.refBrowse, m_refBrowseAction);
+    add(entries.rebase, m_rebaseAction);
     add(entries.mergeAbort, m_mergeAbortAction);
     add(entries.revert, m_revertAction);
     add(entries.switchTo, m_switchAction);

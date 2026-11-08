@@ -20,10 +20,11 @@ It has two parts, split the way TortoiseGit splits TortoiseShell and TortoiseGit
   It can also be run from a terminal.
 
 Status: early. Dolphin shows status overlays. The commands are `add`, `commit`, `revert`, `pull`, `fetch`, `merge`,
-`switch` and `push` (TortoiseGit's Add, Commit, Revert, Pull, Fetch, Merge, Switch/Checkout and Push dialogs, also in
-Dolphin's context menu, where Abort Merge, `merge --abort`, appears while a merge is in progress), `clone`, `repocreate`
-and `log`. `switch --rev <ref>` preselects a branch, tag or commit. Pull, fetch and push ask for passwords and host keys
-through ksshaskpass, or your own `SSH_ASKPASS`/`GIT_ASKPASS`, and never on a terminal.
+`switch`, `rebase` and `push` (TortoiseGit's Add, Commit, Revert, Pull, Fetch, Merge, Switch/Checkout, Rebase and
+Push dialogs, also in Dolphin's context menu, where Abort Merge, `merge --abort`, appears while a merge is in
+progress), `clone`, `repocreate` and `log`. `switch --rev <ref>` preselects a branch, tag or commit, and
+`rebase --upstream <ref>` an upstream (`--force` checks "Force Rebase"). Pull, fetch and push ask for passwords and
+host keys through ksshaskpass, or your own `SSH_ASKPASS`/`GIT_ASKPASS`, and never on a terminal.
 
 ## Install
 

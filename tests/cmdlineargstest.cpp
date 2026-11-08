@@ -68,6 +68,15 @@ private Q_SLOTS:
         QCOMPARE(args->values.value(QStringLiteral("rev")), QStringLiteral("v1"));
     }
 
+    void parsesRebaseOptions()
+    {
+        const Result<CmdLineArgs> args = parse(
+            {QStringLiteral("--command"), QStringLiteral("rebase"), QStringLiteral("--upstream"), QStringLiteral("origin/main"), QStringLiteral("--force")});
+        QVERIFY(args);
+        QCOMPARE(args->values.value(QStringLiteral("upstream")), QStringLiteral("origin/main"));
+        QCOMPARE(args->switches, QStringList{QStringLiteral("force")});
+    }
+
     void makesRelativePathsAbsolute()
     {
         const Result<CmdLineArgs> args = parse({QStringLiteral("--command"), QStringLiteral("log"), QStringLiteral("--path"), QStringLiteral("sub/../file")});
