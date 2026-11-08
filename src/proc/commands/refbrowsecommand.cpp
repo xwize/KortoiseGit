@@ -7,7 +7,6 @@
 #include "commands/refbrowsecommand.hpp"
 
 #include "browserefsdlg.hpp"
-#include "git/git.hpp"
 
 namespace kgt
 {

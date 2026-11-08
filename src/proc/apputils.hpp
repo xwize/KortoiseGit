@@ -18,6 +18,7 @@
 #include <QString>
 #include <QStringList>
 
+class QComboBox;
 class QWidget;
 
 namespace kgt
@@ -69,6 +70,15 @@ public:
      * @returns Whether the user answered Yes.
      */
     [[nodiscard]] static bool askYesNo(QWidget *parent, const QString& question, bool warning);
+
+    /**
+     * Ported from CHistoryCombo::AddString: adds an entry once and selects it. An existing entry after @p pos moves
+     * there; one at or before it stays where it is.
+     * @param combo The combo box.
+     * @param text The entry; nothing happens if it is empty.
+     * @param pos Where to put it; negative for the end, TortoiseGit's default.
+     */
+    static void addString(QComboBox *combo, const QString& text, int pos = -1);
 
     /**
      * @param call A finished git call that lists branches or tags.

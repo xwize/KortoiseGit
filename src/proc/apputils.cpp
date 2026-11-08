@@ -26,6 +26,7 @@
 #include <KSharedConfig>
 
 #include <QClipboard>
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
 #include <QGuiApplication>
@@ -65,6 +66,24 @@ bool AppUtils::askYesNo(QWidget *parent, const QString& question, bool warning)
     const auto answer = warning ? KMessageBox::warningTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify)
                                 : KMessageBox::questionTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify);
     return answer == KMessageBox::PrimaryAction;
+}
+
+void AppUtils::addString(QComboBox *combo, const QString& text, int pos)
+{
+    if (text.isEmpty()) {
+        return;
+    }
+    const int position = pos < 0 ? combo->count() : pos;
+    const int existing = combo->findText(text, Qt::MatchExactly | Qt::MatchCaseSensitive);
+    if (existing >= 0) {
+        if (existing <= position) {
+            combo->setCurrentIndex(existing);
+            return;
+        }
+        combo->removeItem(existing);
+    }
+    combo->insertItem(position, text);
+    combo->setCurrentIndex(position);
 }
 
 QByteArray AppUtils::outputOrEmpty(const GitCall& call)

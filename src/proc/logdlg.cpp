@@ -14,7 +14,6 @@
 
 #include "git/git.hpp"
 #include "git/gitrevloglist.hpp"
-#include "git/tgitpath.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KConfigGroup>

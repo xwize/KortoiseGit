@@ -23,7 +23,6 @@ private Q_SLOTS:
         QIcon::setThemeName(QStringLiteral("hicolor"));
     }
 
-    // GitLogList needs its icons without having asked for the app icon first
     void initIconResourcesRegistersTheFile()
     {
         AppUtils::initIconResources();

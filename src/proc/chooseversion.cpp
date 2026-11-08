@@ -223,13 +223,7 @@ void ChooseVersion::selectRef(QString refName, bool refNameIsPossiblyNotFullName
         m_tags->setCurrentIndex(m_tags->findText(refName, Qt::MatchExactly | Qt::MatchCaseSensitive));
     } else {
         setDefaultChoose(Choice::Version);
-        // CHistoryCombo::AddString: the commit goes in once and is selected
-        int index = m_version->findText(refName, Qt::MatchExactly | Qt::MatchCaseSensitive);
-        if (index < 0) {
-            m_version->addItem(refName);
-            index = m_version->count() - 1;
-        }
-        m_version->setCurrentIndex(index);
+        AppUtils::addString(m_version, refName);
     }
     Q_EMIT versionChanged();
 }

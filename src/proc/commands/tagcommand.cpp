@@ -12,7 +12,6 @@
 
 #include "apputils.hpp"
 #include "createbranchtagdlg.hpp"
-#include "git/git.hpp"
 
 namespace kgt
 {

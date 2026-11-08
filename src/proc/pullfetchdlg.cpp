@@ -12,7 +12,6 @@
 
 #include "apputils.hpp"
 #include "git/gitadmindir.hpp"
-#include "historycombo.hpp"
 
 #include <KConfigGroup>
 #include <KLocalizedString>
@@ -318,7 +317,7 @@ void PullFetchDlg::refresh()
     m_configPullBranch = pullBranch;
 
     // Without an upstream, the branch of the same name
-    HistoryCombo::addString(m_remoteBranch, pullBranch.isEmpty() ? currentBranch : pullBranch);
+    AppUtils::addString(m_remoteBranch, pullBranch.isEmpty() ? currentBranch : pullBranch);
 
     if (pullRemote.isEmpty()) {
         pullRemote = historyGroup(QStringLiteral("PullRemote")).readEntry(m_git.workingDirectory(), QString());

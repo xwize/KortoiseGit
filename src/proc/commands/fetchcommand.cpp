@@ -11,7 +11,6 @@
 
 #include "commands/fetchcommand.hpp"
 
-#include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 #include "progressdlg.hpp"
 #include "pullfetchdlg.hpp"

@@ -21,7 +21,6 @@
 #include "gitloglist.hpp"
 #include "gitloglistmodel.hpp"
 #include "gitstatuslistctrl.hpp"
-#include "historycombo.hpp"
 
 #include <KLocalizedString>
 
@@ -409,7 +408,7 @@ void RebaseDlg::onBranchesLoaded()
         } else {
             // GetCurrentBranch(true): HEAD when detached
             const QString head = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(m_git.workingDirectory()));
-            HistoryCombo::addString(m_branchCtrl, head.isEmpty() ? QStringLiteral("HEAD") : head, 0);
+            AppUtils::addString(m_branchCtrl, head.isEmpty() ? QStringLiteral("HEAD") : head, 0);
         }
 
         const BranchList upstreams = Git::parseBranchList(branchOutput, BranchAllF, false, !m_git.derefFetchHead().isEmpty());
@@ -417,7 +416,7 @@ void RebaseDlg::onBranchesLoaded()
         m_upstreamCtrl->addItems(upstreams.branches + Git::parseTagList(AppUtils::outputOrEmpty(*tagCall)));
         m_upstreamCtrl->setCurrentIndex(-1);
         if (!m_options.upstream.isEmpty()) {
-            HistoryCombo::addString(m_upstreamCtrl, m_options.upstream, 0);
+            AppUtils::addString(m_upstreamCtrl, m_options.upstream, 0);
         } else {
             // Select pull-remote from current branch (GetRemoteTrackedBranchForHEAD)
             const QString current = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(m_git.workingDirectory()));
@@ -766,8 +765,8 @@ void RebaseDlg::onReverse()
     {
         const QSignalBlocker branchBlocker(m_branchCtrl);
         const QSignalBlocker upstreamBlocker(m_upstreamCtrl);
-        HistoryCombo::addString(m_branchCtrl, upstream, 0);
-        HistoryCombo::addString(m_upstreamCtrl, branch, 0);
+        AppUtils::addString(m_branchCtrl, upstream, 0);
+        AppUtils::addString(m_upstreamCtrl, branch, 0);
     }
     fetchLogList();
 }
@@ -781,7 +780,7 @@ void RebaseDlg::onBrowse()
     }
     {
         const QSignalBlocker blocker(m_upstreamCtrl);
-        HistoryCombo::addString(m_upstreamCtrl, Git::stripRefName(ref), 0);
+        AppUtils::addString(m_upstreamCtrl, Git::stripRefName(ref), 0);
     }
     fetchLogList();
 }

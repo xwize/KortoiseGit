@@ -17,7 +17,6 @@
 #include "git/gitadmindir.hpp"
 #include "git/gitcall.hpp"
 #include "git/massivegittask.hpp"
-#include "git/tgitpath.hpp"
 #include "gitstatuslistctrl.hpp"
 #include "gitstatuslistmodel.hpp"
 #include "utils/runtimeerror.hpp"
