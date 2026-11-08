@@ -105,8 +105,8 @@ void showError(QWidget *parent, const QString& message)
 }
 
 /**
- * Sorts the list, keeping the groups of a merge's files in parent order whichever way it is sorted, as the
- * Windows list view keeps its groups.
+ * Sorts the list within its groups, keeping the groups themselves in order whichever way it is sorted, as the
+ * Windows list view does.
  */
 class GitStatusListProxy : public QSortFilterProxyModel
 {
@@ -149,6 +149,9 @@ GitStatusListCtrl::GitStatusListCtrl(QWidget *parent)
     setModel(m_proxy);
 
     setRootIsDecorated(false);
+    // A list view's groups are neither indented nor collapsible
+    setIndentation(0);
+    setItemsExpandable(false);
     setUniformRowHeights(true);
     setAllColumnsShowFocus(true);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -162,6 +165,8 @@ GitStatusListCtrl::GitStatusListCtrl(QWidget *parent)
     header()->setSortIndicator(-1, Qt::AscendingOrder);
     setSortingEnabled(true);
 
+    // After the view's own reset, which has forgotten which rows span and are open
+    connect(m_proxy, &QAbstractItemModel::modelReset, this, &GitStatusListCtrl::showGroups);
     connect(this, &QAbstractItemView::doubleClicked, this, &GitStatusListCtrl::onDoubleClicked);
     connect(m_model, &GitStatusListModel::checkedCountChanged, this, &GitStatusListCtrl::updateCheckedCount);
 }
@@ -245,7 +250,6 @@ void GitStatusListCtrl::updateWithGitPathList(const QList<GitStatusListEntry>& e
     m_errorMessage.clear();
     m_isBusy = false;
     m_model->setEntries(entries);
-    showGroups();
     viewport()->update();
 }
 
@@ -340,11 +344,9 @@ bool GitStatusListCtrl::hasConflicts() const
 void GitStatusListCtrl::selectFirstConflict()
 {
     clearSelection();
-    for (int row = 0; row < m_model->rowCount(); ++row) {
-        const QModelIndex index = m_model->index(row, 0);
-        const GitStatusListEntry *entry = m_model->entry(index);
-        if (entry && (entry->actions & Action::Unmerged)) {
-            const QModelIndex shown = m_proxy->mapFromSource(index);
+    for (int row = 0; row < m_model->listedCount(); ++row) {
+        if (m_model->entry(row).actions & Action::Unmerged) {
+            const QModelIndex shown = m_proxy->mapFromSource(m_model->entryIndex(row));
             selectionModel()->select(shown, QItemSelectionModel::Select | QItemSelectionModel::Rows);
             scrollTo(shown);
             setFocus();

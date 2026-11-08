@@ -51,7 +51,7 @@ QStringList listedPaths(const AddDlg& dlg)
 {
     const GitStatusListModel *model = dlg.listCtrl()->statusModel();
     QStringList paths;
-    for (int row = 0; row < model->rowCount(); ++row) {
+    for (int row = 0; row < model->listedCount(); ++row) {
         paths.append(model->entry(row).path);
     }
     paths.sort();
@@ -82,9 +82,9 @@ QStringList checkedPaths(const AddDlg& dlg)
 bool setChecked(const AddDlg& dlg, const QString& path, Qt::CheckState state)
 {
     GitStatusListModel *model = dlg.listCtrl()->statusModel();
-    for (int row = 0; row < model->rowCount(); ++row) {
+    for (int row = 0; row < model->listedCount(); ++row) {
         if (model->entry(row).path == path) {
-            return model->setData(model->index(row, GitStatusListModel::PathColumn), state, Qt::CheckStateRole);
+            return model->setData(model->entryIndex(row), state, Qt::CheckStateRole);
         }
     }
     return false;

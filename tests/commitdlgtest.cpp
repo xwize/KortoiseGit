@@ -47,7 +47,7 @@ QStringList listedPaths(const CommitDlg& dlg)
 {
     const GitStatusListModel *model = dlg.fileList()->statusModel();
     QStringList paths;
-    for (int row = 0; row < model->rowCount(); ++row) {
+    for (int row = 0; row < model->listedCount(); ++row) {
         paths.append(model->entry(row).path);
     }
     paths.sort();
@@ -64,9 +64,9 @@ QStringList listedPaths(const CommitDlg& dlg)
 bool setChecked(const CommitDlg& dlg, const QString& path, bool checked)
 {
     GitStatusListModel *model = dlg.fileList()->statusModel();
-    for (int row = 0; row < model->rowCount(); ++row) {
+    for (int row = 0; row < model->listedCount(); ++row) {
         if (model->entry(row).path == path) {
-            return model->setData(model->index(row, GitStatusListModel::PathColumn), checked ? Qt::Checked : Qt::Unchecked, Qt::CheckStateRole);
+            return model->setData(model->entryIndex(row), checked ? Qt::Checked : Qt::Unchecked, Qt::CheckStateRole);
         }
     }
     return false;
@@ -794,6 +794,7 @@ private Q_SLOTS:
         const CommitDlg dlg({repo.path()});
         QVERIFY(waitForList(dlg));
         QVERIFY(setChecked(dlg, QStringLiteral("odd*.txt"), true));
+        QVERIFY(dlg.fileList()->statusModel()->hasGroups());
 
         // However long the list, none of the paths are on a command line
         const CommitPlan plan = CommitDlg::planCommit(*dlg.fileList()->statusModel());

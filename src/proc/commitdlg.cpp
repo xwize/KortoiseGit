@@ -246,13 +246,13 @@ CommitPlan CommitDlg::planCommit(const GitStatusListModel& model, bool amendAgai
 {
     CommitPlan plan;
     IndexTasks tasks;
-    for (int row = 0; row < model.rowCount(); ++row) {
-        const bool checked = model.data(model.index(row, GitStatusListModel::PathColumn), Qt::CheckStateRole).value<Qt::CheckState>() == Qt::Checked;
-        if (checked) {
-            planChecked(model.entry(row), tasks);
+    for (int row = 0; row < model.listedCount(); ++row) {
+        const GitStatusListEntry& entry = model.entry(row);
+        if (model.hasCheckboxes() && model.isChecked(entry)) {
+            planChecked(entry, tasks);
             ++plan.checkedCount;
         } else {
-            planUnchecked(model.entry(row), tasks);
+            planUnchecked(entry, tasks);
         }
     }
 

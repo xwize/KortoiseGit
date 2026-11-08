@@ -7,14 +7,21 @@
 #include "git/git.hpp"
 #include "progressdlg.hpp"
 
+#include <QAbstractProxyModel>
 #include <QApplication>
+#include <QBrush>
 #include <QCheckBox>
+#include <QColor>
 #include <QContextMenuEvent>
 #include <QDir>
 #include <QFile>
+#include <QFont>
+#include <QGuiApplication>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
+#include <QPalette>
+#include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -31,6 +38,7 @@ namespace
 
 using namespace kgt;
 using Show = GitStatusListModel::Show;
+using Action = TGitPath::Action;
 
 /**
  * A throwaway repository on branch main. git's identity and configuration are fixed by initTestCase().
@@ -110,6 +118,52 @@ void makeChanges(const TestRepo& repo)
 }
 
 /**
+ * @param path A path relative to the root.
+ * @param actions What happened to it.
+ * @param parentNo The parent the change is against.
+ * @returns An entry for it.
+ */
+[[nodiscard]] GitStatusListEntry makeEntry(const QString& path, TGitPath::Actions actions, int parentNo = 0)
+{
+    return GitStatusListEntry{
+        .path = path,
+        .origPath = {},
+        .actions = actions,
+        .linesAdded = {},
+        .linesRemoved = {},
+        .parentNo = parentNo,
+    };
+}
+
+/**
+ * @param model The list's model or its sorting proxy.
+ * @returns The text of each group header, top to bottom.
+ */
+[[nodiscard]] QStringList groupHeaders(const QAbstractItemModel& model)
+{
+    QStringList headers;
+    for (int group = 0; group < model.rowCount(); ++group) {
+        headers.append(model.index(group, GitStatusListModel::PathColumn).data().toString());
+    }
+    return headers;
+}
+
+/**
+ * @param model The list's model or its sorting proxy.
+ * @param group Which group.
+ * @returns The paths in it, top to bottom.
+ */
+[[nodiscard]] QStringList groupPaths(const QAbstractItemModel& model, int group)
+{
+    const QModelIndex header = model.index(group, GitStatusListModel::PathColumn);
+    QStringList paths;
+    for (int row = 0; row < model.rowCount(header); ++row) {
+        paths.append(model.index(row, GitStatusListModel::PathColumn, header).data(GitStatusListModel::PathRole).toString());
+    }
+    return paths;
+}
+
+/**
  * Reloads a list and waits for it.
  * @param ctrl The list.
  * @returns Whether it loaded.
@@ -132,7 +186,7 @@ void makeChanges(const TestRepo& repo)
  */
 [[nodiscard]] int rowOf(const GitStatusListModel& model, const QString& path)
 {
-    for (int row = 0; row < model.rowCount(); ++row) {
+    for (int row = 0; row < model.listedCount(); ++row) {
         if (model.entry(row).path == path) {
             return row;
         }
@@ -147,7 +201,7 @@ void makeChanges(const TestRepo& repo)
 [[nodiscard]] QStringList listedPaths(const GitStatusListModel& model)
 {
     QStringList paths;
-    for (int row = 0; row < model.rowCount(); ++row) {
+    for (int row = 0; row < model.listedCount(); ++row) {
         paths.append(model.entry(row).path);
     }
     paths.sort();
@@ -162,7 +216,7 @@ void makeChanges(const TestRepo& repo)
  */
 [[nodiscard]] QString cell(const GitStatusListModel& model, const QString& path, int column)
 {
-    return model.index(rowOf(model, path), column).data().toString();
+    return model.entryIndex(rowOf(model, path), column).data().toString();
 }
 
 /**
@@ -174,7 +228,8 @@ void select(GitStatusListCtrl& ctrl, const QStringList& paths)
 {
     ctrl.clearSelection();
     for (const QString& path : paths) {
-        const QModelIndex index = ctrl.model()->index(rowOf(*ctrl.statusModel(), path), 0);
+        const QModelIndex index =
+            qobject_cast<const QAbstractProxyModel *>(ctrl.model())->mapFromSource(ctrl.statusModel()->entryIndex(rowOf(*ctrl.statusModel(), path)));
         ctrl.selectionModel()->select(index, QItemSelectionModel::Select | QItemSelectionModel::Rows);
         if (path == paths.constFirst()) {
             ctrl.selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
@@ -372,10 +427,12 @@ private Q_SLOTS:
         QVERIFY(reloadAndWait(ctrl));
 
         ctrl.sortByColumn(GitStatusListModel::LinesAddedColumn, Qt::DescendingOrder);
-        QCOMPARE(ctrl.model()->index(0, GitStatusListModel::PathColumn).data(GitStatusListModel::PathRole).toString(), QStringLiteral("a.txt"));
+        const QModelIndex modifiedFiles = ctrl.model()->index(0, 0);
+        QCOMPARE(ctrl.model()->index(0, GitStatusListModel::PathColumn, modifiedFiles).data(GitStatusListModel::PathRole).toString(), QStringLiteral("a.txt"));
         ctrl.sortByColumn(GitStatusListModel::PathColumn, Qt::AscendingOrder);
-        QCOMPARE(ctrl.model()->index(0, GitStatusListModel::PathColumn).data(GitStatusListModel::PathRole).toString(), QStringLiteral("a.txt"));
-        QCOMPARE(ctrl.model()->index(4, GitStatusListModel::PathColumn).data(GitStatusListModel::PathRole).toString(), QStringLiteral("moved.txt"));
+        QCOMPARE(ctrl.model()->index(0, GitStatusListModel::PathColumn, modifiedFiles).data(GitStatusListModel::PathRole).toString(), QStringLiteral("a.txt"));
+        QCOMPARE(ctrl.model()->index(3, GitStatusListModel::PathColumn, modifiedFiles).data(GitStatusListModel::PathRole).toString(),
+                 QStringLiteral("moved.txt"));
     }
 
     void togglesCheckState()
@@ -390,12 +447,12 @@ private Q_SLOTS:
 
         // Tracked changes start checked, the unversioned file doesn't
         QCOMPARE(model.checkedCount(), 4);
-        const QModelIndex unversioned = model.index(rowOf(model, QStringLiteral("e.md")), GitStatusListModel::PathColumn);
+        const QModelIndex unversioned = model.entryIndex(rowOf(model, QStringLiteral("e.md")), GitStatusListModel::PathColumn);
         QCOMPARE(unversioned.data(Qt::CheckStateRole).value<Qt::CheckState>(), Qt::Unchecked);
         QVERIFY(model.flags(unversioned).testFlag(Qt::ItemIsUserCheckable));
 
         const QSignalSpy changed(&ctrl, &GitStatusListCtrl::checkedCountChanged);
-        const QModelIndex modified = model.index(rowOf(model, QStringLiteral("a.txt")), GitStatusListModel::PathColumn);
+        const QModelIndex modified = model.entryIndex(rowOf(model, QStringLiteral("a.txt")), GitStatusListModel::PathColumn);
         QVERIFY(model.setData(modified, Qt::Unchecked, Qt::CheckStateRole));
         QVERIFY(model.setData(unversioned, Qt::Checked, Qt::CheckStateRole));
         QCOMPARE(changed.size(), 2);
@@ -409,8 +466,8 @@ private Q_SLOTS:
 
         // The check state survives a reload
         QVERIFY(reloadAndWait(ctrl));
-        QCOMPARE(model.index(rowOf(model, QStringLiteral("a.txt")), 0).data(Qt::CheckStateRole).value<Qt::CheckState>(), Qt::Unchecked);
-        QCOMPARE(model.index(rowOf(model, QStringLiteral("e.md")), 0).data(Qt::CheckStateRole).value<Qt::CheckState>(), Qt::Checked);
+        QCOMPARE(model.entryIndex(rowOf(model, QStringLiteral("a.txt")), 0).data(Qt::CheckStateRole).value<Qt::CheckState>(), Qt::Unchecked);
+        QCOMPARE(model.entryIndex(rowOf(model, QStringLiteral("e.md")), 0).data(Qt::CheckStateRole).value<Qt::CheckState>(), Qt::Checked);
     }
 
     void selectAllAndCounter()
@@ -705,7 +762,7 @@ private Q_SLOTS:
         auto ctrl = makeShownList(repo);
         QVERIFY(ctrl);
         const GitStatusListModel *model = ctrl->statusModel();
-        const QModelIndex before = model->index(rowOf(*model, QStringLiteral("e.md")), GitStatusListModel::PathColumn);
+        const QModelIndex before = model->entryIndex(rowOf(*model, QStringLiteral("e.md")), GitStatusListModel::PathColumn);
         QCOMPARE(before.data(Qt::CheckStateRole).value<Qt::CheckState>(), Qt::Unchecked);
 
         select(*ctrl, {QStringLiteral("e.md"), QStringLiteral("f.log")});
@@ -715,7 +772,7 @@ private Q_SLOTS:
         QCOMPARE(lsFiles(repo, QStringLiteral("f.log")), QByteArray("f.log\n"));
         for (const QString& path : {QStringLiteral("e.md"), QStringLiteral("f.log")}) {
             QCOMPARE(cell(*model, path, GitStatusListModel::StatusColumn), GitStatusListModel::actionName(TGitPath::Action::Added));
-            const QModelIndex after = model->index(rowOf(*model, path), GitStatusListModel::PathColumn);
+            const QModelIndex after = model->entryIndex(rowOf(*model, path), GitStatusListModel::PathColumn);
             QCOMPARE(after.data(Qt::CheckStateRole).value<Qt::CheckState>(), Qt::Checked);
         }
     }
@@ -763,6 +820,226 @@ private Q_SLOTS:
         auto ctrl = makeShownList(repo);
         QVERIFY(ctrl);
         verifyShowsRename(*ctrl);
+    }
+
+    void groupsByStatusInTortoiseGitsOrder()
+    {
+        const TestRepo repo;
+        makeChanges(repo);
+        GitStatusListCtrl ctrl;
+        ctrl.setWorkingTree(repo.path());
+        ctrl.setShowFlags(Show::Versioned | Show::Unversioned | Show::Ignored, Show::Versioned);
+        QVERIFY(reloadAndWait(ctrl));
+        const GitStatusListModel& model = *ctrl.statusModel();
+
+        QVERIFY(model.hasGroups());
+        QCOMPARE(groupHeaders(model), (QStringList{QStringLiteral("Modified Files"), QStringLiteral("Not Versioned Files"), QStringLiteral("Ignored Files")}));
+        QStringList modified = groupPaths(model, 0);
+        modified.sort();
+        QCOMPARE(modified, (QStringList{QStringLiteral("a.txt"), QStringLiteral("c.txt"), QStringLiteral("d.txt"), QStringLiteral("moved.txt")}));
+        QCOMPARE(groupPaths(model, 1), QStringList{QStringLiteral("e.md")});
+        QCOMPARE(groupPaths(model, 2), QStringList{QStringLiteral("f.log")});
+        QCOMPARE(model.listedCount(), 6);
+
+        // The view shows them whichever way the model was reset
+        QVERIFY(ctrl.isFirstColumnSpanned(0, {}));
+        QVERIFY(ctrl.isExpanded(ctrl.model()->index(2, 0)));
+    }
+
+    void onlyModifiedFilesStaysFlat()
+    {
+        GitStatusListModel model;
+        model.setShowFlags(Show::Versioned | Show::Unversioned, Show::Versioned);
+        model.setEntries({makeEntry(QStringLiteral("a.txt"), Action::Modified), makeEntry(QStringLiteral("b.txt"), Action::Added)});
+        QVERIFY(!model.hasGroups());
+        QCOMPARE(model.rowCount(), 2);
+        QCOMPARE(model.entry(model.index(1, 0))->path, QStringLiteral("b.txt"));
+        QCOMPARE(model.rowCount(model.index(0, 0)), 0);
+        QCOMPARE(model.entryIndex(1), model.index(1, 0));
+    }
+
+    void showFlagsAddAndRemoveGroups()
+    {
+        GitStatusListModel model;
+        model.setEntries({makeEntry(QStringLiteral("a.txt"), Action::Modified),
+                          makeEntry(QStringLiteral("e.md"), Action::Unversioned),
+                          makeEntry(QStringLiteral("f.log"), Action::Ignore),
+                          makeEntry(QStringLiteral("v.txt"), Action::AssumeValid),
+                          makeEntry(QStringLiteral("w.txt"), Action::SkipWorktree)});
+        const QString modified = QStringLiteral("Modified Files");
+        const QString unversioned = QStringLiteral("Not Versioned Files");
+        const QString ignored = QStringLiteral("Ignored Files");
+        const QString localChanges = QStringLiteral("Local changes ignored (assumed valid/unchanged or skip worktree flagged files)");
+
+        model.setShowFlags(Show::Versioned, {});
+        QVERIFY(!model.hasGroups());
+        QCOMPARE(model.rowCount(), 1);
+
+        model.setShowFlags(Show::Versioned | Show::Unversioned, {});
+        QCOMPARE(groupHeaders(model), (QStringList{modified, unversioned}));
+
+        model.setShowFlags(Show::Versioned | Show::Ignored, {});
+        QCOMPARE(groupHeaders(model), (QStringList{modified, ignored}));
+
+        model.setShowFlags(Show::Versioned | Show::AssumeValid, {});
+        QCOMPARE(groupHeaders(model), (QStringList{modified, localChanges}));
+        QCOMPARE(groupPaths(model, 1), QStringList{QStringLiteral("v.txt")});
+
+        model.setShowFlags(Show::Versioned | Show::Unversioned | Show::Ignored | Show::AssumeValid | Show::SkipWorktree, {});
+        QCOMPARE(groupHeaders(model), (QStringList{modified, unversioned, ignored, localChanges}));
+        QCOMPARE(groupPaths(model, 3), (QStringList{QStringLiteral("v.txt"), QStringLiteral("w.txt")}));
+    }
+
+    void emptyGroupsHaveNoRow()
+    {
+        GitStatusListModel model;
+        model.setShowFlags(Show::Versioned | Show::Unversioned | Show::Ignored, {});
+        model.setEntries({makeEntry(QStringLiteral("f.log"), Action::Ignore)});
+        QCOMPARE(groupHeaders(model), QStringList{QStringLiteral("Ignored Files")});
+        QCOMPARE(model.entry(model.entryIndex(0))->path, QStringLiteral("f.log"));
+    }
+
+    void sortingStaysWithinGroups()
+    {
+        GitStatusListCtrl ctrl;
+        ctrl.setShowFlags(Show::Versioned | Show::Unversioned, Show::Versioned);
+        ctrl.updateWithGitPathList({makeEntry(QStringLiteral("a.txt"), Action::Modified),
+                                    makeEntry(QStringLiteral("z.txt"), Action::Modified),
+                                    makeEntry(QStringLiteral("b.md"), Action::Unversioned),
+                                    makeEntry(QStringLiteral("y.md"), Action::Unversioned)});
+        const QStringList headers{QStringLiteral("Modified Files"), QStringLiteral("Not Versioned Files")};
+
+        ctrl.sortByColumn(GitStatusListModel::PathColumn, Qt::DescendingOrder);
+        QCOMPARE(groupHeaders(*ctrl.model()), headers);
+        QCOMPARE(groupPaths(*ctrl.model(), 0), (QStringList{QStringLiteral("z.txt"), QStringLiteral("a.txt")}));
+        QCOMPARE(groupPaths(*ctrl.model(), 1), (QStringList{QStringLiteral("y.md"), QStringLiteral("b.md")}));
+
+        ctrl.sortByColumn(GitStatusListModel::PathColumn, Qt::AscendingOrder);
+        QCOMPARE(groupHeaders(*ctrl.model()), headers);
+        QCOMPARE(groupPaths(*ctrl.model(), 0), (QStringList{QStringLiteral("a.txt"), QStringLiteral("z.txt")}));
+        QCOMPARE(groupPaths(*ctrl.model(), 1), (QStringList{QStringLiteral("b.md"), QStringLiteral("y.md")}));
+    }
+
+    void headerRowsAreNotEntries()
+    {
+        GitStatusListModel model;
+        model.setShowFlags(Show::Versioned | Show::Unversioned, Show::Versioned);
+        model.setEntries({makeEntry(QStringLiteral("a.txt"), Action::Modified), makeEntry(QStringLiteral("e.md"), Action::Unversioned)});
+        const QModelIndex header = model.index(0, GitStatusListModel::PathColumn);
+
+        QCOMPARE(model.entry(header), nullptr);
+        QCOMPARE(model.flags(header), Qt::NoItemFlags);
+        QVERIFY(!header.data(Qt::CheckStateRole).isValid());
+        QVERIFY(!model.setData(header, Qt::Checked, Qt::CheckStateRole));
+        QCOMPARE(header.data(Qt::FontRole).value<QFont>().bold(), true);
+
+        QCOMPARE(model.listedCount(), 2);
+        QCOMPARE(model.checkedCount(), 1);
+        model.setAllChecked(true);
+        QCOMPARE(model.checkedCount(), 2);
+        QCOMPARE(model.checkedEntries().size(), 2);
+        model.setAllChecked(false);
+        QCOMPARE(model.checkedCount(), 0);
+        QVERIFY(model.checkedEntries().isEmpty());
+    }
+
+    void keyboardStepsOverHeaderRows()
+    {
+        GitStatusListCtrl ctrl;
+        ctrl.setShowFlags(Show::Versioned | Show::Unversioned, Show::Versioned);
+        ctrl.updateWithGitPathList({makeEntry(QStringLiteral("a.txt"), Action::Modified),
+                                    makeEntry(QStringLiteral("b.txt"), Action::Modified),
+                                    makeEntry(QStringLiteral("e.md"), Action::Unversioned)});
+        ctrl.resize(400, 300);
+        ctrl.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&ctrl));
+        const auto currentPath = [&ctrl] {
+            return ctrl.currentIndex().data(GitStatusListModel::PathRole).toString();
+        };
+
+        ctrl.setCurrentIndex(ctrl.model()->index(1, 0, ctrl.model()->index(0, 0)));
+        QCOMPARE(currentPath(), QStringLiteral("b.txt"));
+        QTest::keyClick(&ctrl, Qt::Key_Down);
+        QCOMPARE(currentPath(), QStringLiteral("e.md"));
+        QTest::keyClick(&ctrl, Qt::Key_Up);
+        QCOMPARE(currentPath(), QStringLiteral("b.txt"));
+        QTest::keyClick(&ctrl, Qt::Key_Home);
+        QCOMPARE(currentPath(), QStringLiteral("a.txt"));
+        QTest::keyClick(&ctrl, Qt::Key_End);
+        QCOMPARE(currentPath(), QStringLiteral("e.md"));
+
+        ctrl.selectAll();
+        QCOMPARE(ctrl.selectionModel()->selectedRows().size(), 3);
+    }
+
+    void selectFirstConflictFindsAGroupedEntry()
+    {
+        GitStatusListCtrl ctrl;
+        ctrl.setShowFlags(Show::Versioned | Show::Unversioned, Show::Versioned);
+        ctrl.updateWithGitPathList({makeEntry(QStringLiteral("a.txt"), Action::Modified),
+                                    makeEntry(QStringLiteral("b.txt"), Action::Unmerged),
+                                    makeEntry(QStringLiteral("e.md"), Action::Unversioned)});
+        ctrl.selectFirstConflict();
+        const QModelIndexList selected = ctrl.selectionModel()->selectedRows();
+        QCOMPARE(selected.size(), 1);
+        QCOMPARE(selected.constFirst().data(GitStatusListModel::PathRole).toString(), QStringLiteral("b.txt"));
+    }
+
+    void mergeParentsGroupAsBefore()
+    {
+        GitStatusListModel model;
+        model.setEntries({makeEntry(QStringLiteral("a.txt"), Action::Modified, 0), makeEntry(QStringLiteral("b.txt"), Action::Added, 1)});
+        model.setParentHeaders({QStringLiteral("Parent one"), QStringLiteral("Parent two")});
+        QCOMPARE(groupHeaders(model), (QStringList{QStringLiteral("Parent one"), QStringLiteral("Parent two")}));
+        QCOMPARE(groupPaths(model, 0), QStringList{QStringLiteral("a.txt")});
+        QCOMPARE(groupPaths(model, 1), QStringList{QStringLiteral("b.txt")});
+
+        // A parent with no changes has no row, and the others keep their own headers
+        model.setEntries({makeEntry(QStringLiteral("b.txt"), Action::Added, 1)});
+        QCOMPARE(groupHeaders(model), QStringList{QStringLiteral("Parent two")});
+        QCOMPARE(groupPaths(model, 0), QStringList{QStringLiteral("b.txt")});
+    }
+
+    void coloursFollowOnNMCustomdrawsPrecedence()
+    {
+        GitStatusListModel model;
+        model.setShowFlags(Show::All | Show::Ignored | Show::AssumeValid | Show::SkipWorktree, {});
+        const auto colour = [&model](TGitPath::Actions actions) {
+            model.setEntries({makeEntry(QStringLiteral("a.txt"), actions)});
+            return model.entryIndex(0).data(Qt::ForegroundRole);
+        };
+
+        const QColor conflict = colour(Action::Unmerged).value<QColor>();
+        const QColor modified = colour(Action::Modified).value<QColor>();
+        const QColor added = colour(Action::Added).value<QColor>();
+        const QColor deleted = colour(Action::Deleted).value<QColor>();
+        const QColor renamed = colour(Action::Replaced).value<QColor>();
+        const QColor merged = colour(Action::Merged).value<QColor>();
+        const QSet<QRgb> distinct{conflict.rgb(), modified.rgb(), added.rgb(), deleted.rgb(), renamed.rgb(), merged.rgb()};
+        QCOMPARE(distinct.size(), 6);
+
+        // The first match wins
+        QCOMPARE(colour(Action::Unmerged | Action::Modified).value<QColor>(), conflict);
+        QCOMPARE(colour(Action::Modified | Action::Added).value<QColor>(), modified);
+        QCOMPARE(colour(Action::Added | Action::Deleted).value<QColor>(), added);
+        QCOMPARE(colour(Action::Copy).value<QColor>(), added);
+        QCOMPARE(colour(Action::Deleted | Action::Missing | Action::Replaced).value<QColor>(), deleted);
+        QCOMPARE(colour(Action::Replaced | Action::Merged).value<QColor>(), renamed);
+
+        // Everything else keeps the normal text colour
+        QVERIFY(!colour(Action::Unversioned).isValid());
+        QVERIFY(!colour(Action::Ignore).isValid());
+        QVERIFY(!colour(Action::AssumeValid).isValid());
+
+        // Gray comes before all of them
+        GitStatusListEntry gray = makeEntry(QStringLiteral("a.txt"), Action::Unmerged);
+        gray.isGrayed = true;
+        model.setEntries({gray});
+        QCOMPARE(model.entryIndex(0).data(Qt::ForegroundRole).value<QBrush>(), QGuiApplication::palette().brush(QPalette::Disabled, QPalette::Text));
+
+        // A header isn't coloured as an entry
+        model.setEntries({makeEntry(QStringLiteral("e.md"), Action::Unversioned)});
+        QCOMPARE(model.index(0, 0).data(Qt::ForegroundRole).value<QBrush>(), QGuiApplication::palette().brush(QPalette::Text));
     }
 
 private:
