@@ -3,6 +3,7 @@
 
 #include "shellext.hpp"
 
+#include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 #include "kortoisegitplugin_debug.hpp"
 #include "utils/runtimeerror.hpp"
@@ -14,6 +15,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QIcon>
+#include <QMenu>
 #include <QProcess>
 #include <QStandardPaths>
 
@@ -34,6 +36,8 @@ constexpr auto procName = "kortoisegitproc"_L1;
 constexpr std::chrono::milliseconds refreshDelay{600};
 // CShellExt::InsertGitMenu's limit on the branch name in the Commit entry
 constexpr qsizetype maxMenuBranchLength = 64;
+// CGit::GetShortHASHLength
+constexpr qsizetype shortHashLength = 8;
 
 /**
  * The directory holding this plugin's .so, like TortoiseGit's CPathUtils::GetAppDirectory(g_hmodThisDll).
@@ -304,6 +308,47 @@ MenuEntries menuEntries(const MenuState& state)
     };
 }
 
+/**
+ * One line of MenuInfo.
+ */
+struct MenuItem {
+    bool shown = false;
+    QAction *action = nullptr; // None: a separator
+};
+
+/**
+ * Ported from the loop in CShellExt::QueryContextMenu: splits the entries into top-level ones and @p submenu's. A
+ * separator is only added before the submenu's next entry, so none comes first, last or twice in a row.
+ * @param items The entries and separators, in MenuInfo's order.
+ * @param topEntries The entries that go at the top level, like TortoiseGit's menu layout setting.
+ * @param paths The selection, stored in each entry shown.
+ * @param submenu The submenu, emptied first.
+ * @returns The top-level entries shown.
+ */
+QList<QAction *> layoutMenu(const QList<MenuItem>& items, const QList<QAction *>& topEntries, const QStringList& paths, QMenu& submenu)
+{
+    submenu.clear();
+    QList<QAction *> topLevel;
+    bool separatorDue = false;
+    for (const auto& [shown, action] : items) {
+        if (action == nullptr) {
+            separatorDue = !submenu.isEmpty();
+        } else if (shown) {
+            action->setData(paths);
+            if (topEntries.contains(action)) {
+                topLevel.append(action);
+                continue;
+            }
+            if (separatorDue) {
+                submenu.addSeparator();
+                separatorDue = false;
+            }
+            submenu.addAction(action);
+        }
+    }
+    return topLevel;
+}
+
 } // namespace
 
 namespace kgt
@@ -328,8 +373,11 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_mergeAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge..."), this))
     , m_branchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Create &Branch..."), this))
     , m_mergeAbortAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Abort &Merge"), this))
+    , m_gitMenu(std::make_unique<QMenu>())
+    , m_gitMenuAction(new QAction(i18n("&Git"), this))
 {
     Q_UNUSED(args)
+    m_gitMenuAction->setMenu(m_gitMenu.get());
     connect(m_createRepoAction, &QAction::triggered, this, [this] {
         watchForNewRepository(m_createRepoAction->data().toStringList().constFirst());
         runCommand(QStringLiteral("repocreate"), m_createRepoAction);
@@ -477,34 +525,51 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
     }
     const MenuEntries entries = menuEntries(menuState(paths));
 
-    // In MenuInfo's order
-    QList<QAction *> actions;
-    const auto add = [&actions, &paths](bool shown, QAction *action) {
-        if (shown) {
-            action->setData(paths);
-            actions.append(action);
-        }
-    };
-    add(entries.clone, m_cloneAction);
-    add(entries.pull, m_pullAction);
-    add(entries.fetch, m_fetchAction);
-    add(entries.push, m_pushAction);
     if (entries.commit) {
         m_commitAction->setText(commitMenuText(paths.constFirst()));
     }
-    add(entries.commit, m_commitAction);
-    add(entries.diff, m_diffAction);
-    add(entries.prevDiff, m_prevDiffAction);
-    add(entries.log, m_showLogAction);
-    add(entries.refBrowse, m_refBrowseAction);
-    add(entries.rebase, m_rebaseAction);
-    add(entries.mergeAbort, m_mergeAbortAction);
-    add(entries.revert, m_revertAction);
-    add(entries.switchTo, m_switchAction);
-    add(entries.merge, m_mergeAction);
-    add(entries.branch, m_branchAction);
-    add(entries.createRepo, m_createRepoAction);
-    add(entries.add, m_addAction);
+
+    // CShellExt::QueryContextMenu and InsertGitMenu: defaultTopMenuEntries (ShellCache.h) puts Sync, CreateRepo, Clone
+    // and Commit at the top level, Sync once we have it, and everything else in the submenu
+    const QList<QAction *> topEntries{m_createRepoAction, m_cloneAction, m_commitAction};
+    const MenuItem separator{.shown = true};
+    const auto entry = [](bool shown, QAction *action) {
+        return MenuItem{.shown = shown, .action = action};
+    };
+    // MenuInfo's order and separators, without the separators between groups that have none of our entries yet
+    QList<QAction *> actions = layoutMenu(
+        {
+            entry(entries.clone, m_cloneAction),
+            entry(entries.pull, m_pullAction),
+            entry(entries.fetch, m_fetchAction),
+            entry(entries.push, m_pushAction),
+            separator,
+            entry(entries.commit, m_commitAction),
+            separator,
+            entry(entries.diff, m_diffAction),
+            entry(entries.prevDiff, m_prevDiffAction),
+            separator,
+            entry(entries.log, m_showLogAction),
+            entry(entries.refBrowse, m_refBrowseAction),
+            entry(entries.rebase, m_rebaseAction),
+            separator,
+            entry(entries.mergeAbort, m_mergeAbortAction),
+            entry(entries.revert, m_revertAction),
+            separator,
+            entry(entries.switchTo, m_switchAction),
+            entry(entries.merge, m_mergeAction),
+            entry(entries.branch, m_branchAction),
+            separator,
+            entry(entries.createRepo, m_createRepoAction),
+            entry(entries.add, m_addAction),
+        },
+        topEntries,
+        paths,
+        *m_gitMenu);
+    // CShellExt::QueryContextMenu: no submenu when it would be empty
+    if (!m_gitMenu->isEmpty()) {
+        actions.append(m_gitMenuAction);
+    }
     return actions;
 }
 
@@ -560,9 +625,14 @@ void ShellExt::watchIndex(const QString& indexFile)
 
 QString ShellExt::commitMenuText(const QString& path)
 {
-    QString branch = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(path));
+    // InsertGitMenu calls this without fallback, so TortoiseGit's detached HEAD gets the plain "Git Commit...", and its
+    // hash shortening below never runs. We show the hash instead, as KORTOISEGIT-0031 asks
+    QString branch = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(path), true);
     if (branch.isEmpty()) {
         return i18n("Git &Commit...");
+    }
+    if (Git::isHash(branch.toLatin1())) {
+        branch = branch.left(shortHashLength) + QStringLiteral("...");
     }
     if (branch.size() > maxMenuBranchLength) {
         branch = branch.left(maxMenuBranchLength) + QStringLiteral("...");

@@ -58,10 +58,11 @@ public:
     /**
      * Ported from CGit::GetCurrentBranchFromFile: reads HEAD directly, as git-gui does.
      * @param adminDir A working tree's admin directory, from worktreeAdminDirPath().
-     * @returns The current branch's name (it may not exist yet, in a repository without commits), "HEAD" when
-     *          HEAD is detached, or an empty string if HEAD can't be read.
+     * @param fallback Give a detached HEAD's commit hash instead of "HEAD".
+     * @returns The current branch's name (it may not exist yet, in a repository without commits), "HEAD" or the hash
+     *          (see @p fallback) when HEAD is detached, or an empty string if HEAD can't be read.
      */
-    [[nodiscard]] static QString currentBranchFromFile(const QString& adminDir);
+    [[nodiscard]] static QString currentBranchFromFile(const QString& adminDir, bool fallback = false);
 };
 
 } // namespace kgt

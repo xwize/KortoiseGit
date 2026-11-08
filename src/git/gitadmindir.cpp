@@ -11,6 +11,8 @@
 
 #include "gitadmindir.hpp"
 
+#include "git/git.hpp"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -142,7 +144,7 @@ bool GitAdminDir::isBareRepo(const QString& path)
         && QFileInfo(dir.filePath(QStringLiteral("objects"))).isDir() && QFileInfo(dir.filePath(QStringLiteral("refs/heads"))).isDir();
 }
 
-QString GitAdminDir::currentBranchFromFile(const QString& adminDir)
+QString GitAdminDir::currentBranchFromFile(const QString& adminDir, bool fallback)
 {
     if (adminDir.isEmpty()) {
         return {};
@@ -154,7 +156,7 @@ QString GitAdminDir::currentBranchFromFile(const QString& adminDir)
     const QByteArray line = readFirstLine(head);
     if (!line.startsWith(branchRefPrefix)) {
         // A detached HEAD
-        return QStringLiteral("HEAD");
+        return fallback && Git::isHash(line) ? QString::fromLatin1(line) : QStringLiteral("HEAD");
     }
     return QString::fromUtf8(line.mid(branchRefPrefix.size()));
 }

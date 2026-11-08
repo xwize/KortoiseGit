@@ -14,9 +14,11 @@
 #include <Dolphin/KVersionControlPlugin>
 #include <KDirWatch>
 
+#include <QMenu>
 #include <QTimer>
 #include <QVariantList>
 
+#include <memory>
 #include <optional>
 
 class QAction;
@@ -113,12 +115,14 @@ private:
      * condition holds. Decided afresh on every request from the items' own paths, as CShellExt::Initialize and
      * QueryContextMenu do.
      * @param selected The selected paths, or the folder shown when nothing is selected.
-     * @returns The actions, in TortoiseGit's menu order, their data set to the paths.
+     * @returns The top-level actions, in TortoiseGit's menu order, then the "Git" submenu's action if the submenu has
+     *          entries. Every entry's data is set to the paths.
      */
     [[nodiscard]] QList<QAction *> menuActions(const QStringList& selected) const;
 
     /**
-     * Ported from CShellExt::InsertGitMenu: the Commit entry shows the current branch, "Git Commit -> "main"...".
+     * Ported from CShellExt::InsertGitMenu: the Commit entry shows the current branch, "Git Commit -> "main"...",
+     * or a shortened hash on a detached HEAD.
      * @param path A selected path.
      * @returns The entry's text.
      */
@@ -141,6 +145,8 @@ private:
     QAction *m_mergeAction;
     QAction *m_branchAction;
     QAction *m_mergeAbortAction;
+    std::unique_ptr<QMenu> m_gitMenu; // A QMenu's parent must be a widget, so it can't be a child of the plugin
+    QAction *m_gitMenuAction;
     std::optional<GitFolderStatus> m_folderStatus; // Only touched on Dolphin's retrieval thread
     KDirWatch m_indexWatch;
     QString m_watchedIndex; // The file m_indexWatch watches, if any

@@ -9,11 +9,14 @@
 #include <QAction>
 #include <QDir>
 #include <QFileInfo>
+#include <QMenu>
+#include <QPointer>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUrl>
 
+#include <memory>
 #include <tuple>
 
 namespace
@@ -31,14 +34,57 @@ KFileItem item(const QString& path)
 }
 
 /**
+ * @param actions Actions the plugin returned.
+ * @returns The "Git" submenu's entries, in order, a separator as "-"; nothing if there is no submenu.
+ */
+QStringList submenuLayout(const QList<QAction *>& actions)
+{
+    QStringList layout;
+    if (actions.isEmpty() || actions.constLast()->menu() == nullptr) {
+        return layout;
+    }
+    for (const QAction *entry : actions.constLast()->menu()->actions()) {
+        layout.append(entry->isSeparator() ? QStringLiteral("-") : entry->text());
+    }
+    return layout;
+}
+
+/**
+ * @param actions Actions the plugin returned.
+ * @returns Their texts, with the "Git" submenu replaced by its entries and separators left out: the top-level entries
+ *          come first, then the submenu's.
+ */
+QStringList flatTexts(const QList<QAction *>& actions)
+{
+    QStringList texts;
+    for (const QAction *action : actions) {
+        if (action->menu() == nullptr) {
+            texts.append(action->text());
+        }
+    }
+    texts += submenuLayout(actions);
+    texts.removeAll(QStringLiteral("-"));
+    return texts;
+}
+
+/**
  * @param plugin The plugin, after a retrieval.
  * @param items The selected items.
- * @returns The texts of the context menu entries the plugin offers for them.
+ * @returns The texts of the context menu entries the plugin offers for them, as flatTexts() gives them.
  */
 QStringList menuTexts(const ShellExt& plugin, const KFileItemList& items)
 {
+    return flatTexts(plugin.versionControlActions(items));
+}
+
+/**
+ * @param actions Actions the plugin returned.
+ * @returns The texts of the top-level entries, including the submenu's.
+ */
+QStringList topLevelTexts(const QList<QAction *>& actions)
+{
     QStringList texts;
-    for (const QAction *action : plugin.versionControlActions(items)) {
+    for (const QAction *action : actions) {
         texts.append(action->text());
     }
     return texts;
@@ -87,6 +133,22 @@ struct MenuTexts {
     QString prevDiff = QStringLiteral("&Diff with previous version");
     QString branch = QStringLiteral("Create &Branch...");
 };
+
+/**
+ * @returns The "Git" submenu's text.
+ */
+QString gitMenu()
+{
+    return QStringLiteral("&Git");
+}
+
+/**
+ * @returns How submenuLayout() shows a separator.
+ */
+QString separator()
+{
+    return QStringLiteral("-");
+}
 
 } // namespace
 
@@ -161,13 +223,13 @@ private Q_SLOTS:
             return menuTexts(plugin, items);
         };
         // The working tree root, as when nothing is selected, and every folder in it, versioned or not
-        const QStringList versionedFolder{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, branch, add};
+        const QStringList versionedFolder{commit, pull, fetch, push, log, refs, rebase, revert, switchTo, merge, branch, add};
         QCOMPARE(menu({QString()}), versionedFolder);
         QCOMPARE(menu({QStringLiteral("clean")}), versionedFolder);
         QCOMPARE(menu({QStringLiteral("untracked")}), versionedFolder);
         // An ignored folder is where a nested repository belongs
         QCOMPARE(menu({QStringLiteral("vendor")}),
-                 (QStringList{clone, pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, branch, createRepo, add}));
+                 (QStringList{clone, commit, createRepo, pull, fetch, push, log, refs, rebase, revert, switchTo, merge, branch, add}));
 
         QCOMPARE(menu({QStringLiteral("tracked.txt")}), (QStringList{commit, diff, prevDiff, log}));
         QCOMPARE(menu({QStringLiteral("modified.txt")}), (QStringList{commit, diff, prevDiff, log, revert}));
@@ -189,7 +251,7 @@ private Q_SLOTS:
         QCOMPARE(menu({QStringLiteral("tracked.txt"), QStringLiteral("clean")}), QStringList{commit});
         QCOMPARE(menu({QStringLiteral("clean"), QStringLiteral("untracked")}), (QStringList{commit, revert, add}));
         // Except the working tree root, which keeps Pull, Fetch and Push
-        QCOMPARE(menu({QString(), QStringLiteral("clean")}), (QStringList{pull, fetch, push, commit, revert, add}));
+        QCOMPARE(menu({QString(), QStringLiteral("clean")}), (QStringList{commit, pull, fetch, push, revert, add}));
 
         // The state is read afresh: once added, the file is no longer offered for Add
         repo.run({QStringLiteral("add"), QStringLiteral("new.txt")});
@@ -211,20 +273,19 @@ private Q_SLOTS:
 
         ShellExt plugin(nullptr, {});
         QVERIFY(retrieve(plugin, repo.path()));
-        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, branch, add}));
+        QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{commit, pull, fetch, push, log, refs, rebase, revert, switchTo, merge, branch, add}));
 
         for (const QString& name : {QStringLiteral(".git"), QStringLiteral("a.txt"), QStringLiteral("dir")}) {
             QVERIFY(QDir(repo.path()).rename(name, QStringLiteral("moved/") + name));
         }
 
         // Shown, or seen from the old root, which Dolphin then asks through outOfVersionControlActions()
-        const QStringList root{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, branch, add};
+        const QStringList root{commit, pull, fetch, push, log, refs, rebase, revert, switchTo, merge, branch, add};
         QCOMPARE(menuTexts(plugin, {item(moved)}), root);
-        QCOMPARE(plugin.outOfVersionControlActions({item(moved)}).size(), root.size());
-        QCOMPARE(plugin.outOfVersionControlActions({item(moved)}).at(3)->text(), commit);
+        QCOMPARE(flatTexts(plugin.outOfVersionControlActions({item(moved)})), root);
         QCOMPARE(menuTexts(plugin, {item(QDir(moved).filePath(QStringLiteral("a.txt")))}), (QStringList{commit, diff, prevDiff, log}));
         QCOMPARE(menuTexts(plugin, {item(QDir(moved).filePath(QStringLiteral("dir")))}),
-                 (QStringList{pull, fetch, push, commit, log, refs, rebase, revert, switchTo, merge, branch, add}));
+                 (QStringList{commit, pull, fetch, push, log, refs, rebase, revert, switchTo, merge, branch, add}));
         // The old root is a plain folder now
         QCOMPARE(menuTexts(plugin, {item(repo.path())}), (QStringList{clone, createRepo}));
 
@@ -280,24 +341,119 @@ private Q_SLOTS:
         QCoreApplication::processEvents();
 
         QList<QAction *> actions = plugin.versionControlActions({item(repo.filePath(QStringLiteral("a.txt")))});
-        QCOMPARE(actions.size(), 4);
-        QCOMPARE(actions.constFirst()->text(), QStringLiteral("Git &Commit -> \"main\"..."));
+        QCOMPARE(topLevelTexts(actions), (QStringList{commit, gitMenu()}));
         QCOMPARE(actions.constFirst()->data().toStringList(), QStringList{repo.filePath(QStringLiteral("a.txt"))});
 
         // An unversioned file can't be committed from its menu, as in TortoiseGit
         actions = plugin.versionControlActions({item(repo.filePath(QStringLiteral("new.txt")))});
-        QCOMPARE(actions.size(), 1); // Add
-        QCOMPARE(actions.constFirst()->text(), add);
+        QCOMPARE(flatTexts(actions), QStringList{add});
 
         // The folder shown, when nothing is selected
         actions = plugin.versionControlActions({item(repo.path())});
-        QCOMPARE(actions.size(),
-                 12); // Pull, Fetch, Push, Commit, Show log, Browse References, Rebase, Revert, Switch/Checkout, Merge, Create Branch, and Add for new.txt
-        QCOMPARE(actions.at(0)->text(), QStringLiteral("&Pull..."));
-        QCOMPARE(actions.at(0)->data().toStringList(), QStringList{repo.path()});
-        QCOMPARE(actions.at(1)->text(), QStringLiteral("F&etch..."));
-        QCOMPARE(actions.at(2)->text(), QStringLiteral("Pus&h..."));
-        QCOMPARE(actions.at(3)->text(), QStringLiteral("Git &Commit -> \"main\"..."));
+        QCOMPARE(topLevelTexts(actions), (QStringList{commit, gitMenu()}));
+        QCOMPARE(actions.constFirst()->data().toStringList(), QStringList{repo.path()});
+        const QAction *firstInSubmenu = actions.constLast()->menu()->actions().constFirst();
+        QCOMPARE(firstInSubmenu->text(), pull);
+        QCOMPARE(firstInSubmenu->data().toStringList(), QStringList{repo.path()});
+    }
+
+    void commitEntryLabels()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        const ShellExt plugin(nullptr, {});
+        const auto commitText = [&plugin, &repo] {
+            return plugin.versionControlActions({item(repo.path())}).constFirst()->text();
+        };
+        const QString accelerated = QStringLiteral("Git &Commit -> \"%1\"...");
+
+        // CStringUtils::EscapeAccellerators: '&' in a branch name is no shortcut
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("a&b")});
+        QCOMPARE(commitText(), accelerated.arg(QStringLiteral("a&&b")));
+
+        // Sanity check: at most 64 characters of a branch name
+        const QString longName(70, QLatin1Char('x'));
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), longName});
+        QCOMPARE(commitText(), accelerated.arg(longName.left(64) + QStringLiteral("...")));
+
+        // A detached HEAD: the first 8 characters of its hash
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("--detach")});
+        QFile head(repo.filePath(QStringLiteral(".git/HEAD")));
+        QVERIFY(head.open(QIODevice::ReadOnly));
+        const QString hash = QString::fromLatin1(head.readAll().trimmed());
+        QCOMPARE(hash.size(), 40);
+        QCOMPARE(commitText(), accelerated.arg(hash.left(8) + QStringLiteral("...")));
+    }
+
+    void menuIsSplitLikeTortoiseGit()
+    {
+        const auto [commit, log, push, revert, add, clone, createRepo, refs, pull, fetch, merge, mergeAbort, switchTo, rebase, diff, prevDiff, branch] =
+            MenuTexts();
+        const TestRepo repo;
+        repo.write(QStringLiteral(".gitignore"), "vendor/\n");
+        repo.write(QStringLiteral("tracked.txt"), "a\n");
+        repo.write(QStringLiteral("modified.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        repo.write(QStringLiteral("modified.txt"), "changed\n");
+        repo.write(QStringLiteral("new.txt"), "new\n");
+        repo.write(QStringLiteral("vendor/lib.txt"), "lib\n");
+        const ShellExt plugin(nullptr, {});
+        const auto actionsFor = [&plugin, &repo](const QString& name) {
+            return plugin.versionControlActions({item(name.isEmpty() ? repo.path() : repo.filePath(name))});
+        };
+
+        // Commit stays at the top level; the separators around it are one in the submenu
+        QList<QAction *> actions = actionsFor({});
+        QCOMPARE(topLevelTexts(actions), (QStringList{commit, gitMenu()}));
+        QCOMPARE(submenuLayout(actions),
+                 (QStringList{pull, fetch, push, separator(), log, refs, rebase, separator(), revert, separator(), switchTo, merge, branch, separator(), add}));
+
+        // The separator after Commit's group comes first among the submenu's, and is dropped; none trails either
+        actions = actionsFor(QStringLiteral("tracked.txt"));
+        QCOMPARE(topLevelTexts(actions), (QStringList{commit, gitMenu()}));
+        QCOMPARE(submenuLayout(actions), (QStringList{diff, prevDiff, separator(), log}));
+        QCOMPARE(submenuLayout(actionsFor(QStringLiteral("modified.txt"))), (QStringList{diff, prevDiff, separator(), log, separator(), revert}));
+
+        // Only submenu entries
+        actions = actionsFor(QStringLiteral("new.txt"));
+        QCOMPARE(topLevelTexts(actions), QStringList{gitMenu()});
+        QCOMPARE(submenuLayout(actions), QStringList{add});
+
+        // All three top-level entries that exist, in MenuInfo's order, the submenu after them
+        actions = actionsFor(QStringLiteral("vendor"));
+        QCOMPARE(topLevelTexts(actions), (QStringList{clone, commit, createRepo, gitMenu()}));
+        QCOMPARE(submenuLayout(actions),
+                 (QStringList{pull, fetch, push, separator(), log, refs, rebase, separator(), revert, separator(), switchTo, merge, branch, separator(), add}));
+
+        // Nothing for the submenu: it is left out
+        const QTemporaryDir plain;
+        actions = plugin.outOfVersionControlActions({item(plain.path())});
+        QCOMPARE(topLevelTexts(actions), (QStringList{clone, createRepo}));
+        QVERIFY(submenuLayout(actions).isEmpty());
+    }
+
+    void submenuIsRebuiltAndFreed()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        auto plugin = std::make_unique<ShellExt>(nullptr, QVariantList{});
+
+        const QList<QAction *> first = plugin->versionControlActions({item(repo.path())});
+        const QPointer<QMenu> submenu = first.constLast()->menu();
+        QVERIFY(submenu);
+        const qsizetype entries = submenu->actions().size();
+        const qsizetype children = submenu->findChildren<QAction *>(Qt::FindDirectChildrenOnly).size();
+
+        // Asking again replaces the entries; the separators of the last menu don't pile up
+        const QList<QAction *> second = plugin->versionControlActions({item(repo.path())});
+        QCOMPARE(second.constLast()->menu(), submenu.data());
+        QCOMPARE(submenu->actions().size(), entries);
+        QCOMPARE(submenu->findChildren<QAction *>(Qt::FindDirectChildrenOnly).size(), children);
+
+        plugin.reset();
+        QVERIFY(submenu.isNull());
     }
 
     void createRepositoryEntryOutsideRepositories()
@@ -322,7 +478,7 @@ private Q_SLOTS:
 
         // A working tree seen from outside gets its own menu
         const TestRepo repo;
-        QCOMPARE(plugin.outOfVersionControlActions({item(repo.path())}).at(3)->text(), commit);
+        QCOMPARE(plugin.outOfVersionControlActions({item(repo.path())}).constFirst()->text(), commit);
         // A bare repository: Fetch, Show log and Browse References (TortoiseGit's Push too, which PushCommand
         // doesn't support yet)
         const QString bare = plain.filePath(QStringLiteral("bare.git"));
@@ -383,7 +539,7 @@ private Q_SLOTS:
 
         // While a merge awaits its commit: Abort Merge, before Revert, for versioned files and folders, and no Merge
         repo.write(QStringLiteral(".git/MERGE_HEAD"), "x\n");
-        QCOMPARE(menu({}), (QStringList{fetch, push, commit, log, refs, mergeAbort, revert, switchTo, branch, add}));
+        QCOMPARE(menu({}), (QStringList{commit, fetch, push, log, refs, mergeAbort, revert, switchTo, branch, add}));
         QCOMPARE(menu(QStringLiteral("a.txt")), (QStringList{commit, diff, prevDiff, log, mergeAbort}));
         repo.remove(QStringLiteral(".git/MERGE_HEAD"));
 

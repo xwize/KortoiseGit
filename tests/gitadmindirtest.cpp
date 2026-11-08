@@ -77,6 +77,10 @@ private Q_SLOTS:
 
         repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("--detach")});
         QCOMPARE(GitAdminDir::currentBranchFromFile(adminDir), QStringLiteral("HEAD"));
+        // CGit::GetCurrentBranchFromFile's fallback: the commit instead
+        const QString hash = GitAdminDir::currentBranchFromFile(adminDir, true);
+        QCOMPARE(hash.size(), 40);
+        QVERIFY(hash != QStringLiteral("HEAD"));
 
         QVERIFY(GitAdminDir::currentBranchFromFile({}).isEmpty());
     }

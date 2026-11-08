@@ -92,6 +92,12 @@ public:
     [[nodiscard]] static QString stripRefName(const QString& ref);
 
     /**
+     * @param text The text to check.
+     * @returns Whether it is a full commit hash (SHA-1 or SHA-256) in git's lower-case hex.
+     */
+    [[nodiscard]] static bool isHash(QByteArrayView text);
+
+    /**
      * Ported from CGit::HasWorkingTreeConflicts: whether the index holds unmerged entries, with git ls-files -u.
      * @returns True if a file is in conflict.
      * @throws RuntimeError (category Git) if git fails.
