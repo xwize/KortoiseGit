@@ -10,6 +10,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QIcon>
+#include <QImage>
 #include <QMenu>
 #include <QPointer>
 #include <QSignalSpy>
@@ -36,7 +38,7 @@ KFileItem item(const QString& path)
 
 /**
  * @param actions Actions the plugin returned.
- * @returns The "Git" submenu's entries, in order, a separator as "-"; nothing if there is no submenu.
+ * @returns The "KortoiseGit" submenu's entries, in order, a separator as "-"; nothing if there is no submenu.
  */
 QStringList submenuLayout(const QList<QAction *>& actions)
 {
@@ -52,7 +54,7 @@ QStringList submenuLayout(const QList<QAction *>& actions)
 
 /**
  * @param actions Actions the plugin returned.
- * @returns Their texts, with the "Git" submenu replaced by its entries and separators left out: the top-level entries
+ * @returns Their texts, with the "KortoiseGit" submenu replaced by its entries and separators left out: the top-level entries
  *          come first, then the submenu's.
  */
 QStringList flatTexts(const QList<QAction *>& actions)
@@ -137,11 +139,11 @@ struct MenuTexts {
 };
 
 /**
- * @returns The "Git" submenu's text.
+ * @returns The "KortoiseGit" submenu's text.
  */
 QString gitMenu()
 {
-    return QStringLiteral("&Git");
+    return QStringLiteral("&KortoiseGit");
 }
 
 /**
@@ -436,6 +438,24 @@ private Q_SLOTS:
         actions = plugin.outOfVersionControlActions({item(plain.path())});
         QCOMPARE(topLevelTexts(actions), (QStringList{clone, createRepo}));
         QVERIFY(submenuLayout(actions).isEmpty());
+    }
+
+    void submenuCarriesTheAppIcon()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        const ShellExt plugin(nullptr, {});
+
+        const QIcon icon = plugin.versionControlActions({item(repo.path())}).constLast()->icon();
+
+        // Each size is the PNG itself, not another one scaled, and needs no icon theme
+        for (const int size : {16, 22, 32, 48, 64, 128, 256}) {
+            const QImage expected(QStringLiteral(":/kortoisegitplugin/kortoisegit-%1.png").arg(size));
+            QVERIFY(!expected.isNull());
+            QCOMPARE(icon.pixmap(size, size).toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied),
+                     expected.convertToFormat(QImage::Format_ARGB32_Premultiplied));
+        }
     }
 
     void submenuIsRebuiltAndFreed()

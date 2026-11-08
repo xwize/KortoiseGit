@@ -117,6 +117,11 @@ QColor laneColor(std::size_t lane)
 /**
  * Draws the curve that joins a lane to the commit's horizontal line (paintGraphLane's arcs). TortoiseGit's GDI+
  * angles run clockwise, Qt's anticlockwise, so they are negated.
+ *
+ * paintGraphLane offsets its DrawArc rectangles by -1, which suits GDI+'s pixel centres on integer coordinates. Qt's
+ * pixel centres are at .5 and a 2 pixel pen on an integer coordinate fills the pixels either side of it, so here the
+ * quarter ellipse is built from the two points it joins: the commit's horizontal line at the lane's edge, and the
+ * lane's axis at the row's edge. The two radii are separate because odd row heights and lane widths make them differ.
  * @param painter Draws.
  * @param lane The lane.
  */
@@ -125,10 +130,12 @@ void paintLaneArc(QPainter *painter, const GraphLane& lane)
     using LaneType = Lanes::LaneType;
     const int half = lane.laneHeight / 2;
     const int mid = (lane.left + lane.right) / 2;
-    const int width = lane.right - lane.left;
     const int top = lane.top;
+    const int line = top + half; // The commit's horizontal line
+    const int bottom = top + lane.laneHeight;
     QLinearGradient gradient;
-    QRect arc;
+    QPoint center; // Of the ellipse: the corner the curve bends around
+    QSize radii;
     int startAngle = 0;
     switch (lane.type) {
     case LaneType::Join:
@@ -138,14 +145,16 @@ void paintLaneArc(QPainter *painter, const GraphLane& lane)
         gradient = QLinearGradient(QPoint(lane.left - 2, half + top - 2), QPoint(mid, (2 * half) + top + 1));
         gradient.setColorAt(0, lane.activeColor);
         gradient.setColorAt(1, lane.color);
-        arc = QRect(lane.left - (width / 2) - 1, top + half - 1, width, lane.laneHeight);
+        center = QPoint(lane.left, bottom);
+        radii = QSize(mid - lane.left, bottom - line);
         startAngle = 90; // GDI+ 270 to 360: from the top to the right
         break;
     case LaneType::JoinL:
         gradient = QLinearGradient(QPoint(mid, (2 * half) + top + 1), QPoint(lane.right + 1, half + top - 1));
         gradient.setColorAt(0, lane.color);
         gradient.setColorAt(1, lane.activeColor);
-        arc = QRect(lane.left + (width / 2), top + half - 1, width, lane.laneHeight);
+        center = QPoint(lane.right, bottom);
+        radii = QSize(lane.right - mid, bottom - line);
         startAngle = 180; // GDI+ 180 to 270: from the left to the top
         break;
     case LaneType::Tail:
@@ -153,12 +162,14 @@ void paintLaneArc(QPainter *painter, const GraphLane& lane)
         gradient = QLinearGradient(QPoint(lane.left - 2, half + top - 2), QPoint(mid, top - 1));
         gradient.setColorAt(0, lane.activeColor);
         gradient.setColorAt(1, lane.color);
-        arc = QRect(lane.left - (width / 2) - 1, top - half - 1, width, lane.laneHeight);
+        center = QPoint(lane.left, top);
+        radii = QSize(mid - lane.left, line - top);
         startAngle = 0; // GDI+ 0 to 90: from the right to the bottom
         break;
     default:
         return;
     }
+    const QRect arc(center.x() - radii.width(), center.y() - radii.height(), 2 * radii.width(), 2 * radii.height());
     constexpr int degree = 16; // Qt's arc angles are in 1/16 degrees
     constexpr int quarter = 90;
     painter->setPen(QPen(QBrush(gradient), graphLineWidth));

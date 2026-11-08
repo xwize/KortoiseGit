@@ -31,12 +31,12 @@ The install adds no packages itself: if a build dependency is missing, it says s
 `pacman` command to run. When it finishes, log out and log in again, then in Dolphin open
 Configure Dolphin > Interface > Version Control, tick KortoiseGit and untick Git.
 
-![KortoiseGit's log dialog showing a commit graph with coloured branch lanes, next to Dolphin's context menu with the Git submenu open](screenshot.png)
+![KortoiseGit's log dialog showing a commit graph with coloured branch lanes, next to Dolphin's context menu with the KortoiseGit submenu open](screenshot.png)
 
 ## What it does
 
 - **Status overlays in Dolphin**, showing each file's git status
-- **Context menu in Dolphin**, laid out like TortoiseGit's, with most entries in a "Git" submenu
+- **Context menu in Dolphin**, laid out like TortoiseGit's, with most entries in a "KortoiseGit" submenu
 - **Log:** commit graph, message and changed files for each commit
 - **Commit** with a checkable file list and Amend Last Commit
 - **Add** and **Revert**

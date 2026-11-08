@@ -58,16 +58,17 @@ void selectText(QComboBox *combo, const QString& text)
 }
 
 /**
+ * @param parent The dialog.
  * @param question A question.
  * @param warning Whether it warns of something, such as a deletion, rather than only asking.
  * @returns Whether the user answered Yes.
  */
-bool askYesNo(const QString& question, bool warning)
+bool askYesNo(QWidget *parent, const QString& question, bool warning)
 {
     const KGuiItem yesItem(i18n("&Yes"));
     const KGuiItem noItem(i18n("&No"));
-    const auto answer = warning ? KMessageBox::warningTwoActions(nullptr, question, QString(), yesItem, noItem, QString(), noNotify)
-                                : KMessageBox::questionTwoActions(nullptr, question, QString(), yesItem, noItem, QString(), noNotify);
+    const auto answer = warning ? KMessageBox::warningTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify)
+                                : KMessageBox::questionTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify);
     return answer == KMessageBox::PrimaryAction;
 }
 
@@ -159,11 +160,11 @@ void PushDlg::accept()
         return;
     }
     if (chosen.localBranch.isEmpty() && chosen.remoteBranch.isEmpty()) {
-        if (!askYesNo(i18n("The local branch name and the remote branch name are empty.\nContinue?"), false)) {
+        if (!askYesNo(this, i18n("The local branch name and the remote branch name are empty.\nContinue?"), false)) {
             return;
         }
     } else if (chosen.localBranch.isEmpty()) {
-        if (!askYesNo(i18n("The local branch/tag name is empty. This results in a remote removal.\nContinue?"), true)) {
+        if (!askYesNo(this, i18n("The local branch/tag name is empty. This results in a remote removal.\nContinue?"), true)) {
             return;
         }
     } else if (!chosen.remoteBranch.isEmpty() && !isBranchNameValid(chosen.remoteBranch)) {

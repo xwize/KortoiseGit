@@ -133,8 +133,8 @@ private:
      * condition holds. Decided afresh on every request from the items' own paths, as CShellExt::Initialize and
      * QueryContextMenu do.
      * @param selected The selected paths, or the folder shown when nothing is selected.
-     * @returns The top-level actions, in TortoiseGit's menu order, then the "Git" submenu's action if the submenu has
-     *          entries. Every entry's data is set to the paths.
+     * @returns The top-level actions, in TortoiseGit's menu order, then the "KortoiseGit" submenu's action if the submenu
+     *          has entries. Every entry's data is set to the paths.
      */
     [[nodiscard]] QList<QAction *> menuActions(const QStringList& selected) const;
 

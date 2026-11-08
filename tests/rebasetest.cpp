@@ -26,6 +26,7 @@
 #include <QTabWidget>
 #include <QTest>
 #include <QTimer>
+#include <QToolButton>
 
 #include <memory>
 
@@ -312,6 +313,45 @@ private Q_SLOTS:
         QCOMPARE(model->rev(0).subject, QStringLiteral("c3"));
         QCOMPARE(withUpstream->tabs()->tabText(RebaseDlg::ConflictTab), QStringLiteral("Revision Files"));
         saveScreenshot(*withUpstream, QStringLiteral("rebasedlg-setup.png"));
+    }
+
+    void comboEntriesKeepTheirPlace()
+    {
+        const auto items = [](const QComboBox *combo) {
+            QStringList texts;
+            for (int index = 0; index < combo->count(); ++index) {
+                texts.append(combo->itemText(index));
+            }
+            return texts;
+        };
+        const auto reverse = [](const RebaseDlg& dlg) {
+            QSignalSpy fetched(&dlg, &RebaseDlg::logListFetched);
+            dlg.reverseButton()->click();
+            return fetched.wait(timeout);
+        };
+        const QStringList branches{QStringLiteral("feature"), QStringLiteral("main"), QStringLiteral("old")};
+        const RebaseSetup setup;
+
+        // An entry that is already listed stays where it is, and is selected
+        const std::unique_ptr<RebaseDlg> existing = openDlg(setup.repo);
+        QVERIFY(existing);
+        QCOMPARE(items(existing->upstreamCombo()), branches);
+        QCOMPARE(existing->upstreamCombo()->currentIndex(), 1);
+        QVERIFY(reverse(*existing));
+        QCOMPARE(items(existing->branchCombo()), branches);
+        QCOMPARE(existing->branchCombo()->currentIndex(), 1);
+        QCOMPARE(items(existing->upstreamCombo()), branches);
+        QCOMPARE(existing->upstreamCombo()->currentIndex(), 0);
+
+        // A new entry goes at the end, and is selected
+        const QString commit = QStringLiteral("main~0");
+        const std::unique_ptr<RebaseDlg> added = openDlg(setup.repo, commit);
+        QVERIFY(added);
+        QCOMPARE(items(added->upstreamCombo()), branches + QStringList{commit});
+        QCOMPARE(added->upstreamCombo()->currentIndex(), 3);
+        QVERIFY(reverse(*added));
+        QCOMPARE(items(added->branchCombo()), branches + QStringList{commit});
+        QCOMPARE(added->branchCombo()->currentIndex(), 3);
     }
 
     void plainRebase()

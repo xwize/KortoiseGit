@@ -21,6 +21,7 @@ target_sources(kgtplugin PRIVATE
     pathutils.hpp
     remotecachelink.cpp
     remotecachelink.hpp
+    resourceshell.qrc
     shellext.cpp
     shellext.hpp
 )
