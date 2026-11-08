@@ -81,17 +81,21 @@ QColor labelColor(const GitRef& ref)
 }
 
 /**
- * The lane colours, CColors::BranchLine1 to BranchLine8 (TortoiseGit's Colors.cpp defaults).
+ * The lane colours, following the order of CColors::BranchLine1 to BranchLine8 (TortoiseGit's Colors.cpp defaults:
+ * black, red, green, blue, grey, olive, teal, purple). TortoiseGit's values are black or fully saturated, harsh on a
+ * light background and muddy once CTheme::GetThemeColor inverts them for a dark one. These are pastel shades of
+ * the same hues instead (grey for black and orange for the second grey), all at OKLCh lightness 0.66 with chroma
+ * up to 0.13, about 3:1 contrast on white and 5:1 on Breeze Dark's #202326, so one palette serves both themes.
  */
 constexpr std::array<QRgb, Lanes::colorsNum> branchLineColors{
-    qRgb(0, 0, 0),
-    qRgb(0xFF, 0, 0),
-    qRgb(0, 0xFF, 0),
-    qRgb(0, 0, 0xFF),
-    qRgb(128, 128, 128),
-    qRgb(128, 128, 0),
-    qRgb(0, 128, 128),
-    qRgb(128, 0, 128),
+    qRgb(0x92, 0x92, 0x92), // grey
+    qRgb(0xd6, 0x70, 0x69), // red
+    qRgb(0x5a, 0xa7, 0x5e), // green
+    qRgb(0x5d, 0x94, 0xda), // blue
+    qRgb(0xc7, 0x7f, 0x3e), // orange
+    qRgb(0x9c, 0x96, 0x3e), // olive
+    qRgb(0x31, 0xa5, 0xa5), // teal
+    qRgb(0xb0, 0x78, 0xc9), // purple
 };
 
 /**
@@ -109,24 +113,12 @@ struct GraphLane {
 
 /**
  * @param lane A lane's index.
- * @param isDark Whether the list has a dark background.
- * @returns The lane's colour. TortoiseGit passes it through CTheme::GetThemeColor(color, true), which in its dark
- *          theme inverts the HSL lightness and keeps it between 5% and 90%, so black lanes turn light. Here the
- *          dark theme is a dark palette, such as Breeze Dark.
+ * @returns The lane's colour. TortoiseGit passes it through CTheme::GetThemeColor(color, true), which inverts its
+ *          lightness in the dark theme; the pastel branchLineColors read on both, so they are used as they are.
  */
-QColor laneColor(std::size_t lane, bool isDark)
+QColor laneColor(std::size_t lane)
 {
-    const QColor color = QColor::fromRgb(branchLineColors.at(lane % Lanes::colorsNum));
-    if (!isDark) {
-        return color;
-    }
-    constexpr float minLightness = 0.05F;
-    constexpr float maxLightness = 0.90F;
-    float hue = 0;
-    float saturation = 0;
-    float lightness = 0;
-    color.getHslF(&hue, &saturation, &lightness);
-    return QColor::fromHslF(hue, saturation, std::clamp(1.0F - lightness, minLightness, maxLightness));
+    return QColor::fromRgb(branchLineColors.at(lane % Lanes::colorsNum));
 }
 
 /**
@@ -331,9 +323,8 @@ void paintGraphLane(QPainter *painter, const GraphLane& lane)
  * @param painter Draws.
  * @param rect The cell.
  * @param lanes The row's lanes.
- * @param isDark Whether the list has a dark background.
  */
-void drawGraph(QPainter *painter, const QRect& rect, const std::vector<Lanes::LaneType>& lanes, bool isDark)
+void drawGraph(QPainter *painter, const QRect& rect, const std::vector<Lanes::LaneType>& lanes)
 {
     // The active lane is the first merge lane: the commit's node
     const auto merge = std::ranges::find_if(lanes, &Lanes::isMerge);
@@ -342,7 +333,7 @@ void drawGraph(QPainter *painter, const QRect& rect, const std::vector<Lanes::La
     int laneRight = 0;
     const int maxWidth = rect.width();
     const int laneWidth = 3 * rect.height() / 4;
-    const QColor activeColor = laneColor(activeLane, isDark);
+    const QColor activeColor = laneColor(activeLane);
 
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setClipRect(rect);
@@ -360,7 +351,7 @@ void drawGraph(QPainter *painter, const QRect& rect, const std::vector<Lanes::La
                            .right = laneRight + rect.left(),
                            .top = rect.top(),
                            .laneHeight = rect.height(),
-                           .color = i == activeLane ? activeColor : laneColor(i, isDark),
+                           .color = i == activeLane ? activeColor : laneColor(i),
                            .activeColor = activeColor,
                        });
     }
@@ -483,9 +474,8 @@ private:
         initStyleOption(&opt, index);
         const QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
         style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
-        const bool isDark = opt.palette.color(QPalette::Base).lightness() < opt.palette.color(QPalette::Text).lightness();
         painter->save();
-        drawGraph(painter, opt.rect, model.lanes(index.row()), isDark);
+        drawGraph(painter, opt.rect, model.lanes(index.row()));
         painter->restore();
     }
 
