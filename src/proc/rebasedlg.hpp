@@ -153,6 +153,11 @@ public:
     [[nodiscard]] QComboBox *upstreamCombo() const;
 
     /**
+     * @returns The button that swaps Branch and Upstream.
+     */
+    [[nodiscard]] QToolButton *reverseButton() const;
+
+    /**
      * @returns The "Force Rebase" checkbox.
      */
     [[nodiscard]] QCheckBox *forceCheck() const;
