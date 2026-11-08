@@ -17,6 +17,7 @@ target_sources(kgtplugin PRIVATE
     ${kgtplugin_logging}
     gitfolderstatus.cpp
     gitfolderstatus.hpp
+    resourceshell.qrc
     shellext.cpp
     shellext.hpp
 )

@@ -22,9 +22,18 @@
 
 #include <dlfcn.h>
 
+#include <array>
 #include <chrono>
 #include <exception>
 #include <utility>
+
+/**
+ * Registers resourceshell.qrc, which a static library has to do itself. Q_INIT_RESOURCE must be outside any namespace.
+ */
+static void registerMenuIconResources()
+{
+    Q_INIT_RESOURCE(resourceshell);
+}
 
 namespace
 {
@@ -41,6 +50,21 @@ constexpr qsizetype maxMenuBranchLength = 64;
 constexpr qsizetype shortHashLength = 8;
 // More than this goes in a file: well under Linux's usual 2 MiB for the arguments and the environment together
 constexpr qsizetype maxPathArgumentsLength = 128LL * 1024;
+
+/**
+ * The submenu's icon, like CShellExt::QueryContextMenu's IDI_APP from the shell extension's own resources, so it
+ * shows from the build tree too. Unlike TortoiseGit it doesn't vary with the selection.
+ * @returns The app icon, with every size it comes in, so that a menu gets a matching image rather than a scaled one.
+ */
+QIcon submenuIcon()
+{
+    registerMenuIconResources();
+    QIcon icon;
+    for (const int size : std::array{16, 22, 32, 48, 64, 128, 256}) {
+        icon.addFile(QStringLiteral(":/kortoisegitplugin/kortoisegit-%1.png").arg(size), QSize(size, size));
+    }
+    return icon;
+}
 
 /**
  * The directory holding this plugin's .so, like TortoiseGit's CPathUtils::GetAppDirectory(g_hmodThisDll).
@@ -380,7 +404,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_tagAction(new QAction(QIcon::fromTheme(QStringLiteral("tag")), i18n("Create &Tag..."), this))
     , m_mergeAbortAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Abort &Merge"), this))
     , m_gitMenu(std::make_unique<QMenu>())
-    , m_gitMenuAction(new QAction(QIcon::fromTheme(QStringLiteral("kortoisegit")), i18n("&Git"), this))
+    , m_gitMenuAction(new QAction(submenuIcon(), i18n("&KortoiseGit"), this))
 {
     Q_UNUSED(args)
     m_gitMenuAction->setMenu(m_gitMenu.get());
