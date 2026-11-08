@@ -10,10 +10,14 @@
 
 #pragma once
 
+#include "lanes.hpp"
+
 #include "git/gitrevloglist.hpp"
 
 #include <QAbstractTableModel>
 #include <QList>
+
+#include <vector>
 
 namespace kgt
 {
@@ -32,7 +36,7 @@ public:
      */
     // NOLINTNEXTLINE(cppcoreguidelines-use-enum-class): Qt's model API takes columns as int
     enum Column {
-        GraphColumn, // LOGLIST_GRAPH: empty until the graph lanes are ported
+        GraphColumn, // LOGLIST_GRAPH: the commit graph, drawn by GitLogList from lanes()
         ActionsColumn, // LOGLIST_ACTION: icons for what the commit did to its files, drawn by GitLogList
         MessageColumn, // LOGLIST_MESSAGE: the ref labels, drawn by GitLogList, then the subject
         AuthorColumn, // LOGLIST_AUTHOR
@@ -63,6 +67,15 @@ public:
     [[nodiscard]] const GitRevLoglist& rev(int row) const;
 
     /**
+     * The commit graph's lanes on a row, computed on first use for it and every row above it, in list order
+     * (CGitLogListBase::DrawGraph calling CLogDataVector::setLane). TortoiseGit keeps them on the revision
+     * (GitRevLoglist::m_Lanes); here the model keeps them beside it, since the git layer doesn't know Lanes.
+     * @param row A row of this model.
+     * @returns The type of each lane, left to right.
+     */
+    [[nodiscard]] const std::vector<Lanes::LaneType>& lanes(int row) const;
+
+    /**
      * Records a commit's files once they are fetched, and with them its actions for the Actions column.
      * @param row A row of this model.
      * @param files The changes against each parent, in parent order (one for a root commit).
@@ -91,7 +104,14 @@ private:
     [[nodiscard]] static QVariant displayData(const GitRevLoglist& rev, int column);
     [[nodiscard]] static QString actionsToolTip(TGitPath::Actions actions);
 
+    void setLane(int row) const;
+    static void updateLanes(const GitRevLoglist& rev, Lanes& lns, std::vector<Lanes::LaneType>& lanes, bool onlyFirstParent);
+
     QList<GitRevLoglist> m_revs;
+    // The graph is computed lazily from const lanes(), as TortoiseGit does while painting
+    mutable Lanes m_lns; // CLogDataVector::m_Lns: the lane state after row m_firstFreeLane - 1
+    mutable std::vector<std::vector<Lanes::LaneType>> m_lanes; // GitRevLoglist::m_Lanes of each row; empty until computed
+    mutable int m_firstFreeLane = 0; // CLogDataVector::m_FirstFreeLane: the first row not yet computed
 };
 
 } // namespace kgt
