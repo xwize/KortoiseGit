@@ -15,15 +15,18 @@
 #include "utils/runtimeerror.hpp"
 
 #include <KIO/ApplicationLauncherJob>
+#include <KIO/DeleteOrTrashJob>
 #include <KIO/JobUiDelegateFactory>
 #include <KIO/OpenFileManagerWindowJob>
 #include <KIO/OpenUrlJob>
+#include <KJob>
 #include <KLocalizedString>
 
 #include <QCheckBox>
 #include <QContextMenuEvent>
 #include <QDir>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QHeaderView>
 #include <QIcon>
 #include <QKeyEvent>
@@ -78,6 +81,27 @@ bool isTracked(const GitStatusListEntry& entry)
 bool isGone(const GitStatusListEntry& entry)
 {
     return (entry.actions & (Action::Deleted | Action::Missing)) != 0;
+}
+
+/**
+ * @param entry The entry the context menu was opened on.
+ * @returns Whether the menu offers Delete (CGitStatusListCtrl::OnContextMenuList).
+ */
+bool offersDelete(const GitStatusListEntry& entry)
+{
+    return (entry.actions & (Action::Unversioned | Action::Ignore | Action::Missing)) != 0;
+}
+
+/**
+ * Shows an error without a nested event loop, window-modal.
+ * @param parent The window to block.
+ * @param message What went wrong.
+ */
+void showError(QWidget *parent, const QString& message)
+{
+    auto *box = new QMessageBox(QMessageBox::Critical, i18n("KortoiseGit"), message, QMessageBox::Ok, parent);
+    box->setAttribute(Qt::WA_DeleteOnClose);
+    box->open();
 }
 
 /**
@@ -277,7 +301,7 @@ void GitStatusListCtrl::reload()
 
 bool GitStatusListCtrl::isBusy() const
 {
-    return m_isBusy || m_statusCall || m_indexDiffCall || m_numStatCall || m_revertCommand || m_resolveCall;
+    return m_isBusy || m_statusCall || m_indexDiffCall || m_numStatCall || m_revertCommand || m_resolveCall || m_isDeleting;
 }
 
 void GitStatusListCtrl::setSelectButton(QCheckBox *button)
@@ -331,7 +355,7 @@ void GitStatusListCtrl::selectFirstConflict()
 
 bool GitStatusListCtrl::isModifying() const
 {
-    return m_revertCommand || m_resolveCall;
+    return m_revertCommand || m_resolveCall || m_isDeleting;
 }
 
 QString GitStatusListCtrl::absolutePath(const GitStatusListEntry& entry) const
@@ -344,6 +368,14 @@ void GitStatusListCtrl::keyPressEvent(QKeyEvent *event)
     if (event->key() == Qt::Key_F5 || event->matches(QKeySequence::Refresh)) {
         reload();
         return;
+    }
+    if (event->key() == Qt::Key_Delete) {
+        // CGitStatusListCtrl::OnKeyDown: unlike the menu, not for a missing file
+        const GitStatusListEntry *focused = focusedEntry();
+        if (focused && (focused->actions & (Action::Unversioned | Action::Ignore))) {
+            deleteSelectedFiles();
+            return;
+        }
     }
     QTreeView::keyPressEvent(event);
 }
@@ -394,6 +426,12 @@ void GitStatusListCtrl::contextMenuEvent(QContextMenuEvent *event)
                 explore(entry);
             });
         }
+    }
+    if (focused && offersDelete(*focused) && !m_isDeleting) {
+        menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("&Delete"), this, [this] {
+            // After the menu has closed, so the confirmation isn't nested in it
+            QMetaObject::invokeMethod(this, &GitStatusListCtrl::deleteSelectedFiles, Qt::QueuedConnection);
+        });
     }
     if (!menu.isEmpty()) {
         menu.exec(event->globalPos());
@@ -663,10 +701,7 @@ void GitStatusListCtrl::onResolveFinished()
         if (e.error().category != ErrorCategory::Git) {
             throw;
         }
-        // Window-modal without a nested event loop
-        auto *box = new QMessageBox(QMessageBox::Critical, i18n("KortoiseGit"), e.error().message, QMessageBox::Ok, this);
-        box->setAttribute(Qt::WA_DeleteOnClose);
-        box->open();
+        showError(this, e.error().message);
     }
     // TortoiseGit marks the entries modified, or refreshes the parent after an error; reloading does both
     reload();
@@ -793,14 +828,99 @@ void GitStatusListCtrl::onRevertFinished()
     command->deleteLater();
     unsetCursor();
     if (const std::optional<Error>& error = command->error()) {
-        // Window-modal without a nested event loop
-        auto *box = new QMessageBox(QMessageBox::Critical, i18n("KortoiseGit"), error->message, QMessageBox::Ok, this);
-        box->setAttribute(Qt::WA_DeleteOnClose);
-        box->open();
+        showError(this, error->message);
     }
     // TortoiseGit drops the reverted entries or refreshes the parent dialog; reloading does both
     reload();
     Q_EMIT reverted();
+}
+
+void GitStatusListCtrl::deleteSelectedFiles()
+{
+    // Ported from CGitStatusListCtrl::DeleteSelectedFiles
+    const QList<GitStatusListEntry> selected = selectedEntries();
+    if (selected.isEmpty() || m_isDeleting) {
+        return;
+    }
+    // GetAsyncKeyState(VK_SHIFT), read now rather than when the menu was opened
+    const bool permanently = QGuiApplication::queryKeyboardModifiers().testFlag(Qt::ShiftModifier);
+    m_deletingPaths.clear();
+    QList<QUrl> urls;
+    for (const GitStatusListEntry& entry : selected) {
+        m_deletingPaths.append(entry.path);
+        // A dangling symlink is still there to delete, though exists() follows it
+        const QFileInfo file(absolutePath(entry));
+        if (file.exists() || file.isSymLink()) {
+            urls.append(QUrl::fromLocalFile(file.filePath()));
+        }
+    }
+    m_isDeleting = true;
+    Q_EMIT checkedCountChanged();
+    if (urls.isEmpty()) {
+        // Nothing on disk to confirm or delete, as SHFileOperation's empty list
+        removeDeletedFromIndex();
+        return;
+    }
+    using AskUser = KIO::AskUserActionInterface;
+    // SHFileOperation always asks; KIO's default confirmation doesn't for Trash unless the user turned that on
+    auto *job = new KIO::DeleteOrTrashJob(urls, permanently ? AskUser::Delete : AskUser::Trash, AskUser::ForceConfirmation, this);
+    job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, this));
+    connect(job, &KJob::result, this, &GitStatusListCtrl::onDeleteJobResult);
+    job->start();
+}
+
+void GitStatusListCtrl::onDeleteJobResult(const KJob *job)
+{
+    if (job->error() != KJob::NoError) {
+        // Cancelled or failed: the index and the list are left alone, and the job's delegate has shown any error
+        m_deletingPaths.clear();
+        m_isDeleting = false;
+        Q_EMIT checkedCountChanged();
+        return;
+    }
+    removeDeletedFromIndex();
+}
+
+void GitStatusListCtrl::removeDeletedFromIndex()
+{
+    /**
+     * git_index_remove_bypath for each path. --ignore-unmatch because an unversioned file won't be there, -r because
+     * an ignored folder is one entry, --force because a file may have staged changes.
+     */
+    MassiveGitTask removeTask(
+        {QStringLiteral("rm"), QStringLiteral("--cached"), QStringLiteral("-r"), QStringLiteral("--force"), QStringLiteral("--ignore-unmatch")});
+    removeTask.setPaths(m_deletingPaths);
+    m_deleteCall = removeTask.runAsync(Git(m_workingTree));
+    connect(m_deleteCall.get(), &GitCall::finished, this, &GitStatusListCtrl::onDeleteIndexFinished);
+}
+
+void GitStatusListCtrl::onDeleteIndexFinished()
+{
+    const GitCall *call = takeFinished(m_deleteCall);
+    bool indexChanged = true; // After an error, TortoiseGit refreshes too
+    try {
+        // git rm prints a line for each path it removes (needWriteIndex)
+        indexChanged = !call->output().isEmpty();
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        showError(this, e.error().message);
+    }
+    const QSet<QString> deleted(m_deletingPaths.cbegin(), m_deletingPaths.cend());
+    m_deletingPaths.clear();
+    m_isDeleting = false;
+    Q_EMIT checkedCountChanged();
+    // A load started before the files went would bring their rows back, so it is restarted
+    if (indexChanged || m_statusCall || m_indexDiffCall || m_numStatCall) {
+        reload();
+        return;
+    }
+    QList<GitStatusListEntry> remaining = m_model->allEntries();
+    remaining.removeIf([&deleted](const GitStatusListEntry& entry) {
+        return deleted.contains(entry.path);
+    });
+    m_model->setEntries(remaining);
 }
 
 bool GitStatusListCtrl::isPathFilterGivenToGit() const

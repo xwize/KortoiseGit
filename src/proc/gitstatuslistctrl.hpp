@@ -26,6 +26,7 @@
 
 #include <memory>
 
+class KJob;
 class QCheckBox;
 class QLabel;
 class QMenu;
@@ -41,7 +42,8 @@ class RevertProgressCommand;
  * The changed-files list. The owning dialog sets the working tree and the show flags, places the Select all
  * checkbox and the counter label, calls reload() and acts on checkedEntries(). Double-clicking a file compares it
  * with HEAD in git difftool, or opens a conflicted one in git mergetool; the context menu offers Edit conflicts,
- * Resolved, Compare with base, Revert..., Open, Open with... and Explore to; F5 reloads.
+ * Resolved, Compare with base, Revert..., Open, Open with..., Explore to and Delete; F5 reloads, and the Delete key
+ * deletes.
  */
 class GitStatusListCtrl : public QTreeView
 {
@@ -175,7 +177,7 @@ public:
     void reload();
 
     /**
-     * @returns Whether a load, or a revert from the context menu, is running.
+     * @returns Whether a load, or a revert or delete from the context menu, is running.
      */
     [[nodiscard]] bool isBusy() const;
 
@@ -219,7 +221,7 @@ public:
     void selectFirstConflict();
 
     /**
-     * @returns Whether a Revert or Resolved started from the context menu is changing the repository.
+     * @returns Whether a Revert, Resolved or Delete started from the context menu is changing the repository.
      */
     [[nodiscard]] bool isModifying() const;
 
@@ -291,6 +293,10 @@ private:
     void addConflictEntries(QMenu& menu, int selectedCount);
     void editConflict(const GitStatusListEntry& entry);
     void onResolveFinished();
+    void deleteSelectedFiles();
+    void onDeleteJobResult(const KJob *job);
+    void removeDeletedFromIndex();
+    void onDeleteIndexFinished();
     [[nodiscard]] const GitStatusListEntry *focusedEntry() const;
     [[nodiscard]] bool isPathFilterGivenToGit() const;
     [[nodiscard]] QStringList pathSpec() const;
@@ -309,6 +315,8 @@ private:
     std::unique_ptr<GitCall> m_numStatCall;
     std::unique_ptr<RevertProgressCommand> m_revertCommand; // The running revert, if any
     std::unique_ptr<GitCall> m_resolveCall; // The running git add of Resolved, if any
+    std::unique_ptr<GitCall> m_deleteCall; // The running git rm --cached of Delete, if any
+    QStringList m_deletingPaths; // The paths of the running Delete
     QList<GitStatusEntry> m_pendingStatus; // The status of the running load, waiting for its line counts
     QString m_errorMessage; // Shown in the empty list after a failed load
     QString m_emptyString; // Shown in the empty list after a load that found nothing
@@ -320,6 +328,7 @@ private:
     bool m_includeStaged = false; // Whether staged changes outside m_pathFilter are listed too
     bool m_amend = false; // Changes are against HEAD~1 (m_amend)
     bool m_isBusy = false; // The owner is loading the entries (setBusy)
+    bool m_isDeleting = false; // A Delete is asking for confirmation, deleting files or updating the index
     bool m_hasDirectFiles = false; // The direct files have been taken from the path filter (m_setDirectFiles)
     ContextMenus m_contextMenus = ContextMenu::All; // TortoiseGit's m_dwContextMenus
 };
