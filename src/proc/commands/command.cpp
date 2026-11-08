@@ -19,6 +19,7 @@
 #include "commands/mergecommand.hpp"
 #include "commands/pullcommand.hpp"
 #include "commands/pushcommand.hpp"
+#include "commands/rebasecommand.hpp"
 #include "commands/refbrowsecommand.hpp"
 #include "commands/revertcommand.hpp"
 #include "commands/switchcommand.hpp"
@@ -59,6 +60,7 @@ constexpr std::array commands{
     CommandEntry{.name = u"merge", .create = &create<kgt::MergeCommand>},
     CommandEntry{.name = u"pull", .create = &create<kgt::PullCommand>},
     CommandEntry{.name = u"push", .create = &create<kgt::PushCommand>},
+    CommandEntry{.name = u"rebase", .create = &create<kgt::RebaseCommand>},
     CommandEntry{.name = u"refbrowse", .create = &create<kgt::RefBrowseCommand>},
     CommandEntry{.name = u"repocreate", .create = &create<kgt::CreateRepositoryCommand>},
     CommandEntry{.name = u"revert", .create = &create<kgt::RevertCommand>},

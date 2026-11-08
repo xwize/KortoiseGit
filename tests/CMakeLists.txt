@@ -23,6 +23,7 @@ set(kgt_tests
     progressdlgtest
     pullfetchtest
     pushdlgtest
+    rebasetest
     resulttest
     reverttest
     switchtest
