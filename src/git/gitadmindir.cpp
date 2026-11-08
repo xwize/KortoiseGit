@@ -4,7 +4,8 @@
 
 /**
  * @file
- * Ported from TortoiseGit src/Git/GitAdminDir.cpp (GetWorktreeAdminDirPath, ReadGitLink, IsBareRepo) and src/Git/Git.cpp
+ * Ported from TortoiseGit src/Git/GitAdminDir.cpp (GetWorktreeAdminDirPath, GetAdminDirPath, HasAdminDir, IsAdminDirPath,
+ * ReadGitLink, IsBareRepo) and src/Git/Git.cpp
  * (CGit::GetCurrentBranchFromFile).
  */
 
@@ -50,10 +51,67 @@ QString readGitLink(const QString& dotGitFile)
     return QDir::cleanPath(QFileInfo(dotGitFile).dir().absoluteFilePath(target));
 }
 
+/**
+ * Ported from GitAdminDir::GetAdminDirPath: a linked worktree's admin directory names the main repository's in
+ * its "commondir" file.
+ * @param worktreeAdminDir A working tree's own admin directory.
+ * @returns The directory holding the repository's objects and refs.
+ */
+QString commonAdminDir(const QString& worktreeAdminDir)
+{
+    QFile commonDir(QDir(worktreeAdminDir).filePath(QStringLiteral("commondir")));
+    if (!commonDir.open(QIODevice::ReadOnly)) {
+        return worktreeAdminDir;
+    }
+    const QString target = QFile::decodeName(readFirstLine(commonDir));
+    return QDir::cleanPath(QDir(worktreeAdminDir).absoluteFilePath(target));
+}
+
 } // namespace
 
 namespace kgt
 {
+
+QString GitAdminDir::projectTopDir(const QString& path)
+{
+    if (path.isEmpty()) {
+        return {};
+    }
+    const QFileInfo info(path);
+    const QString dirName = QDir::cleanPath(info.isDir() ? info.absoluteFilePath() : info.absolutePath());
+    // A .git dir or anything inside it is left out: only working tree files are of interest
+    if (isAdminDirPath(dirName)) {
+        return {};
+    }
+    QDir dir(dirName);
+    while (true) {
+        const QFileInfo dotGit(dir.filePath(QStringLiteral(".git")));
+        if (dotGit.exists()) {
+            const QString worktreeAdminDir = dotGit.isDir() ? dotGit.absoluteFilePath() : readGitLink(dotGit.absoluteFilePath());
+            if (worktreeAdminDir.isEmpty()) {
+                return {};
+            }
+            const QDir adminDir(commonAdminDir(worktreeAdminDir));
+            // As in TortoiseGit, refs/heads must be a directory: the reftable format makes it a file
+            if (!QFileInfo::exists(adminDir.filePath(QStringLiteral("HEAD"))) || !QFileInfo::exists(adminDir.filePath(QStringLiteral("config")))
+                || !QFileInfo(adminDir.filePath(QStringLiteral("objects"))).isDir() || !QFileInfo(adminDir.filePath(QStringLiteral("refs"))).isDir()
+                || !QFileInfo(adminDir.filePath(QStringLiteral("refs/heads"))).isDir()) {
+                return {};
+            }
+            return dir.absolutePath();
+        }
+        // A bare repository inside a working tree is not part of it
+        if (isBareRepo(dir.absolutePath()) || !dir.cdUp()) {
+            return {};
+        }
+    }
+}
+
+bool GitAdminDir::isAdminDirPath(const QString& path)
+{
+    const QString cleaned = QDir::cleanPath(path);
+    return cleaned.contains(QLatin1String("/.git/")) || cleaned.endsWith(QLatin1String("/.git")) || cleaned == QLatin1String(".git");
+}
 
 QString GitAdminDir::worktreeAdminDirPath(const QString& path)
 {

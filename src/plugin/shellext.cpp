@@ -19,7 +19,6 @@
 
 #include <dlfcn.h>
 
-#include <algorithm>
 #include <chrono>
 #include <exception>
 
@@ -34,8 +33,6 @@ constexpr auto procName = "kortoisegitproc"_L1;
 constexpr std::chrono::milliseconds refreshDelay{600};
 // CShellExt::InsertGitMenu's limit on the branch name in the Commit entry
 constexpr qsizetype maxMenuBranchLength = 64;
-// How many folders' states the context menu keeps: those Dolphin shows at once, expanded ones included
-constexpr qsizetype maxMenuFolders = 64;
 
 /**
  * The directory holding this plugin's .so, like TortoiseGit's CPathUtils::GetAppDirectory(g_hmodThisDll).
@@ -86,6 +83,169 @@ QStringList localPaths(const KFileItemList& items)
         }
     }
     return paths;
+}
+
+using namespace kgt;
+
+/**
+ * TortoiseGit's git_wc_status_kind, as far as the context menu tells the states apart.
+ */
+enum class WcStatus {
+    None, // Not in a working tree
+    Unversioned,
+    Ignored,
+    Normal,
+    Modified,
+    Added,
+    Deleted,
+    Conflicted,
+};
+
+/**
+ * Ported from the GitStatus::GetStatus call in CShellExt::Initialize: one item's own state, read from git for
+ * that path alone. git status gives the full state (staged additions included), as TGitCache, TortoiseGit's
+ * default, does.
+ * @param path The item, absolute and clean.
+ * @param isDir Whether it is a folder, whose state rolls up what is below it.
+ * @param topDir The working tree holding it, from GitAdminDir::projectTopDir().
+ * @returns Its state.
+ */
+WcStatus itemStatus(const QString& path, bool isDir, const QString& topDir)
+{
+    // GitStatus::GetDirStatus: the working tree root is at least normal. What lies below it changes none of our
+    // entries for a folder, so git isn't run for the whole tree
+    if (isDir && path == topDir) {
+        return WcStatus::Normal;
+    }
+    const QFileInfo info(path);
+    try {
+        switch (GitFolderStatus::fetchItem(path).itemVersion(info.fileName(), isDir)) {
+        case KVersionControlPlugin::UnversionedVersion:
+            return WcStatus::Unversioned;
+        case KVersionControlPlugin::IgnoredVersion:
+            return WcStatus::Ignored;
+        case KVersionControlPlugin::NormalVersion:
+        case KVersionControlPlugin::UpdateRequiredVersion:
+            return WcStatus::Normal;
+        case KVersionControlPlugin::LocallyModifiedVersion:
+        case KVersionControlPlugin::LocallyModifiedUnstagedVersion:
+            return WcStatus::Modified;
+        case KVersionControlPlugin::AddedVersion:
+            return WcStatus::Added;
+        case KVersionControlPlugin::RemovedVersion:
+        case KVersionControlPlugin::MissingVersion:
+            return WcStatus::Deleted;
+        case KVersionControlPlugin::ConflictingVersion:
+            return WcStatus::Conflicted;
+        }
+    } catch (const RuntimeError& e) {
+        qCDebug(KGT_PLUGIN) << "No status for the menu of" << path << ":" << e.error().message;
+    } catch (const std::exception& e) {
+        qCWarning(KGT_PLUGIN) << "No status for the menu of" << path << ":" << e.what();
+    }
+    // CShellExt::Initialize: when the status can't be read, an item in a working tree counts as normal
+    return WcStatus::Normal;
+}
+
+/**
+ * What CShellExt::Initialize finds out about the selection: the ITEMIS_* states the menu entries depend on.
+ */
+struct MenuState {
+    bool onlyOne = false; // ITEMIS_ONLYONE: one item
+    bool folder = false; // ITEMIS_FOLDER
+    bool inGit = false; // ITEMIS_INGIT: in a working tree and versioned
+    bool folderInGit = false; // ITEMIS_FOLDERINGIT: a folder in a working tree, versioned or not
+    bool inVersionedFolder = false; // ITEMIS_INVERSIONEDFOLDER: in a working tree
+    bool wcRoot = false; // ITEMIS_WCROOT: a working tree's top folder
+    bool bareRepo = false; // ITEMIS_BAREREPO
+    bool inaccessible = false; // ITEMIS_INACCESSIBLE: a folder holding a .git that isn't a valid repository
+    bool ignored = false; // ITEMIS_IGNORED
+    bool normal = false; // ITEMIS_NORMAL: versioned and unchanged
+    bool added = false; // ITEMIS_ADDED
+    bool deleted = false; // ITEMIS_DELETED
+};
+
+/**
+ * Ported from CShellExt::Initialize (with CTGitPath::GetAdminDirMask): the selection's state. As there, only the
+ * first item's state is read; the others only count towards ITEMIS_ONLYONE.
+ *
+ * Dolphin passes the folder shown, when nothing is selected, as a selected item; TortoiseGit reads the folder
+ * background separately (itemStatesFolder), with the same result for the entries we have.
+ * @param paths The selected paths, none inside .git.
+ * @returns Their state.
+ */
+MenuState menuState(const QStringList& paths)
+{
+    Q_ASSERT(!paths.isEmpty());
+    MenuState state;
+    const QString& first = paths.constFirst();
+    const bool isDir = QFileInfo(first).isDir();
+
+    WcStatus status = WcStatus::None;
+    if (const QString topDir = GitAdminDir::projectTopDir(first); !topDir.isEmpty()) {
+        status = itemStatus(first, isDir, topDir);
+        // GetAdminDirMask: every folder in a working tree counts as one in git, whatever its own state
+        state.folder = isDir;
+        state.inGit = true;
+        state.inVersionedFolder = true;
+        state.folderInGit = isDir;
+        state.wcRoot = isDir && first == topDir;
+    }
+    if (status == WcStatus::Unversioned || status == WcStatus::Ignored || status == WcStatus::None) {
+        state.inGit = false;
+    }
+    state.ignored = status == WcStatus::Ignored;
+    state.normal = status == WcStatus::Normal;
+    state.added = status == WcStatus::Added;
+    state.deleted = status == WcStatus::Deleted;
+
+    if (GitAdminDir::isBareRepo(first)) {
+        state = MenuState{.bareRepo = true};
+    }
+
+    state.onlyOne = paths.size() == 1;
+    if (state.onlyOne && isDir) {
+        state.folder = true;
+        state.inaccessible = !state.bareRepo && !state.inVersionedFolder && QFileInfo::exists(QDir(first).filePath(QStringLiteral(".git")));
+    }
+    return state;
+}
+
+/**
+ * Which of our entries TortoiseGit's menu shows.
+ */
+struct MenuEntries {
+    bool clone = false;
+    bool push = false;
+    bool commit = false;
+    bool log = false;
+    bool revert = false;
+    bool createRepo = false;
+    bool add = false;
+};
+
+/**
+ * The entries' conditions from MenuInfo (src/TortoiseShell/MenuInfo.cpp), matched as CShellExt::ShouldInsertItem
+ * does. Its ITEMIS_EXTENDED alternatives (Explorer's Shift+right-click) are left out: Dolphin has no extended menu.
+ * @param state The selection's state.
+ * @returns The entries shown.
+ */
+MenuEntries menuEntries(const MenuState& state)
+{
+    // Clone and CreateRepo: a folder in no repository, or one git ignores
+    const bool outsideRepository = state.folder && !state.inGit && !state.folderInGit && !state.bareRepo && !state.inaccessible;
+    const bool ignoredFolder = state.folder && state.ignored;
+    return {
+        .clone = outsideRepository || ignoredFolder,
+        // MenuInfo also offers Push on a bare repository, which our PushCommand can't push from yet
+        .push = (state.folderInGit && state.onlyOne) || state.wcRoot,
+        .commit = state.inGit || state.folderInGit,
+        .log = (state.onlyOne && !state.added && (state.inGit || state.folderInGit)) || state.bareRepo,
+        .revert = (state.inGit && !state.normal) || state.folderInGit,
+        .createRepo = outsideRepository || ignoredFolder,
+        .add =
+            (state.inVersionedFolder && !state.inGit) || (state.inGit && state.folder) || state.ignored || (state.deleted && !state.folder && !state.onlyOne),
+    };
 }
 
 } // namespace
@@ -162,9 +322,8 @@ bool ShellExt::beginRetrieval(const QString& directory)
     }
     QMetaObject::invokeMethod(
         this,
-        [this, directory, status = *m_folderStatus] {
-            watchIndex(status.indexFile());
-            setMenuStatus(directory, status);
+        [this, indexFile = m_folderStatus->indexFile()] {
+            watchIndex(indexFile);
         },
         Qt::QueuedConnection);
     return true;
@@ -184,53 +343,49 @@ KVersionControlPlugin::ItemVersion ShellExt::itemVersion(const KFileItem& item) 
 
 QList<QAction *> ShellExt::versionControlActions(const KFileItemList& items) const
 {
-    const QStringList paths = localPaths(items);
-    if (paths.isEmpty()) {
-        return {};
-    }
-    QList<QAction *> actions;
-    // TortoiseGit's Clone inside a working tree: one ignored folder
-    if (isIgnoredFolder(items)) {
-        m_cloneAction->setData(paths);
-        actions.append(m_cloneAction);
-    }
-    // TortoiseGit's Push: one folder in the working tree, or the folder shown when nothing is selected
-    if (items.size() == 1 && items.constFirst().isDir() && hasVersionedItem(items)) {
-        m_pushAction->setData(paths);
-        actions.append(m_pushAction);
-    }
-    if (hasVersionedItem(items)) {
-        m_commitAction->setText(commitMenuText(paths.constFirst()));
-        m_commitAction->setData(paths);
-        actions.append(m_commitAction);
-    }
-    m_showLogAction->setData(paths);
-    actions.append(m_showLogAction);
-    // TortoiseGit's menu order: Clone, Push, Commit, Show log, ..., Revert, ..., Add
-    if (hasRevertableItem(items)) {
-        m_revertAction->setData(paths);
-        actions.append(m_revertAction);
-    }
-    if (hasAddableItem(items)) {
-        m_addAction->setData(paths);
-        actions.append(m_addAction);
-    }
-    return actions;
+    return menuActions(localPaths(items));
 }
 
 QList<QAction *> ShellExt::outOfVersionControlActions(const KFileItemList& items) const
 {
-    // TortoiseGit's Clone and CreateRepo: one folder, not in a working tree, not a bare repository, and accessible
-    if (items.size() != 1 || !items.constFirst().isDir()) {
+    // Dolphin decides which of the two calls it makes, by the folder it shows; TortoiseGit has one menu, decided
+    // by the items, so both give the same
+    return menuActions(localPaths(items));
+}
+
+QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
+{
+    // CShellExt::Initialize: items in a .git directory get no menu
+    QStringList paths;
+    for (const QString& path : selected) {
+        if (!GitAdminDir::isAdminDirPath(path)) {
+            paths.append(QDir::cleanPath(QFileInfo(path).absoluteFilePath()));
+        }
+    }
+    if (paths.isEmpty()) {
         return {};
     }
-    const QString folder = items.constFirst().localPath();
-    if (folder.isEmpty() || !QFileInfo(folder).isReadable() || !GitAdminDir::worktreeAdminDirPath(folder).isEmpty() || GitAdminDir::isBareRepo(folder)) {
-        return {};
+    const MenuEntries entries = menuEntries(menuState(paths));
+
+    // In MenuInfo's order
+    QList<QAction *> actions;
+    const auto add = [&actions, &paths](bool shown, QAction *action) {
+        if (shown) {
+            action->setData(paths);
+            actions.append(action);
+        }
+    };
+    add(entries.clone, m_cloneAction);
+    add(entries.push, m_pushAction);
+    if (entries.commit) {
+        m_commitAction->setText(commitMenuText(paths.constFirst()));
     }
-    m_cloneAction->setData(QStringList{folder});
-    m_createRepoAction->setData(QStringList{folder});
-    return {m_cloneAction, m_createRepoAction};
+    add(entries.commit, m_commitAction);
+    add(entries.log, m_showLogAction);
+    add(entries.revert, m_revertAction);
+    add(entries.createRepo, m_createRepoAction);
+    add(entries.add, m_addAction);
+    return actions;
 }
 
 void ShellExt::watchForNewRepository(const QString& folder)
@@ -280,85 +435,6 @@ void ShellExt::watchIndex(const QString& indexFile)
     }
     m_indexWatch.addFile(indexFile);
     m_watchedIndex = indexFile;
-}
-
-void ShellExt::setMenuStatus(const QString& directory, const GitFolderStatus& status)
-{
-    const QString key = QDir::cleanPath(directory);
-    // Forget the folders browsed long ago rather than grow without bound
-    if (m_menuStatus.size() >= maxMenuFolders && !m_menuStatus.contains(key)) {
-        m_menuStatus.clear();
-    }
-    m_menuStatus.insert_or_assign(key, status);
-}
-
-const GitFolderStatus *ShellExt::menuStatus(const QString& directory) const
-{
-    const auto found = m_menuStatus.constFind(directory);
-    return found == m_menuStatus.cend() ? nullptr : &found.value();
-}
-
-bool ShellExt::hasVersionedItem(const KFileItemList& items) const
-{
-    return std::ranges::any_of(items, [this](const KFileItem& item) {
-        const QFileInfo info(QDir::cleanPath(item.localPath()));
-        const GitFolderStatus *status = menuStatus(info.absolutePath());
-        if (!status) {
-            return true;
-        }
-        const ItemVersion version = status->itemVersion(info.fileName(), item.isDir());
-        return version != UnversionedVersion && version != IgnoredVersion;
-    });
-}
-
-bool ShellExt::hasRevertableItem(const KFileItemList& items) const
-{
-    // TortoiseGit's Revert entry: a versioned file that is not unchanged, or a folder in a working tree
-    return std::ranges::any_of(items, [this](const KFileItem& item) {
-        const QFileInfo info(QDir::cleanPath(item.localPath()));
-        if (info.fileName() == QLatin1String(".git")) {
-            return false;
-        }
-        const GitFolderStatus *status = menuStatus(info.absolutePath());
-        if (!status) {
-            // Not listed yet, such as the folder Dolphin shows when nothing is selected
-            return item.isDir();
-        }
-        const ItemVersion version = status->itemVersion(info.fileName(), item.isDir());
-        if (version == UnversionedVersion || version == IgnoredVersion) {
-            return false;
-        }
-        return item.isDir() || version != NormalVersion;
-    });
-}
-
-bool ShellExt::hasAddableItem(const KFileItemList& items) const
-{
-    return std::ranges::any_of(items, [this](const KFileItem& item) {
-        const QString path = QDir::cleanPath(item.localPath());
-        // The folder Dolphin shows, when nothing is selected, is judged by its own listing
-        if (const GitFolderStatus *own = item.isDir() ? menuStatus(path) : nullptr; own && own->hasUnversioned()) {
-            return true;
-        }
-        const QFileInfo info(path);
-        const GitFolderStatus *status = menuStatus(info.absolutePath());
-        // ".git" is reported as unversioned so it gets no overlay, but there is nothing in it to add
-        if (!status || info.fileName() == QLatin1String(".git")) {
-            return false;
-        }
-        const ItemVersion version = status->itemVersion(info.fileName(), item.isDir());
-        return version == UnversionedVersion || version == IgnoredVersion || (item.isDir() && status->hasUnversioned(info.fileName()));
-    });
-}
-
-bool ShellExt::isIgnoredFolder(const KFileItemList& items) const
-{
-    if (items.size() != 1 || !items.constFirst().isDir()) {
-        return false;
-    }
-    const QFileInfo info(QDir::cleanPath(items.constFirst().localPath()));
-    const GitFolderStatus *status = menuStatus(info.absolutePath());
-    return status && status->itemVersion(info.fileName(), true) == IgnoredVersion;
 }
 
 QString ShellExt::commitMenuText(const QString& path)
