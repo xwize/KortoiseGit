@@ -11,24 +11,9 @@ can use it straight away.
 
 **KortoiseGit is not affiliated with, or endorsed by, the TortoiseGit project.**
 
-It has two parts, split the way TortoiseGit splits TortoiseShell and TortoiseGitProc:
-
-- `kortoisegitplugin`, a Dolphin version control plugin that shows each file's git status as an overlay and adds
-  the context menu entries. Each entry starts
-  `kortoisegitproc` as a separate process, so no dialog ever runs inside Dolphin.
-- `kortoisegitproc`, the application that runs every dialog, such as `kortoisegitproc --command log --path <path>`.
-  It can also be run from a terminal.
-
-Status: early. Dolphin shows status overlays. The commands are `add`, `commit`, `revert`, `pull`, `fetch`, `merge`,
-`switch`, `rebase` and `push` (TortoiseGit's Add, Commit, Revert, Pull, Fetch, Merge, Switch/Checkout, Rebase and
-Push dialogs, also in Dolphin's context menu, where Abort Merge, `merge --abort`, appears while a merge is in
-progress), `clone`, `repocreate` and `log`. `switch --rev <ref>` preselects a branch, tag or commit, and
-`rebase --upstream <ref>` an upstream (`--force` checks "Force Rebase"). Pull, fetch and push ask for passwords and
-host keys through ksshaskpass, or your own `SSH_ASKPASS`/`GIT_ASKPASS`, and never on a terminal.
-
 ## Install
 
-Build the latest `main` and install it for your user, into `~/.local` (no sudo):
+Build the latest `main` and install it for your user, into `~/.local` (no sudo). Run it again to upgrade:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/xwize/KortoiseGit/main/scripts/install.sh | bash
@@ -40,13 +25,55 @@ To uninstall, removing everything the install added and KortoiseGit's settings:
 curl -fsSL https://raw.githubusercontent.com/xwize/KortoiseGit/main/scripts/uninstall.sh | bash
 ```
 
-The install needs the build dependencies below, apart from `clang`. It installs no packages itself: if any are missing, it prints the
-`pacman` command that installs them and stops. Running it again upgrades to the latest `main`.
+The install adds no packages itself: if a build dependency is missing, it says so and stops, and on Arch it prints the
+`pacman` command to run. When it finishes, log out and log in again, then in Dolphin open Configure Dolphin > Interface
+> Version Control, tick KortoiseGit and untick Git.
 
-When it finishes, log out and log in again, then in Dolphin open Configure Dolphin > Interface > Version Control, tick
-KortoiseGit and untick Git.
+![KortoiseGit's log dialog showing a commit graph with coloured branch lanes, next to Dolphin's context menu with the Git submenu open](screenshot.png)
 
-## Building on Arch Linux
+## What it does
+
+- **Status overlays in Dolphin**, showing each file's git status
+- **Context menu in Dolphin**, laid out like TortoiseGit's, with most entries in a "Git" submenu
+- **Log:** commit graph, message and changed files for each commit
+- **Commit** with a checkable file list and Amend Last Commit
+- **Add** and **Revert**
+- **Diff** and **Diff with previous version**, through `git difftool`
+- **Pull, Fetch and Push**, asking for passwords and host keys through ksshaskpass
+- **Switch/Checkout** and **Create Branch**
+- **Merge**, with Abort Merge while a merge is in progress
+- **Rebase**, with pick, squash, edit and skip for each commit
+- **Browse References**, to filter and delete branches and tags
+- **Clone** and **Create repository**
+
+## Licence
+
+GPL-2.0-or-later; see [LICENSES/](LICENSES/). Files ported from TortoiseGit keep its copyright lines and say which
+file they come from.
+
+The commit graph's lane code, `src/proc/lanes.hpp` and `lanes.cpp`, comes from TortoiseGit's `lanes.cpp`, which took it
+from [QGit](https://github.com/tibirna/qgit) (Marco Costalba). Those two files are GPL-2.0-only, which makes the
+combined program GPL-2.0-only.
+
+The log list's action icons in `src/proc/icons/` are TortoiseGit's (`src/Resources/action*.ico`, converted to PNG),
+derived from the [TortoiseSVN](https://tortoisesvn.net/) project's icons. TortoiseGit offers them under the GPL or the
+TortoiseSVN Icon License (see `src/proc/icons/license.txt`); KortoiseGit uses them under the GPL. They are modified:
+`scripts/recolour-icons.sh` recolours them to pastel shades from the unmodified originals kept in
+`src/proc/icons/original/`.
+
+## Developer
+
+### Architecture
+
+KortoiseGit has two parts, split the way TortoiseGit splits TortoiseShell and TortoiseGitProc:
+
+- `kortoisegitplugin`, a Dolphin version control plugin that shows each file's git status as an overlay and adds the
+  context menu entries. Each entry starts `kortoisegitproc` as a separate process, so no dialog ever runs inside
+  Dolphin.
+- `kortoisegitproc`, the application that runs every dialog, such as `kortoisegitproc --command log --path <path>`.
+  It can also be run from a terminal.
+
+### Building on Arch Linux
 
 ```sh
 sudo pacman -S --needed base-devel cmake ninja extra-cmake-modules clang \
@@ -71,7 +98,7 @@ Configuring also installs a git pre-commit hook that checks formatting; run `git
 
 Never install into `/usr`: pacman owns it.
 
-## Running from the build tree
+### Running from the build tree
 
 ```sh
 build/gcc-debug/bin/kortoisegitproc --command log --path ~/src/some-repo
@@ -91,24 +118,7 @@ in the build tree, so nothing needs installing.
 **Enable either KortoiseGit or Dolphin's own Git plugin, not both.** In Configure Dolphin, tick KortoiseGit and untick
 Git in the list of version control plugins. Both plugins claim `.git` folders, and Dolphin uses only one.
 
-## CLion
+### CLion
 
-Open the project folder and enable the presets in Settings > Build, Execution, Deployment > CMake. To run or debug the
-app, use the `kortoisegitproc` target with program arguments `--command log --path <repo>`. To debug the plugin, add a
-run configuration that starts `/usr/bin/dolphin` with the environment variable
-`QT_PLUGIN_PATH=<project>/build/<preset>/bin`, as `scripts/dolphin-dev.sh` does.
-
-## Licence
-
-GPL-2.0-or-later; see [LICENSES/](LICENSES/). Files ported from TortoiseGit keep its copyright lines and say which
-file they come from.
-
-The commit graph's lane code, `src/proc/lanes.hpp` and `lanes.cpp`, comes from TortoiseGit's `lanes.cpp`, which it
-took from [QGit](https://github.com/tibirna/qgit) (Marco Costalba). Those two files are GPL-2.0-only, which makes the
-combined program GPL-2.0-only.
-
-The log list's action icons in `src/proc/icons/` are TortoiseGit's (`src/Resources/action*.ico`, converted to PNG),
-derived from the [TortoiseSVN](https://tortoisesvn.net/) project's icons. TortoiseGit offers them under the GPL or
-the TortoiseSVN Icon License (see `src/proc/icons/license.txt`); KortoiseGit uses them under the GPL. They are
-modified: `scripts/recolour-icons.sh` recolours them to pastel shades from the unmodified originals kept in
-`src/proc/icons/original/`.
+Open the project folder and enable the presets in Settings > Build, Execution, Deployment > CMake. To debug the plugin,
+run `/usr/bin/dolphin` with `QT_PLUGIN_PATH=<project>/build/<preset>/bin`, as `scripts/dolphin-dev.sh` does.
