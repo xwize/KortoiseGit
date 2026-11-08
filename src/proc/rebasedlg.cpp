@@ -90,21 +90,21 @@ QStringList splitAllTexts()
 }
 
 /**
- * Ported from CHistoryCombo::AddString: puts a text at the top of a combo box, once, and selects it.
+ * Ported from CHistoryCombo::AddString: appends an entry unless it is there already, and selects it.
  * @param combo The combo box.
- * @param text The text.
+ * @param text The entry; nothing happens if it is empty.
  */
 void addString(QComboBox *combo, const QString& text)
 {
     if (text.isEmpty()) {
         return;
     }
-    const int existing = combo->findText(text, Qt::MatchExactly | Qt::MatchCaseSensitive);
-    if (existing >= 0) {
-        combo->removeItem(existing);
+    int index = combo->findText(text, Qt::MatchExactly | Qt::MatchCaseSensitive);
+    if (index < 0) {
+        combo->addItem(text);
+        index = combo->count() - 1;
     }
-    combo->insertItem(0, text);
-    combo->setCurrentIndex(0);
+    combo->setCurrentIndex(index);
 }
 
 } // namespace
@@ -340,6 +340,11 @@ QComboBox *RebaseDlg::branchCombo() const
 QComboBox *RebaseDlg::upstreamCombo() const
 {
     return m_upstreamCtrl;
+}
+
+QToolButton *RebaseDlg::reverseButton() const
+{
+    return m_reverseButton;
 }
 
 QCheckBox *RebaseDlg::forceCheck() const
