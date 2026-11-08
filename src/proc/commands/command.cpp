@@ -14,12 +14,19 @@
 #include "commands/clonecommand.hpp"
 #include "commands/commitcommand.hpp"
 #include "commands/createrepositorycommand.hpp"
+#include "commands/fetchcommand.hpp"
 #include "commands/logcommand.hpp"
+#include "commands/pullcommand.hpp"
 #include "commands/pushcommand.hpp"
 #include "commands/refbrowsecommand.hpp"
 #include "commands/revertcommand.hpp"
 
+#include "git/git.hpp"
+#include "utils/runtimeerror.hpp"
+
 #include <KLocalizedString>
+
+#include <QFileInfo>
 
 #include <array>
 #include <utility>
@@ -45,7 +52,9 @@ constexpr std::array commands{
     CommandEntry{.name = u"add", .create = &create<kgt::AddCommand>},
     CommandEntry{.name = u"clone", .create = &create<kgt::CloneCommand>},
     CommandEntry{.name = u"commit", .create = &create<kgt::CommitCommand>},
+    CommandEntry{.name = u"fetch", .create = &create<kgt::FetchCommand>},
     CommandEntry{.name = u"log", .create = &create<kgt::LogCommand>},
+    CommandEntry{.name = u"pull", .create = &create<kgt::PullCommand>},
     CommandEntry{.name = u"push", .create = &create<kgt::PushCommand>},
     CommandEntry{.name = u"refbrowse", .create = &create<kgt::RefBrowseCommand>},
     CommandEntry{.name = u"repocreate", .create = &create<kgt::CreateRepositoryCommand>},
@@ -80,6 +89,19 @@ void Command::setPaths(const QStringList& paths)
 const QStringList& Command::paths() const
 {
     return m_paths;
+}
+
+QString Command::repositoryRoot(const QString& path)
+{
+    try {
+        return Git::workingTreeRoot(path);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        const QFileInfo info(path);
+        return info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+    }
 }
 
 Result<std::unique_ptr<Command>> CommandServer::command(const QString& name)

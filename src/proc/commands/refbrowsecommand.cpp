@@ -8,33 +8,6 @@
 
 #include "browserefsdlg.hpp"
 
-#include "git/git.hpp"
-#include "utils/runtimeerror.hpp"
-
-#include <QFileInfo>
-
-namespace
-{
-
-/**
- * @param path The path given on the command line.
- * @returns The working tree root holding it, or, for a bare repository, which has none, the path itself.
- */
-QString repositoryRoot(const QString& path)
-{
-    try {
-        return kgt::Git::workingTreeRoot(path);
-    } catch (const kgt::RuntimeError& e) {
-        if (e.error().category != kgt::ErrorCategory::Git) {
-            throw;
-        }
-        const QFileInfo info(path);
-        return info.isDir() ? info.absoluteFilePath() : info.absolutePath();
-    }
-}
-
-} // namespace
-
 namespace kgt
 {
 

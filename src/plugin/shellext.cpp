@@ -163,6 +163,8 @@ struct MenuState {
     bool normal = false; // ITEMIS_NORMAL: versioned and unchanged
     bool added = false; // ITEMIS_ADDED
     bool deleted = false; // ITEMIS_DELETED
+    bool bisect = false; // ITEMIS_BISECT: a bisect is running
+    bool mergeActive = false; // ITEMIS_MERGEACTIVE: a merge awaits its commit
 };
 
 /**
@@ -190,6 +192,10 @@ MenuState menuState(const QStringList& paths)
         state.inVersionedFolder = true;
         state.folderInGit = isDir;
         state.wcRoot = isDir && first == topDir;
+        // CTGitPath::IsBisectActive and IsMergeActive
+        const QDir adminDir(GitAdminDir::worktreeAdminDirPath(first));
+        state.bisect = adminDir.exists(QStringLiteral("BISECT_START"));
+        state.mergeActive = adminDir.exists(QStringLiteral("MERGE_HEAD"));
     }
     if (status == WcStatus::Unversioned || status == WcStatus::Ignored || status == WcStatus::None) {
         state.inGit = false;
@@ -216,6 +222,8 @@ MenuState menuState(const QStringList& paths)
  */
 struct MenuEntries {
     bool clone = false;
+    bool pull = false;
+    bool fetch = false;
     bool push = false;
     bool commit = false;
     bool log = false;
@@ -238,6 +246,8 @@ MenuEntries menuEntries(const MenuState& state)
     const bool ignoredFolder = state.folder && state.ignored;
     return {
         .clone = outsideRepository || ignoredFolder,
+        .pull = ((state.folderInGit && state.onlyOne) || state.wcRoot) && !state.bisect && !state.mergeActive,
+        .fetch = (state.folderInGit && state.onlyOne) || state.bareRepo || state.wcRoot,
         // MenuInfo also offers Push on a bare repository, which our PushCommand can't push from yet
         .push = (state.folderInGit && state.onlyOne) || state.wcRoot,
         .commit = state.inGit || state.folderInGit,
@@ -262,6 +272,8 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_showLogAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"), this))
     , m_revertAction(new QAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Re&vert..."), this))
     , m_addAction(new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("&Add..."), this))
+    , m_pullAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-pull")), i18n("&Pull..."), this))
+    , m_fetchAction(new QAction(QIcon::fromTheme(QStringLiteral("download")), i18n("F&etch..."), this))
     , m_pushAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-push")), i18n("Pus&h..."), this))
     , m_cloneAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-download")), i18n("Git Clone..."), this))
     , m_refBrowseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Browse References"), this))
@@ -280,6 +292,14 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_cloneAction->setToolTip(i18n("Clone a repository"));
     connect(m_cloneAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("clone"), m_cloneAction);
+    });
+    m_pullAction->setToolTip(i18n("Pull (fetch and merge) commits from a remote branch."));
+    connect(m_pullAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("pull"), m_pullAction);
+    });
+    m_fetchAction->setToolTip(i18n("Fetch commits from a remote repository."));
+    connect(m_fetchAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("fetch"), m_fetchAction);
     });
     m_pushAction->setToolTip(i18n("Push commits to a remote repository."));
     connect(m_pushAction, &QAction::triggered, this, [this] {
@@ -383,6 +403,8 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
         }
     };
     add(entries.clone, m_cloneAction);
+    add(entries.pull, m_pullAction);
+    add(entries.fetch, m_fetchAction);
     add(entries.push, m_pushAction);
     if (entries.commit) {
         m_commitAction->setText(commitMenuText(paths.constFirst()));

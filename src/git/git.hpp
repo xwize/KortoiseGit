@@ -72,6 +72,13 @@ public:
      */
     [[nodiscard]] static QString stripRefName(const QString& ref);
 
+    /**
+     * Ported from CGit::HasWorkingTreeConflicts: whether the index holds unmerged entries, with git ls-files -u.
+     * @returns True if a file is in conflict.
+     * @throws RuntimeError (category Git) if git fails.
+     */
+    [[nodiscard]] bool hasWorkingTreeConflicts() const;
+
 private:
     QString m_workingDirectory;
 };

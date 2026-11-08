@@ -14,6 +14,8 @@
 #include <QString>
 #include <QStringList>
 
+class QWidget;
+
 namespace kgt
 {
 
@@ -48,6 +50,15 @@ public:
      * @returns Whether it started.
      */
     static bool runTortoiseGitProc(const QStringList& arguments);
+
+    /**
+     * Ported from CAppUtils::IsTGitRebaseActive: whether a TortoiseGit rebase holds its lock (a tgitrebase.active
+     * directory in the admin directory). If it does, asks whether to remove it as stale.
+     * @param workingTree The working tree.
+     * @param parent Parent of the question.
+     * @returns True if the lock stays, so the caller must not go on.
+     */
+    [[nodiscard]] static bool isTGitRebaseActive(const QString& workingTree, QWidget *parent = nullptr);
 };
 
 } // namespace kgt

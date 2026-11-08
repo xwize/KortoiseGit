@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// Ported from TortoiseGit src/Git/Git.cpp (CGit::Run, CGit::StripRefName)
+// Ported from TortoiseGit src/Git/Git.cpp (CGit::Run, CGit::StripRefName, CGit::HasWorkingTreeConflicts)
 
 #include "git/git.hpp"
 
@@ -55,6 +55,11 @@ QString Git::stripRefName(const QString& ref)
         }
     }
     return ref;
+}
+
+bool Git::hasWorkingTreeConflicts() const
+{
+    return !run({QStringLiteral("ls-files"), QStringLiteral("-u")}, RunMode::ReadOnly).isEmpty();
 }
 
 } // namespace kgt

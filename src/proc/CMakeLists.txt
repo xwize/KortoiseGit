@@ -48,8 +48,12 @@ target_sources(kgtproc PRIVATE
     commands/createrepositorycommand.hpp
     commands/command.cpp
     commands/command.hpp
+    commands/fetchcommand.cpp
+    commands/fetchcommand.hpp
     commands/logcommand.cpp
     commands/logcommand.hpp
+    commands/pullcommand.cpp
+    commands/pullcommand.hpp
     commands/pushcommand.cpp
     commands/pushcommand.hpp
     commands/refbrowsecommand.cpp
@@ -73,6 +77,8 @@ target_sources(kgtproc PRIVATE
     progresscommands/revertprogresscommand.hpp
     progressdlg.cpp
     progressdlg.hpp
+    pullfetchdlg.cpp
+    pullfetchdlg.hpp
     pushdlg.cpp
     pushdlg.hpp
     refleaflistmodel.cpp
@@ -89,6 +95,7 @@ target_link_libraries(kgtproc PUBLIC
     kgtutils
     Qt6::Core
     Qt6::Widgets
+    KF6::ConfigCore
     KF6::CoreAddons
     KF6::I18n
     KF6::KIOGui
