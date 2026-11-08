@@ -83,6 +83,7 @@ struct GitRevLoglist {
     TGitPath::Actions actions; // GitRevLoglist::m_Action: what the commit did to its files; empty until known
     QList<GitRevFiles> files; // GitRevLoglist::m_Files: the changes against each parent, in parent order
     FilesState filesState = FilesState::NotLoaded; // Whether files and actions are known
+    bool isBoundary = false; // GitRevLoglist::IsBoundary(): marked '-' by git log --boundary, which isn't used yet
 
     bool operator==(const GitRevLoglist&) const = default;
 

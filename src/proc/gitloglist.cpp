@@ -16,10 +16,14 @@
 #include <QHeaderView>
 #include <QIcon>
 #include <QKeyEvent>
+#include <QLinearGradient>
 #include <QPainter>
+#include <QPen>
 #include <QStyledItemDelegate>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <tuple>
 #include <utility>
 
@@ -41,7 +45,10 @@ constexpr int labelPadding = 3; // Between a ref label's border and its text
 constexpr int labelSpacing = 3; // Between two ref labels, and between the last one and the subject
 constexpr int maxIconSize = 16; // TortoiseGit's small icons
 constexpr int iconSpacing = 2; // Between two action icons
-constexpr int graphColumnWidth = 40;
+constexpr int iconItemBorder = 5; // ICONITEMBORDER
+constexpr int graphColumnWidth = iconItemBorder + (maxIconSize * 4); // CGitLogListBase::InsertGitColumn's columnWidth
+constexpr int graphLineWidth = 2; // Graph\LogLineWidth's default
+constexpr int graphNodeSize = 10; // Graph\LogNodeSize's default
 constexpr int authorColumnWidth = 150;
 constexpr int dateColumnWidth = 140;
 constexpr int maxLabelBrightness = 128; // Labels with a lightness below this get white text
@@ -69,6 +76,292 @@ QColor labelColor(const GitRef& ref)
         return {224, 224, 224}; // CColors::OtherRef
     }
     return {224, 224, 224};
+}
+
+/**
+ * The lane colours, CColors::BranchLine1 to BranchLine8 (TortoiseGit's Colors.cpp defaults).
+ */
+constexpr std::array<QRgb, Lanes::colorsNum> branchLineColors{
+    qRgb(0, 0, 0),
+    qRgb(0xFF, 0, 0),
+    qRgb(0, 0xFF, 0),
+    qRgb(0, 0, 0xFF),
+    qRgb(128, 128, 128),
+    qRgb(128, 128, 0),
+    qRgb(0, 128, 128),
+    qRgb(128, 0, 128),
+};
+
+/**
+ * One lane of one row for paintGraphLane.
+ */
+struct GraphLane {
+    Lanes::LaneType type = Lanes::LaneType::Empty; // What to draw
+    int left = 0; // The lane's left edge
+    int right = 0; // The lane's right edge
+    int top = 0; // The row's top
+    int laneHeight = 0; // The row's height
+    QColor color; // The lane's colour
+    QColor activeColor; // The colour of the commit's lane, for the lines that reach it
+};
+
+/**
+ * @param lane A lane's index.
+ * @param isDark Whether the list has a dark background.
+ * @returns The lane's colour. TortoiseGit passes it through CTheme::GetThemeColor(color, true), which in its dark
+ *          theme inverts the HSL lightness and keeps it between 5% and 90%, so black lanes turn light. Here the
+ *          dark theme is a dark palette, such as Breeze Dark.
+ */
+QColor laneColor(std::size_t lane, bool isDark)
+{
+    const QColor color = QColor::fromRgb(branchLineColors.at(lane % Lanes::colorsNum));
+    if (!isDark) {
+        return color;
+    }
+    constexpr float minLightness = 0.05F;
+    constexpr float maxLightness = 0.90F;
+    float hue = 0;
+    float saturation = 0;
+    float lightness = 0;
+    color.getHslF(&hue, &saturation, &lightness);
+    return QColor::fromHslF(hue, saturation, std::clamp(1.0F - lightness, minLightness, maxLightness));
+}
+
+/**
+ * Draws the curve that joins a lane to the commit's horizontal line (paintGraphLane's arcs). TortoiseGit's GDI+
+ * angles run clockwise, Qt's anticlockwise, so they are negated.
+ * @param painter Draws.
+ * @param lane The lane.
+ */
+void paintLaneArc(QPainter *painter, const GraphLane& lane)
+{
+    using LaneType = Lanes::LaneType;
+    const int half = lane.laneHeight / 2;
+    const int mid = (lane.left + lane.right) / 2;
+    const int width = lane.right - lane.left;
+    const int top = lane.top;
+    QLinearGradient gradient;
+    QRect arc;
+    int startAngle = 0;
+    switch (lane.type) {
+    case LaneType::Join:
+    case LaneType::JoinR:
+    case LaneType::Head:
+    case LaneType::HeadR:
+        gradient = QLinearGradient(QPoint(lane.left - 2, half + top - 2), QPoint(mid, (2 * half) + top + 1));
+        gradient.setColorAt(0, lane.activeColor);
+        gradient.setColorAt(1, lane.color);
+        arc = QRect(lane.left - (width / 2) - 1, top + half - 1, width, lane.laneHeight);
+        startAngle = 90; // GDI+ 270 to 360: from the top to the right
+        break;
+    case LaneType::JoinL:
+        gradient = QLinearGradient(QPoint(mid, (2 * half) + top + 1), QPoint(lane.right + 1, half + top - 1));
+        gradient.setColorAt(0, lane.color);
+        gradient.setColorAt(1, lane.activeColor);
+        arc = QRect(lane.left + (width / 2), top + half - 1, width, lane.laneHeight);
+        startAngle = 180; // GDI+ 180 to 270: from the left to the top
+        break;
+    case LaneType::Tail:
+    case LaneType::TailR:
+        gradient = QLinearGradient(QPoint(lane.left - 2, half + top - 2), QPoint(mid, top - 1));
+        gradient.setColorAt(0, lane.activeColor);
+        gradient.setColorAt(1, lane.color);
+        arc = QRect(lane.left - (width / 2) - 1, top - half - 1, width, lane.laneHeight);
+        startAngle = 0; // GDI+ 0 to 90: from the right to the bottom
+        break;
+    default:
+        return;
+    }
+    constexpr int degree = 16; // Qt's arc angles are in 1/16 degrees
+    constexpr int quarter = 90;
+    painter->setPen(QPen(QBrush(gradient), graphLineWidth));
+    painter->setBrush(Qt::NoBrush);
+    painter->drawArc(arc, startAngle * degree, -quarter * degree);
+}
+
+/**
+ * Draws a lane's vertical line, in its own colour (paintGraphLane).
+ * @param painter Draws.
+ * @param lane The lane.
+ */
+void paintLaneVertical(QPainter *painter, const GraphLane& lane)
+{
+    using LaneType = Lanes::LaneType;
+    const int half = lane.laneHeight / 2;
+    const int mid = (lane.left + lane.right) / 2;
+    const QPoint center(mid, half + lane.top);
+    const QPoint above(mid, lane.top - 1); // P_90
+    const QPoint below(mid, (2 * half) + lane.top + 1); // P_270
+    painter->setPen(QPen(lane.color, graphLineWidth));
+    switch (lane.type) {
+    case LaneType::Active:
+    case LaneType::MergeFork:
+    case LaneType::MergeForkR:
+    case LaneType::MergeForkL:
+    case LaneType::NotActive:
+    case LaneType::Join:
+    case LaneType::JoinR:
+    case LaneType::JoinL:
+    case LaneType::Cross:
+        painter->drawLine(above, below);
+        break;
+    case LaneType::Branch:
+    case LaneType::HeadL:
+        painter->drawLine(center, below);
+        break;
+    case LaneType::Initial:
+    case LaneType::MergeForkLInitial:
+    case LaneType::Boundary:
+    case LaneType::BoundaryC:
+    case LaneType::BoundaryR:
+    case LaneType::BoundaryL:
+    case LaneType::TailL:
+        painter->drawLine(above, center);
+        break;
+    default:
+        break;
+    }
+}
+
+/**
+ * Draws the horizontal line that reaches the commit's node, in the active lane's colour (paintGraphLane).
+ * @param painter Draws.
+ * @param lane The lane.
+ */
+void paintLaneHorizontal(QPainter *painter, const GraphLane& lane)
+{
+    using LaneType = Lanes::LaneType;
+    const int y = (lane.laneHeight / 2) + lane.top;
+    const QPoint center((lane.left + lane.right) / 2, y);
+    const QPoint left(lane.left, y); // P_180
+    const QPoint right(lane.right, y); // P_0
+    painter->setPen(QPen(lane.activeColor, graphLineWidth));
+    switch (lane.type) {
+    case LaneType::MergeFork:
+    case LaneType::BoundaryC:
+    case LaneType::Join:
+    case LaneType::Head:
+    case LaneType::Tail:
+    case LaneType::Cross:
+    case LaneType::CrossEmpty:
+        painter->drawLine(left, right);
+        break;
+    case LaneType::MergeForkR:
+    case LaneType::BoundaryR:
+        painter->drawLine(left, center);
+        break;
+    case LaneType::MergeForkL:
+    case LaneType::MergeForkLInitial:
+    case LaneType::BoundaryL:
+    case LaneType::HeadL:
+    case LaneType::TailL:
+        painter->drawLine(center, right);
+        break;
+    default:
+        break;
+    }
+}
+
+/**
+ * Draws the commit's node: a circle, a square for a merge or fork, an outlined circle for a boundary commit
+ * (paintGraphLane's center symbol).
+ * @param painter Draws.
+ * @param lane The lane.
+ */
+void paintLaneNode(QPainter *painter, const GraphLane& lane)
+{
+    using LaneType = Lanes::LaneType;
+    const int half = lane.laneHeight / 2;
+    const int mid = (lane.left + lane.right) / 2;
+    const int radius = (lane.right - lane.left) * graphNodeSize / 30;
+    const int diameter = 2 * radius;
+    const QRect node(mid - radius, half - radius + lane.top, diameter, diameter); // R_CENTER
+    switch (lane.type) {
+    case LaneType::Active:
+    case LaneType::Initial:
+    case LaneType::Branch:
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(lane.color);
+        painter->drawEllipse(node);
+        break;
+    case LaneType::MergeFork:
+    case LaneType::MergeForkR:
+    case LaneType::MergeForkL:
+    case LaneType::MergeForkLInitial:
+    case LaneType::BoundaryC:
+    case LaneType::BoundaryR:
+    case LaneType::BoundaryL:
+        painter->fillRect(node, lane.color);
+        break;
+    case LaneType::Unapplied:
+        // TortoiseGit leaves out the row's top here, which only works for the first row
+        painter->fillRect(QRect(mid - radius, half - 1 + lane.top, diameter, 2), lane.color);
+        break;
+    case LaneType::Applied:
+        painter->fillRect(QRect(mid - radius, half - 1 + lane.top, diameter, 2), lane.color);
+        painter->fillRect(QRect(mid - 1, half - radius + lane.top, 2, diameter), lane.color);
+        break;
+    case LaneType::Boundary:
+        painter->setPen(QPen(lane.activeColor, graphLineWidth));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(node);
+        break;
+    default:
+        break;
+    }
+}
+
+/**
+ * CGitLogListBase::paintGraphLane: one lane of one row. Roll-up (m_RolledUp) isn't ported yet.
+ * @param painter Draws, antialiased.
+ * @param lane The lane.
+ */
+void paintGraphLane(QPainter *painter, const GraphLane& lane)
+{
+    paintLaneArc(painter, lane);
+    paintLaneVertical(painter, lane);
+    paintLaneHorizontal(painter, lane);
+    paintLaneNode(painter, lane);
+}
+
+/**
+ * CGitLogListBase::DrawGraph: a row's lanes, each 3/4 of the row height wide, until the cell is full.
+ * @param painter Draws.
+ * @param rect The cell.
+ * @param lanes The row's lanes.
+ * @param isDark Whether the list has a dark background.
+ */
+void drawGraph(QPainter *painter, const QRect& rect, const std::vector<Lanes::LaneType>& lanes, bool isDark)
+{
+    // The active lane is the first merge lane: the commit's node
+    const auto merge = std::ranges::find_if(lanes, &Lanes::isMerge);
+    const std::size_t activeLane = merge == lanes.end() ? 0 : static_cast<std::size_t>(merge - lanes.begin());
+
+    int laneRight = 0;
+    const int maxWidth = rect.width();
+    const int laneWidth = 3 * rect.height() / 4;
+    const QColor activeColor = laneColor(activeLane, isDark);
+
+    painter->setRenderHint(QPainter::Antialiasing);
+    painter->setClipRect(rect);
+    for (std::size_t i = 0; i < lanes.size() && laneRight < maxWidth; ++i) {
+        const int laneLeft = laneRight;
+        laneRight += laneWidth;
+        const Lanes::LaneType type = lanes.at(i);
+        if (type == Lanes::LaneType::Empty) {
+            continue;
+        }
+        paintGraphLane(painter,
+                       {
+                           .type = type,
+                           .left = laneLeft + rect.left(),
+                           .right = laneRight + rect.left(),
+                           .top = rect.top(),
+                           .laneHeight = rect.height(),
+                           .color = i == activeLane ? activeColor : laneColor(i, isDark),
+                           .activeColor = activeColor,
+                       });
+    }
 }
 
 /**
@@ -141,6 +434,10 @@ public:
     {
         const auto *model = qobject_cast<const GitLogListModel *>(index.model());
         const int column = index.column();
+        if (model && column == GitLogListModel::GraphColumn) {
+            paintGraph(painter, option, index, *model);
+            return;
+        }
         if (!model || (column != GitLogListModel::ActionsColumn && column != GitLogListModel::MessageColumn)) {
             QStyledItemDelegate::paint(painter, option, index);
             return;
@@ -168,6 +465,27 @@ public:
     }
 
 private:
+    /**
+     * Draws the Graph column as CGitLogListBase::OnNMCustomdrawLoglist does: the cell's background, then the
+     * graph. TortoiseGit leaves the graph out while a filter is active and hides the column when the log follows
+     * renames; this log has neither yet, so it always draws it.
+     * @param painter Draws.
+     * @param option The cell's style.
+     * @param index The cell.
+     * @param model The log.
+     */
+    void paintGraph(QPainter *painter, const QStyleOptionViewItem& option, const QModelIndex& index, const GitLogListModel& model) const
+    {
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        const QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
+        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+        const bool isDark = opt.palette.color(QPalette::Base).lightness() < opt.palette.color(QPalette::Text).lightness();
+        painter->save();
+        drawGraph(painter, opt.rect, model.lanes(index.row()), isDark);
+        painter->restore();
+    }
+
     /**
      * Draws the icons as CGitLogListBase::OnNMCustomdrawLoglist does: the fetching or error icon until the
      * commit's files are known, then one icon per action in a fixed slot, so each kind lines up down the column.
