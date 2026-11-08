@@ -10,6 +10,7 @@
 #include "utils/runtimeerror.hpp"
 
 #include <QByteArray>
+#include <QFileInfo>
 
 #include <utility>
 
@@ -132,20 +133,30 @@ GitFolderStatus::GitFolderStatus(const QString& prefix, const QList<GitStatusEnt
 
 GitFolderStatus GitFolderStatus::fetch(const QString& directory)
 {
-    const Git git(directory);
+    return fetch(Git(directory), QStringLiteral("."));
+}
+
+GitFolderStatus GitFolderStatus::fetchItem(const QString& path)
+{
+    const QFileInfo info(path);
+    return fetch(Git(info.absolutePath()), QStringLiteral(":(literal)") + info.fileName());
+}
+
+GitFolderStatus GitFolderStatus::fetch(const Git& git, const QString& pathspec)
+{
     // --show-toplevel fails inside .git, which therefore gets no overlays
     const QList<QByteArray> lines =
         git.run({QStringLiteral("rev-parse"), QStringLiteral("--show-toplevel"), QStringLiteral("--absolute-git-dir"), QStringLiteral("--show-prefix")},
                 RunMode::ReadOnly)
             .split('\n');
     if (lines.size() < 3) {
-        throw RuntimeError({.category = ErrorCategory::Parse, .message = QStringLiteral("Unexpected git rev-parse output in %1").arg(directory)});
+        throw RuntimeError({.category = ErrorCategory::Parse, .message = QStringLiteral("Unexpected git rev-parse output")});
     }
     const QString gitDir = QString::fromUtf8(lines.at(1));
     const QString prefix = QString::fromUtf8(lines.at(2));
 
-    // Only this folder and below: in a subfolder of a large repository, git doesn't scan the rest
-    const QStringList statusArguments = GitStatus::arguments(IgnoredFiles::Include) + QStringList{QStringLiteral("--"), QStringLiteral(".")};
+    // Only this folder (or item) and below: in a subfolder of a large repository, git doesn't scan the rest
+    const QStringList statusArguments = GitStatus::arguments(IgnoredFiles::Include) + QStringList{QStringLiteral("--"), pathspec};
     const QList<GitStatusEntry> entries = getOrThrow(GitStatus::parse(git.run(statusArguments, RunMode::ReadOnly)));
 
     GitFolderStatus status(prefix, entries, trackedChildren(git));

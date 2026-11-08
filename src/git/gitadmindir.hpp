@@ -32,6 +32,23 @@ public:
     [[nodiscard]] static QString worktreeAdminDirPath(const QString& path);
 
     /**
+     * Ported from GitAdminDir::HasAdminDir: walks up from @p path to the nearest .git, which must hold a valid
+     * repository (HEAD, config, objects/ and refs/heads/, read from the common directory for a linked worktree).
+     * A bare repository on the way stops the search, so the working tree around it doesn't claim its files.
+     * @param path A file or directory.
+     * @returns The top directory of the working tree holding @p path, or an empty string if it is in none, or
+     *          is .git or inside it.
+     */
+    [[nodiscard]] static QString projectTopDir(const QString& path);
+
+    /**
+     * Ported from GitAdminDir::IsAdminDirPath.
+     * @param path A path.
+     * @returns Whether it is a .git directory or lies inside one.
+     */
+    [[nodiscard]] static bool isAdminDirPath(const QString& path);
+
+    /**
      * Ported from GitAdminDir::IsBareRepo: whether a folder is a bare repository's top, by its files.
      * @param path A folder.
      * @returns True if it holds HEAD, config, objects/ and refs/heads/.

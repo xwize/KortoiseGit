@@ -35,6 +35,34 @@ private Q_SLOTS:
         QVERIFY(GitAdminDir::worktreeAdminDirPath(notARepo.path()).isEmpty());
     }
 
+    void findsProjectTopDir()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("dir/a.txt"), "a\n");
+        QCOMPARE(GitAdminDir::projectTopDir(repo.path()), repo.path());
+        QCOMPARE(GitAdminDir::projectTopDir(repo.filePath(QStringLiteral("dir"))), repo.path());
+        QCOMPARE(GitAdminDir::projectTopDir(repo.filePath(QStringLiteral("dir/a.txt"))), repo.path());
+
+        // Nothing for .git and what is in it
+        QVERIFY(GitAdminDir::projectTopDir(repo.filePath(QStringLiteral(".git"))).isEmpty());
+        QVERIFY(GitAdminDir::projectTopDir(repo.filePath(QStringLiteral(".git/config"))).isEmpty());
+        QVERIFY(GitAdminDir::isAdminDirPath(repo.filePath(QStringLiteral(".git"))));
+        QVERIFY(GitAdminDir::isAdminDirPath(repo.filePath(QStringLiteral(".git/refs"))));
+        QVERIFY(!GitAdminDir::isAdminDirPath(repo.filePath(QStringLiteral(".gitignore"))));
+
+        // A bare repository inside the working tree isn't part of it
+        const QString bare = repo.filePath(QStringLiteral("bare.git"));
+        repo.run({QStringLiteral("init"), QStringLiteral("--quiet"), QStringLiteral("--bare"), bare});
+        QVERIFY(GitAdminDir::projectTopDir(bare).isEmpty());
+        QVERIFY(GitAdminDir::projectTopDir(bare + QStringLiteral("/refs")).isEmpty());
+
+        // A .git that isn't a repository, or none at all
+        const QTemporaryDir other;
+        QVERIFY(GitAdminDir::projectTopDir(other.path()).isEmpty());
+        QVERIFY(QDir().mkpath(other.filePath(QStringLiteral(".git"))));
+        QVERIFY(GitAdminDir::projectTopDir(other.path()).isEmpty());
+    }
+
     void readsBranchAndDetachedHead()
     {
         const TestRepo repo;
@@ -65,6 +93,8 @@ private Q_SLOTS:
         const QString adminDir = GitAdminDir::worktreeAdminDirPath(QDir(worktree).filePath(QStringLiteral("a.txt")));
         QCOMPARE(QFileInfo(adminDir).canonicalFilePath(), QFileInfo(repo.filePath(QStringLiteral(".git/worktrees/wt"))).canonicalFilePath());
         QCOMPARE(GitAdminDir::currentBranchFromFile(adminDir), QStringLiteral("other"));
+        // Its admin directory has no objects of its own: they are found through commondir
+        QCOMPARE(GitAdminDir::projectTopDir(QDir(worktree).filePath(QStringLiteral("a.txt"))), worktree);
     }
 };
 
