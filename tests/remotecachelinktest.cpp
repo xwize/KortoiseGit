@@ -7,6 +7,7 @@
 #include "gitstatuscache.hpp"
 #include "shellext.hpp"
 #include "testrepo.hpp"
+#include "utils/buildconfig.hpp"
 
 #include <KFileItem>
 
@@ -183,6 +184,11 @@ private Q_SLOTS:
         QElapsedTimer timer;
         timer.start();
         repo.write(QStringLiteral("src/lib/foo.cpp"), "two\n");
+        if constexpr (!useStatusCache) {
+            // Compiled out, the plugin hears nothing from the cache, even with one running
+            QVERIFY(!refreshed.wait(1500));
+            return;
+        }
         QVERIFY(refreshed.wait(startTimeoutMs));
         QVERIFY2(timer.elapsed() < 1000, qPrintable(QString::number(timer.elapsed())));
 
