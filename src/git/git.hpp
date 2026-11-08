@@ -17,6 +17,7 @@
 #include <QStringList>
 
 #include <memory>
+#include <optional>
 
 namespace kgt
 {
@@ -90,6 +91,21 @@ public:
      * @throws RuntimeError (category Git) if the path is not inside a working tree.
      */
     [[nodiscard]] static QString workingTreeRoot(const QString& path);
+
+    /**
+     * @param path A path in a working tree or a bare repository.
+     * @returns The working tree's root holding it, or, for a bare repository, which has none, the path itself.
+     */
+    [[nodiscard]] static QString repositoryRoot(const QString& path);
+
+    /**
+     * Reads one field of git's -z style output.
+     * @param output The whole output.
+     * @param[in,out] pos Where the field starts; moved past the delimiter.
+     * @param delimiter What ends the field.
+     * @returns The field, or nothing if the delimiter is missing or the field is empty.
+     */
+    [[nodiscard]] static std::optional<QString> takeField(const QByteArray& output, qsizetype& pos, char delimiter);
 
     /**
      * Ported from CGit::StripRefName.

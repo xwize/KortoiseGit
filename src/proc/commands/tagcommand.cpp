@@ -23,7 +23,7 @@ TagCommand::TagCommand()
 
 bool TagCommand::execute()
 {
-    return AppUtils::createBranchTag(repositoryRoot(paths().constFirst()),
+    return AppUtils::createBranchTag(Git::repositoryRoot(paths().constFirst()),
                                      CreateBranchTagParams{
                                          .initialRefName = value(QStringLiteral("rev")),
                                          .name = value(QStringLiteral("name")),

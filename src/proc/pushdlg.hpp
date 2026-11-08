@@ -83,12 +83,6 @@ private:
     void updateOptionStates();
 
     /**
-     * @param name A configuration variable.
-     * @returns Its value, or an empty string if it is not set.
-     */
-    [[nodiscard]] QString configValue(const QString& name) const;
-
-    /**
      * @param name A remote branch name.
      * @returns Whether git accepts it as a branch name.
      */

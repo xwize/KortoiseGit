@@ -164,13 +164,18 @@ QByteArray GitCall::output() const
     return m_stdout;
 }
 
-QString GitCall::commandLine() const
+QString GitCall::formatCommandLine(const QStringList& arguments)
 {
     QStringList parts{QLatin1String(gitProgram)};
-    for (const QString& argument : m_process.arguments()) {
+    for (const QString& argument : arguments) {
         parts.append(quoted(argument));
     }
     return parts.join(QLatin1Char(' '));
+}
+
+QString GitCall::commandLine() const
+{
+    return formatCommandLine(m_process.arguments());
 }
 
 void GitCall::onProcessFinished()

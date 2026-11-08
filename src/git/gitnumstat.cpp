@@ -6,6 +6,8 @@
 
 #include "git/gitnumstat.hpp"
 
+#include "git/git.hpp"
+
 #include <QByteArrayView>
 
 #include <optional>
@@ -29,24 +31,6 @@ tl::unexpected<Error> badRecord(const QByteArray& output, qsizetype pos)
 }
 
 /**
- * Reads up to the next delimiter.
- * @param output The whole output.
- * @param[in,out] pos Where the field starts; moved past the delimiter.
- * @param delimiter What ends the field.
- * @returns The field, or nothing if the delimiter is missing or the field is empty.
- */
-std::optional<QString> takeField(const QByteArray& output, qsizetype& pos, char delimiter)
-{
-    const qsizetype end = output.indexOf(delimiter, pos);
-    if (end <= pos) {
-        return std::nullopt;
-    }
-    QString field = QString::fromUtf8(QByteArrayView(output).sliced(pos, end - pos));
-    pos = end + 1;
-    return field;
-}
-
-/**
  * Parses one record: "added\tremoved\tpath\0", or "added\tremoved\t\0source\0path\0" for a rename or copy.
  * @param output The whole output.
  * @param[in,out] pos Where the record starts; moved past it.
@@ -55,8 +39,8 @@ std::optional<QString> takeField(const QByteArray& output, qsizetype& pos, char 
 std::optional<NumStatEntry> takeRecord(const QByteArray& output, qsizetype& pos)
 {
     NumStatEntry entry;
-    std::optional<QString> added = takeField(output, pos, '\t');
-    std::optional<QString> removed = added ? takeField(output, pos, '\t') : std::nullopt;
+    std::optional<QString> added = Git::takeField(output, pos, '\t');
+    std::optional<QString> removed = added ? Git::takeField(output, pos, '\t') : std::nullopt;
     if (!removed || pos >= output.size()) {
         return std::nullopt;
     }
@@ -64,13 +48,13 @@ std::optional<NumStatEntry> takeRecord(const QByteArray& output, qsizetype& pos)
     entry.removed = std::move(*removed);
     if (output.at(pos) == '\0') {
         ++pos;
-        std::optional<QString> source = takeField(output, pos, '\0');
+        std::optional<QString> source = Git::takeField(output, pos, '\0');
         if (!source) {
             return std::nullopt;
         }
         entry.origPath = std::move(*source);
     }
-    std::optional<QString> path = takeField(output, pos, '\0');
+    std::optional<QString> path = Git::takeField(output, pos, '\0');
     if (!path) {
         return std::nullopt;
     }

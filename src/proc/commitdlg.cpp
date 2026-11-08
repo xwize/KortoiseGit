@@ -153,38 +153,6 @@ void planUnchecked(const GitStatusListEntry& entry, IndexTasks& tasks)
 }
 
 /**
- * @param path A path given to the dialog.
- * @returns It with symbolic links in its directory resolved, as git reports the working tree root.
- */
-QString resolvedPath(const QString& path)
-{
-    const QFileInfo info(path);
-    const QString dir = QFileInfo(info.absolutePath()).canonicalFilePath();
-    return dir.isEmpty() ? info.absoluteFilePath() : QDir(dir).filePath(info.fileName());
-}
-
-/**
- * @param root The working tree root.
- * @param paths The paths given to the dialog.
- * @returns The paths relative to the root, or an empty list when one of them is the root (the whole tree).
- */
-QStringList relativePaths(const QString& root, const QStringList& paths)
-{
-    QStringList relative;
-    for (const QString& path : paths) {
-        QString rel = QDir(root).relativeFilePath(resolvedPath(path));
-        if (rel.isEmpty() || rel == QLatin1String(".")) {
-            return {};
-        }
-        if (rel.endsWith(QLatin1Char('/'))) {
-            rel.chop(1);
-        }
-        relative.append(rel);
-    }
-    return relative;
-}
-
-/**
  * @param root The working tree root.
  * @returns The current branch, as CGit::GetCurrentBranch shows it: "(no branch)" when HEAD is detached.
  */
@@ -265,7 +233,7 @@ CommitDlg::CommitDlg(const QStringList& paths, QWidget *parent)
     setWindowTitle(i18nc("@title:window %1 is a path", "%1 - Commit", titlePath));
 
     m_fileList->setWorkingTree(m_workingTree);
-    m_fileList->setPathFilter(relativePaths(m_workingTree, paths));
+    m_fileList->setPathFilter(TGitPath::relativePaths(m_workingTree, paths));
     m_fileList->setIncludeStaged(true);
     onShowUnversionedToggled(m_showUnversioned->isChecked());
     refresh();

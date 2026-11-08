@@ -209,7 +209,8 @@ void PushDlg::refresh(const QString& selectLocalBranch)
     selectRemoteBranch(m_branchSource->currentText());
 
     // If the current branch isn't tracked yet, tracking it is the default
-    if (configValue(QStringLiteral("branch.%1.remote").arg(current)).isEmpty() && configValue(QStringLiteral("branch.%1.merge").arg(current)).isEmpty()) {
+    if (m_git.configValue(QStringLiteral("branch.%1.remote").arg(current)).isEmpty()
+        && m_git.configValue(QStringLiteral("branch.%1.merge").arg(current)).isEmpty()) {
         m_setUpstream->setChecked(true);
     }
     updateOptionStates();
@@ -222,17 +223,17 @@ void PushDlg::selectRemoteBranch(const QString& localBranch)
         return;
     }
     // CGit::GetRemotePushBranch
-    QString pushRemote = configValue(QStringLiteral("branch.%1.pushremote").arg(branch));
+    QString pushRemote = m_git.configValue(QStringLiteral("branch.%1.pushremote").arg(branch));
     if (pushRemote.isEmpty()) {
-        pushRemote = configValue(QStringLiteral("remote.pushdefault"));
+        pushRemote = m_git.configValue(QStringLiteral("remote.pushdefault"));
     }
     if (pushRemote.isEmpty()) {
-        pushRemote = configValue(QStringLiteral("branch.%1.remote").arg(branch));
+        pushRemote = m_git.configValue(QStringLiteral("branch.%1.remote").arg(branch));
     }
     // Not stripped, for gerrit's refs/for/..., as TortoiseGit's issue #1609
-    QString pushBranch = configValue(QStringLiteral("branch.%1.pushbranch").arg(branch));
+    QString pushBranch = m_git.configValue(QStringLiteral("branch.%1.pushbranch").arg(branch));
     if (pushBranch.isEmpty()) {
-        pushBranch = Git::stripRefName(configValue(QStringLiteral("branch.%1.merge").arg(branch)));
+        pushBranch = Git::stripRefName(m_git.configValue(QStringLiteral("branch.%1.merge").arg(branch)));
     }
 
     if (const int index = m_remote->findText(pushRemote); !pushRemote.isEmpty() && index >= 0) {
@@ -252,19 +253,6 @@ void PushDlg::updateOptionStates()
     // --force-with-lease and --tags don't go together
     m_tags->setEnabled(!m_forceWithLease->isChecked());
     m_forceWithLease->setEnabled(!m_tags->isChecked());
-}
-
-QString PushDlg::configValue(const QString& name) const
-{
-    try {
-        return QString::fromUtf8(m_git.run({QStringLiteral("config"), QStringLiteral("--get"), name}, RunMode::ReadOnly)).trimmed();
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        // Exit code 1: not set
-        return {};
-    }
 }
 
 bool PushDlg::isBranchNameValid(const QString& name) const

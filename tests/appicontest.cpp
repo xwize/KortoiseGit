@@ -23,6 +23,12 @@ private Q_SLOTS:
         QIcon::setThemeName(QStringLiteral("hicolor"));
     }
 
+    void initIconResourcesRegistersTheFile()
+    {
+        AppUtils::initIconResources();
+        QVERIFY(QFile::exists(QStringLiteral(":/kortoisegit/icons/kortoisegit-16.png")));
+    }
+
     // Running from build/bin: no theme has the icon, so the copy in icons.qrc is used
     void fallsBackToBundledIcon()
     {

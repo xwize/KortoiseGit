@@ -11,6 +11,9 @@
 
 #pragma once
 
+#include <KConfigGroup>
+
+#include <QByteArray>
 #include <QIcon>
 #include <QString>
 #include <QStringList>
@@ -21,6 +24,7 @@ namespace kgt
 {
 
 class Git;
+class GitCall;
 enum class ResetType;
 struct CreateBranchTagOptions;
 struct CreateBranchTagParams;
@@ -45,6 +49,23 @@ class AppUtils
 {
 public:
     AppUtils() = delete;
+
+    /**
+     * Registers icons.qrc, which a static library has to do itself.
+     */
+    static void initIconResources();
+
+    /**
+     * @returns Where TortoiseGit's top-level registry values (Software\\TortoiseGit\\...) are kept.
+     */
+    [[nodiscard]] static KConfigGroup generalSettings();
+
+    /**
+     * @param call A finished git call that lists branches or tags.
+     * @returns Its output, or nothing if git failed: TortoiseGit's loading threads ignore these lists' errors too.
+     * @throws RuntimeError for a failure other than git's.
+     */
+    [[nodiscard]] static QByteArray outputOrEmpty(const GitCall& call);
 
     /**
      * @returns The app icon: the installed hicolor theme's, or the copy bundled in icons.qrc when running from build/bin.

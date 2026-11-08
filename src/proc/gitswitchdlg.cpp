@@ -10,13 +10,13 @@
 
 #include "gitswitchdlg.hpp"
 
+#include "apputils.hpp"
 #include "chooseversion.hpp"
 
 #include <KConfigGroup>
 #include <KGuiItem>
 #include <KLocalizedString>
 #include <KMessageBox>
-#include <KSharedConfig>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -44,14 +44,6 @@ constexpr auto newBranchForCommitKey = "SwitchToCommitNewBranch";
 // CGit::GetShortHASHLength
 constexpr qsizetype shortHashLength = 8;
 constexpr KMessageBox::Options noNotify = KMessageBox::Options();
-
-/**
- * @returns Where TortoiseGit's top-level registry values (Software\TortoiseGit\...) are kept.
- */
-KConfigGroup settings()
-{
-    return KSharedConfig::openConfig()->group(QStringLiteral("General"));
-}
 
 } // namespace
 
@@ -95,7 +87,7 @@ GitSwitchDlg::GitSwitchDlg(Git git, const QString& initialRefName, QWidget *pare
     // The constructor's defaults
     m_track->setTristate(true);
     m_track->setCheckState(Qt::PartiallyChecked);
-    const KConfigGroup config = settings();
+    const KConfigGroup config = AppUtils::generalSettings();
     m_newBranchForTag = config.readEntry(newBranchForTagKey, true);
     m_newBranchForCommit = config.readEntry(newBranchForCommitKey, true);
 
@@ -172,7 +164,7 @@ void GitSwitchDlg::accept()
         }
     }
 
-    KConfigGroup config = settings();
+    KConfigGroup config = AppUtils::generalSettings();
     if (const ChooseVersion::Choice choice = m_chooseVersion->choice(); choice == ChooseVersion::Choice::Version) {
         m_newBranchForCommit = m_branch->isChecked();
         config.writeEntry(newBranchForCommitKey, m_newBranchForCommit);

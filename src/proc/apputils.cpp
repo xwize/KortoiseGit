@@ -11,6 +11,7 @@
 #include "createbranchtagdlg.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
+#include "git/gitcall.hpp"
 #include "gitswitchdlg.hpp"
 #include "kortoisegitproc_debug.hpp"
 #include "mergeabortdlg.hpp"
@@ -18,9 +19,11 @@
 #include "pushdlg.hpp"
 #include "utils/runtimeerror.hpp"
 
+#include <KConfigGroup>
 #include <KGuiItem>
 #include <KLocalizedString>
 #include <KMessageBox>
+#include <KSharedConfig>
 
 #include <QClipboard>
 #include <QCoreApplication>
@@ -35,7 +38,7 @@
 /**
  * Registers icons.qrc, which a static library has to do itself. Q_INIT_RESOURCE must be outside any namespace.
  */
-static void initIconResources()
+static void registerIconResources()
 {
     Q_INIT_RESOURCE(icons);
 }
@@ -43,9 +46,32 @@ static void initIconResources()
 namespace kgt
 {
 
+void AppUtils::initIconResources()
+{
+    registerIconResources();
+}
+
+KConfigGroup AppUtils::generalSettings()
+{
+    return KSharedConfig::openConfig()->group(QStringLiteral("General"));
+}
+
+QByteArray AppUtils::outputOrEmpty(const GitCall& call)
+{
+    try {
+        return call.output();
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        qCWarning(KGT_PROC) << "Loading the branches or tags failed:" << e.error().message;
+        return {};
+    }
+}
+
 QIcon AppUtils::appIcon()
 {
-    initIconResources();
+    registerIconResources();
     QIcon bundled;
     for (const int size : std::array{16, 22, 32, 48, 64, 128, 256}) {
         bundled.addFile(QStringLiteral(":/kortoisegit/icons/kortoisegit-%1.png").arg(size), QSize(size, size));

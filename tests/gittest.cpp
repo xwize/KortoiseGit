@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "git/git.hpp"
+#include "apputils.hpp"
+#include "git/gitcall.hpp"
+#include "git/tgitpath.hpp"
 #include "testrepo.hpp"
 #include "utils/runtimeerror.hpp"
 
@@ -12,6 +15,8 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <memory>
+#include <optional>
 #include <tuple>
 
 namespace
@@ -176,6 +181,48 @@ private:
         qputenv("PATH", path);
         QVERIFY(threw);
         QVERIFY(elapsed.elapsed() < 10000);
+    }
+
+    void repositoryRootFallsBackForABareRepository()
+    {
+        const QTemporaryDir bare;
+        QVERIFY(bare.isValid());
+        std::ignore = Git(bare.path()).run({QStringLiteral("init"), QStringLiteral("--bare")});
+        QCOMPARE(Git::repositoryRoot(bare.path()), bare.path());
+    }
+
+    void takesDelimitedFields()
+    {
+        const QByteArray output("one\ttwo\0\0", 9);
+        qsizetype pos = 0;
+        QCOMPARE(Git::takeField(output, pos, '\t'), std::optional(QStringLiteral("one")));
+        QCOMPARE(Git::takeField(output, pos, '\0'), std::optional(QStringLiteral("two")));
+        QCOMPARE(Git::takeField(output, pos, '\0'), std::nullopt); // An empty field
+        QCOMPARE(pos, 8);
+    }
+
+    void relativePathsResolveLinksAndTheRoot()
+    {
+        const QTemporaryDir dir;
+        const QString root = QFileInfo(dir.path()).canonicalFilePath();
+        const QString tree = root + QStringLiteral("/tree");
+        QVERIFY(QDir(root).mkpath(QStringLiteral("tree/sub")));
+        QVERIFY(QFile::link(tree, root + QStringLiteral("/link")));
+        QCOMPARE(TGitPath::relativePaths(tree, {root + QStringLiteral("/link/a.txt"), tree + QStringLiteral("/sub")}),
+                 (QStringList{QStringLiteral("a.txt"), QStringLiteral("sub")}));
+        QVERIFY(TGitPath::relativePaths(tree, {tree + QStringLiteral("/sub"), tree}).isEmpty());
+    }
+
+    void outputOrEmptyIgnoresGitFailing()
+    {
+        const auto outputOf = [this](const QString& argument) {
+            const std::unique_ptr<GitCall> call = Git(m_dir.path()).runAsync({argument}, RunMode::ReadOnly);
+            QSignalSpy finished(call.get(), &GitCall::finished);
+            finished.wait();
+            return AppUtils::outputOrEmpty(*call);
+        };
+        QVERIFY(outputOf(QStringLiteral("--version")).startsWith("git version"));
+        QVERIFY(outputOf(QStringLiteral("no-such-command")).isEmpty());
     }
 
     void knowsAnUnbornBranch()

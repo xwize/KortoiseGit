@@ -18,7 +18,7 @@ RefBrowseCommand::RefBrowseCommand()
 
 bool RefBrowseCommand::execute()
 {
-    BrowseRefsDlg dlg(repositoryRoot(paths().constFirst()));
+    BrowseRefsDlg dlg(Git::repositoryRoot(paths().constFirst()));
     dlg.exec();
     return true;
 }

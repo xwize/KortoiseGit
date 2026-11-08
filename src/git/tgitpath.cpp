@@ -7,6 +7,9 @@
 
 #include "git/tgitpath.hpp"
 
+#include <QDir>
+#include <QFileInfo>
+
 namespace kgt
 {
 
@@ -30,6 +33,29 @@ TGitPath::Actions TGitPath::parseStatus(char status)
     default:
         return {};
     }
+}
+
+QString TGitPath::resolvedPath(const QString& path)
+{
+    const QFileInfo info(path);
+    const QString dir = QFileInfo(info.absolutePath()).canonicalFilePath();
+    return dir.isEmpty() ? info.absoluteFilePath() : QDir(dir).filePath(info.fileName());
+}
+
+QStringList TGitPath::relativePaths(const QString& root, const QStringList& paths)
+{
+    QStringList relative;
+    for (const QString& path : paths) {
+        QString rel = QDir(root).relativeFilePath(resolvedPath(path));
+        if (rel.isEmpty() || rel == QLatin1String(".")) {
+            return {};
+        }
+        if (rel.endsWith(QLatin1Char('/'))) {
+            rel.chop(1);
+        }
+        relative.append(rel);
+    }
+    return relative;
 }
 
 } // namespace kgt

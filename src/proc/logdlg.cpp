@@ -7,6 +7,7 @@
 
 #include "logdlg.hpp"
 
+#include "apputils.hpp"
 #include "gitloglist.hpp"
 #include "gitstatuslistctrl.hpp"
 #include "logdlgfilter.hpp"
@@ -58,14 +59,6 @@ constexpr int fullColor = 255;
 constexpr int percent = 100;
 
 /**
- * @returns Where the values TortoiseGit keeps directly under its registry root are kept.
- */
-KConfigGroup generalSettings()
-{
-    return KSharedConfig::openConfig()->group(QStringLiteral("General"));
-}
-
-/**
  * @param name A per-repository value of TortoiseGit's LogDialog registry key, such as "ShowTags".
  * @returns Where it is kept; the keys are repository paths.
  */
@@ -102,56 +95,6 @@ bool isRelatedPath(const GitStatusListEntry& entry, const QString& matchPath)
     return matches(entry.path) || ((entry.actions & (TGitPath::Action::Replaced | TGitPath::Action::Copy)) && matches(entry.origPath));
 }
 
-/**
- * @param path A path given to the dialog.
- * @returns It with symbolic links in its directory resolved, as git reports the working tree root.
- */
-QString resolvedPath(const QString& path)
-{
-    const QFileInfo info(path);
-    const QString dir = QFileInfo(info.absolutePath()).canonicalFilePath();
-    return dir.isEmpty() ? info.absoluteFilePath() : QDir(dir).filePath(info.fileName());
-}
-
-/**
- * @param root The working tree root.
- * @param paths The paths given to the dialog.
- * @returns The paths relative to the root, or an empty list when one of them is the root (the whole history).
- */
-QStringList relativePaths(const QString& root, const QStringList& paths)
-{
-    QStringList relative;
-    for (const QString& path : paths) {
-        QString rel = QDir(root).relativeFilePath(resolvedPath(path));
-        if (rel.isEmpty() || rel == QLatin1String(".")) {
-            return {};
-        }
-        if (rel.endsWith(QLatin1Char('/'))) {
-            rel.chop(1);
-        }
-        relative.append(rel);
-    }
-    return relative;
-}
-
-/**
- * @param path The first path given to the dialog.
- * @returns The working tree root holding it, or, for a bare repository, which has none, the path itself.
- */
-QString repositoryRoot(const QString& path)
-{
-    try {
-        return Git::workingTreeRoot(path);
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        // LogCommand accepts a bare repository; git log runs in it without a path filter
-        const QFileInfo info(path);
-        return info.isDir() ? info.absoluteFilePath() : info.absolutePath();
-    }
-}
-
 } // namespace
 
 namespace kgt
@@ -161,9 +104,9 @@ LogDlg::LogDlg(const QStringList& paths, const QString& range, QWidget *parent)
     : QDialog(parent)
 {
     Q_ASSERT(!paths.isEmpty());
-    m_workingTree = repositoryRoot(paths.constFirst());
-    if (QFileInfo(resolvedPath(paths.constFirst())).absoluteFilePath().startsWith(m_workingTree + QLatin1Char('/'))) {
-        m_pathFilter = relativePaths(m_workingTree, paths);
+    m_workingTree = Git::repositoryRoot(paths.constFirst());
+    if (QFileInfo(TGitPath::resolvedPath(paths.constFirst())).absoluteFilePath().startsWith(m_workingTree + QLatin1Char('/'))) {
+        m_pathFilter = TGitPath::relativePaths(m_workingTree, paths);
     }
     for (const QString& path : std::as_const(m_pathFilter)) {
         const bool isDirectory = QFileInfo(QDir(m_workingTree).filePath(path)).isDir();
@@ -309,7 +252,7 @@ bool LogDlg::eventFilter(QObject *watched, QEvent *event)
 void LogDlg::loadSettings()
 {
     // CLogDlg's constructor
-    const KConfigGroup general = generalSettings();
+    const KConfigGroup general = AppUtils::generalSettings();
     m_selectedFilters = general.readEntry("SelectedLogFilters", static_cast<unsigned int>(LogFilterAll));
     m_filterWithRegex = general.readEntry("UseRegexFilter", false);
     m_filterCaseSensitively = general.readEntry("FilterCaseSensitively", false);
@@ -652,7 +595,7 @@ void LogDlg::onFilterIconClicked()
 void LogDlg::onFilterActionTriggered(unsigned int bit)
 {
     // OnClickedInfoIcon's handling of the selection
-    KConfigGroup general = generalSettings();
+    KConfigGroup general = AppUtils::generalSettings();
     switch (bit) {
     case LogFilterRegex:
         m_filterWithRegex = !m_filterWithRegex;

@@ -117,23 +117,6 @@ std::optional<GitRevLoglist> makeRev(const std::array<QByteArrayView, fieldCount
 }
 
 /**
- * Reads up to the next NUL.
- * @param output The whole output.
- * @param[in,out] pos Where the field starts; moved past the NUL.
- * @returns The field, or nothing if the NUL is missing or the field is empty.
- */
-std::optional<QString> takeNulField(const QByteArray& output, qsizetype& pos)
-{
-    const qsizetype end = output.indexOf('\0', pos);
-    if (end <= pos) {
-        return std::nullopt;
-    }
-    QString field = QString::fromUtf8(QByteArrayView(output).sliced(pos, end - pos));
-    pos = end + 1;
-    return field;
-}
-
-/**
  * Parses one raw diff record: ":srcmode dstmode srcsha dstsha status\0path\0", with the source path first for a
  * rename or copy (CTGitPathList::ParserFromLog's raw branch).
  * @param output The whole output.
@@ -159,14 +142,14 @@ std::optional<GitStatusEntry> takeRawRecord(const QByteArray& output, qsizetype&
     if (!entry.actions) {
         return std::nullopt;
     }
-    std::optional<QString> path = takeNulField(output, pos);
+    std::optional<QString> path = Git::takeField(output, pos, '\0');
     if (!path) {
         return std::nullopt;
     }
     if (status == 'R' || status == 'C') {
         entry.kind = GitStatusKind::RenamedOrCopied;
         entry.origPath = std::move(*path);
-        path = takeNulField(output, pos);
+        path = Git::takeField(output, pos, '\0');
         if (!path) {
             return std::nullopt;
         }

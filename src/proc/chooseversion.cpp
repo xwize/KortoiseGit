@@ -10,11 +10,10 @@
 
 #include "chooseversion.hpp"
 
+#include "apputils.hpp"
 #include "browserefsdlg.hpp"
 #include "git/gitcall.hpp"
-#include "kortoisegitproc_debug.hpp"
 #include "logdlg.hpp"
-#include "utils/runtimeerror.hpp"
 
 #include <KLocalizedString>
 
@@ -36,23 +35,6 @@ constexpr auto headsPrefix = "heads/"_L1;
 constexpr auto remotesPrefix = "remotes/"_L1;
 constexpr auto tagsPrefix = "tags/"_L1;
 constexpr auto peeledSuffix = "^{}"_L1;
-
-/**
- * @param call A finished git call.
- * @returns Its output, or nothing if git failed: TortoiseGit's LoadingThread ignores the lists' errors too.
- */
-QByteArray outputOrEmpty(const GitCall& call)
-{
-    try {
-        return call.output();
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        qCWarning(KGT_PROC) << "Loading the branches or tags failed:" << e.error().message;
-        return {};
-    }
-}
 
 /**
  * Ported from CHistoryCombo::SetList.
@@ -337,8 +319,8 @@ void ChooseVersion::onLoadFinished()
     branchCall->deleteLater();
     tagCall->deleteLater();
 
-    const BranchList branches = Git::parseBranchList(outputOrEmpty(*branchCall), BranchAllF, m_skipCurrentBranch, !m_git.derefFetchHead().isEmpty());
-    updateGui(branches, Git::parseTagList(outputOrEmpty(*tagCall)));
+    const BranchList branches = Git::parseBranchList(AppUtils::outputOrEmpty(*branchCall), BranchAllF, m_skipCurrentBranch, !m_git.derefFetchHead().isEmpty());
+    updateGui(branches, Git::parseTagList(AppUtils::outputOrEmpty(*tagCall)));
 }
 
 void ChooseVersion::updateGui(const BranchList& branches, const QStringList& tags)

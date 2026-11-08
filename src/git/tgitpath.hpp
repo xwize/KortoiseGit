@@ -5,20 +5,22 @@
 
 /**
  * @file
- * Ported from TortoiseGit src/Git/TGitPath.h (CTGitPath): so far only the per-file action flags (LOGACTIONS_*)
- * that the status list, the commit dialog and the log's file list share. The path class itself follows when a
- * feature needs it.
+ * Ported from TortoiseGit src/Git/TGitPath.h (CTGitPath): so far the per-file action flags (LOGACTIONS_*) that the
+ * status list, the commit dialog and the log's file list share, and the path handling the dialogs share. The path
+ * class itself follows when a feature needs it.
  */
 
 #pragma once
 
 #include <QFlags>
+#include <QString>
+#include <QStringList>
 
 namespace kgt
 {
 
 /**
- * A path in a working tree and what happened to it. For now only its action flags.
+ * A path in a working tree and what happened to it. For now only its action flags and static path helpers.
  */
 class TGitPath
 {
@@ -48,6 +50,19 @@ public:
      * @returns The matching action, or no flags for any other character (such as '.' for unchanged).
      */
     [[nodiscard]] static Actions parseStatus(char status);
+
+    /**
+     * @param path A path given to a dialog.
+     * @returns It with symbolic links in its directory resolved, as git reports the working tree root.
+     */
+    [[nodiscard]] static QString resolvedPath(const QString& path);
+
+    /**
+     * @param root The working tree root.
+     * @param paths The paths given to a dialog.
+     * @returns The paths relative to the root, or an empty list when one of them is the root (the whole tree).
+     */
+    [[nodiscard]] static QStringList relativePaths(const QString& root, const QStringList& paths);
 };
 
 } // namespace kgt

@@ -21,8 +21,6 @@
 #include "gitloglist.hpp"
 #include "gitloglistmodel.hpp"
 #include "gitstatuslistctrl.hpp"
-#include "kortoisegitproc_debug.hpp"
-#include "utils/runtimeerror.hpp"
 
 #include <KLocalizedString>
 
@@ -107,23 +105,6 @@ void addString(QComboBox *combo, const QString& text)
     }
     combo->insertItem(0, text);
     combo->setCurrentIndex(0);
-}
-
-/**
- * @param call A finished git call.
- * @returns Its output, or nothing if git failed: TortoiseGit ignores errors of the branch lists.
- */
-QByteArray outputOrEmpty(const GitCall& call)
-{
-    try {
-        return call.output();
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        qCWarning(KGT_PROC) << "Loading the branches or tags failed:" << e.error().message;
-        return {};
-    }
 }
 
 } // namespace
@@ -431,7 +412,7 @@ void RebaseDlg::onBranchesLoaded()
     GitCall *tagCall = m_tagCall.release();
     branchCall->deleteLater();
     tagCall->deleteLater();
-    const QByteArray branchOutput = outputOrEmpty(*branchCall);
+    const QByteArray branchOutput = AppUtils::outputOrEmpty(*branchCall);
 
     // LoadBranchInfo
     {
@@ -450,7 +431,7 @@ void RebaseDlg::onBranchesLoaded()
 
         const BranchList upstreams = Git::parseBranchList(branchOutput, BranchAllF, false, !m_git.derefFetchHead().isEmpty());
         m_upstreamCtrl->clear();
-        m_upstreamCtrl->addItems(upstreams.branches + Git::parseTagList(outputOrEmpty(*tagCall)));
+        m_upstreamCtrl->addItems(upstreams.branches + Git::parseTagList(AppUtils::outputOrEmpty(*tagCall)));
         m_upstreamCtrl->setCurrentIndex(-1);
         if (!m_options.upstream.isEmpty()) {
             addString(m_upstreamCtrl, m_options.upstream);

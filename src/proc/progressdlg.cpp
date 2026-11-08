@@ -34,7 +34,6 @@
 #include <signal.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <chrono>
 #include <utility>
 
@@ -49,18 +48,6 @@ constexpr auto refreshInterval = 125ms;
 constexpr qsizetype sizeLimit = qsizetype{2} * 1024 * 1024;
 // How long Abort waits for git to end after asking it to, before killing it outright
 constexpr int terminateWaitMs = 5000;
-
-/**
- * @param argument One argument.
- * @returns It, quoted if it is empty or holds whitespace, for showing the command line.
- */
-QString quoted(const QString& argument)
-{
-    const bool needsQuotes = argument.isEmpty() || std::any_of(argument.cbegin(), argument.cend(), [](QChar character) {
-                                 return character.isSpace();
-                             });
-    return needsQuotes ? QLatin1Char('"') + argument + QLatin1Char('"') : argument;
-}
 
 /**
  * Ported from CProgressDlg::ClearESC: removes the ANSI escape sequences git may write (colours, erase line).
@@ -213,11 +200,7 @@ void ProgressDlg::runNext()
     const QStringList arguments = m_gitCmdList.at(m_nextCmd);
 
     // TortoiseGit's m_bShowCommand, on by default: the command line goes into the log first
-    QStringList shown{QStringLiteral("git")};
-    for (const QString& argument : arguments) {
-        shown.append(quoted(argument));
-    }
-    m_parser.appendChunk(((m_nextCmd > 0 ? QStringLiteral("\n") : QString()) + shown.join(QLatin1Char(' ')) + QLatin1Char('\n')).toUtf8());
+    m_parser.appendChunk(((m_nextCmd > 0 ? QStringLiteral("\n") : QString()) + GitCall::formatCommandLine(arguments) + QLatin1Char('\n')).toUtf8());
     ++m_nextCmd;
 
     m_process = std::make_unique<QProcess>();

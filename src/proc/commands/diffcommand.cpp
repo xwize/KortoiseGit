@@ -136,7 +136,7 @@ DiffInvocation DiffCommand::invocation(const QString& path, const QString& path2
     }
     if (!startRev.isEmpty() && !endRev.isEmpty()) {
         // Two files of one repository, each at its revision
-        const QString root = repositoryRoot(path);
+        const QString root = Git::repositoryRoot(path);
         if (path2.startsWith(root + QLatin1Char('/'))) {
             return {.workingDirectory = root, .arguments = GitDiff::diffArguments(gitPath(path2), gitPath(path), endRev, startRev)};
         }
