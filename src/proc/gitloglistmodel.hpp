@@ -45,6 +45,19 @@ public:
     };
 
     /**
+     * Which kinds of ref get a label (CGitLogListBase::m_ShowRefMask), with TortoiseGit's LOGLIST_SHOW* values.
+     */
+    enum RefMask : unsigned int { // NOLINT(cppcoreguidelines-use-enum-class): Combined as bit flags, as in TortoiseGit
+        ShowLocalBranches = 0x0001, // LOGLIST_SHOWLOCALBRANCHES
+        ShowRemoteBranches = 0x0002, // LOGLIST_SHOWREMOTEBRANCHES
+        ShowTags = 0x0004, // LOGLIST_SHOWTAGS
+        ShowStash = 0x0008, // LOGLIST_SHOWSTASH
+        ShowBisect = 0x0010, // LOGLIST_SHOWBISECT
+        ShowOtherRefs = 0x0020, // LOGLIST_SHOWOTHERREFS
+        ShowAllRefs = 0xFFFF, // LOGLIST_SHOWALLREFS
+    };
+
+    /**
      * @param parent The owning object.
      */
     explicit GitLogListModel(QObject *parent = nullptr);
@@ -59,6 +72,43 @@ public:
      * @param revs The commits, in git's order.
      */
     void appendRevs(const QList<GitRevLoglist>& revs);
+
+    /**
+     * Adds the next commits of a walk of which only some are listed. Ported from CLogDataVector::append: every
+     * commit goes through the graph's lanes, shown or not, so the compressed graph's lines stay joined.
+     * @param revs The commits, in git's order.
+     * @param visible Whether each one is listed; as long as revs.
+     */
+    void appendFiltered(const QList<GitRevLoglist>& revs, const QList<bool>& visible);
+
+    /**
+     * Draws only each commit's first parent in the graph (LOG_INFO_FIRST_PARENT). Takes effect for commits added
+     * after it, so set it while the model is empty.
+     * @param onlyFirstParent Whether to.
+     */
+    void setOnlyFirstParent(bool onlyFirstParent);
+
+    /**
+     * @param shown Whether the Graph column draws the graph (CGitLogListBase::OnNMCustomdrawLoglist's condition).
+     */
+    void setGraphShown(bool shown);
+
+    /**
+     * @returns Whether the Graph column draws the graph.
+     */
+    [[nodiscard]] bool isGraphShown() const;
+
+    /**
+     * @param mask RefMask bits saying which kinds of ref get a label.
+     */
+    void setRefMask(unsigned int mask);
+
+    /**
+     * Decides as CGitLogListBase::DrawTagBranchMessage's switch on the ref type does.
+     * @param ref A ref.
+     * @returns Whether it gets a label.
+     */
+    [[nodiscard]] bool isRefShown(const GitRef& ref) const;
 
     /**
      * @param row A row of this model.
@@ -151,6 +201,9 @@ private:
 
     QList<GitRevLoglist> m_revs;
     bool m_rebaseMode = false;
+    bool m_onlyFirstParent = false; // LOG_INFO_FIRST_PARENT
+    bool m_graphShown = true; // Whether the Graph column draws the graph
+    unsigned int m_refMask = ShowAllRefs; // CGitLogListBase::m_ShowRefMask
     // The graph is computed lazily from const lanes(), as TortoiseGit does while painting
     mutable Lanes m_lns; // CLogDataVector::m_Lns: the lane state after row m_firstFreeLane - 1
     mutable std::vector<std::vector<Lanes::LaneType>> m_lanes; // GitRevLoglist::m_Lanes of each row; empty until computed

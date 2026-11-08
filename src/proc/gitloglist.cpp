@@ -448,7 +448,7 @@ public:
         if (column == GitLogListModel::ActionsColumn) {
             drawActions(painter, rect, rev);
         } else {
-            const QRect textRect = drawRefs(painter, rect, rev.refs, opt);
+            const QRect textRect = drawRefs(painter, rect, rev.refs, opt, *model);
             const bool isSelected = opt.state.testFlag(QStyle::State_Selected);
             painter->setPen(opt.palette.color(isSelected ? QPalette::HighlightedText : QPalette::Text));
             painter->setFont(opt.font);
@@ -461,8 +461,7 @@ public:
 private:
     /**
      * Draws the Graph column as CGitLogListBase::OnNMCustomdrawLoglist does: the cell's background, then the
-     * graph. TortoiseGit leaves the graph out while a filter is active and hides the column when the log follows
-     * renames; this log has neither yet, so it always draws it.
+     * graph, unless the model says to leave it out.
      * @param painter Draws.
      * @param option The cell's style.
      * @param index The cell.
@@ -474,6 +473,9 @@ private:
         initStyleOption(&opt, index);
         const QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
         style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
+        if (!model.isGraphShown()) {
+            return;
+        }
         painter->save();
         drawGraph(painter, opt.rect, model.lanes(index.row()));
         painter->restore();
@@ -519,15 +521,19 @@ private:
      * @param rect The cell's text area.
      * @param refs The refs pointing at the commit.
      * @param opt The cell's style.
+     * @param model Says which refs get a label.
      * @returns What is left of the text area for the subject.
      */
-    static QRect drawRefs(QPainter *painter, const QRect& rect, const QList<GitRef>& refs, const QStyleOptionViewItem& opt)
+    static QRect drawRefs(QPainter *painter, const QRect& rect, const QList<GitRef>& refs, const QStyleOptionViewItem& opt, const GitLogListModel& model)
     {
         QRect rest = rect;
         painter->setFont(opt.font);
         for (const GitRef& ref : refs) {
             if (rest.width() <= 0) {
                 break;
+            }
+            if (!model.isRefShown(ref)) {
+                continue;
             }
             const int width = opt.fontMetrics.horizontalAdvance(ref.name) + (2 * labelPadding);
             const QRect label(rest.left(), rest.top() + 1, std::min(width, rest.width()), rest.height() - 2);
@@ -591,23 +597,47 @@ void GitLogList::setPathFilter(const QStringList& paths)
 void GitLogList::reload()
 {
     Q_ASSERT(!m_workingTree.isEmpty());
+    if (const int row = selectedRow(); row >= 0) {
+        m_lastSelectedHash = m_model->rev(row).hash;
+    }
     m_logCall.reset();
+    m_tagInfoCall.reset();
+    m_simpleListCall.reset();
+    m_simpleListQueue.clear();
     m_filesCall.reset();
     m_filesQueue.clear();
     m_filesRow = -1;
     m_pending.clear();
     m_errorMessage.clear();
+    m_childCount.clear();
+    m_tagInfo.clear();
+    m_oldestCommit = QDateTime::currentDateTime();
+    m_latestCommit = QDate(1971, 1, 2).startOfDay();
     m_model->clear();
-    m_logCall = Git(m_workingTree).runAsync(GitRevLoglist::logArguments(m_pathFilter, m_range, m_noMerges), RunMode::ReadOnly);
+    m_model->setOnlyFirstParent(m_walkOptions.firstParent);
+    m_model->setGraphShown((m_showFilter & FilterShowMergePoints) && !m_logFilter.isFilterActive());
+    setColumnHidden(GitLogListModel::GraphColumn, m_walkOptions.follow); // ShowGraphColumn
+    m_isLoading = true;
+    if (m_logFilter.needsTagInfo()) {
+        m_tagInfoCall = Git(m_workingTree).runAsync(GitRevLoglist::tagInfoArguments(), RunMode::ReadOnly);
+        connect(m_tagInfoCall.get(), &GitCall::finished, this, &GitLogList::onTagInfoFinished);
+    } else {
+        startLog();
+    }
+    viewport()->update();
+}
+
+void GitLogList::startLog()
+{
+    m_logCall = Git(m_workingTree).runAsync(GitRevLoglist::logArguments(m_pathFilter, m_range, m_walkOptions), RunMode::ReadOnly);
     connect(m_logCall.get(), &GitCall::outputAvailable, this, &GitLogList::onOutputAvailable);
     connect(m_logCall.get(), &GitCall::finished, this, &GitLogList::onLogFinished);
-    viewport()->update();
 }
 
 void GitLogList::setRange(const QString& range, bool noMerges)
 {
     m_range = range;
-    m_noMerges = noMerges;
+    m_walkOptions.noMerges = noMerges;
 }
 
 void GitLogList::showText(const QString& text)
@@ -616,6 +646,10 @@ void GitLogList::showText(const QString& text)
         call->disconnect(this);
         call->deleteLater();
     }
+    m_tagInfoCall.reset();
+    m_simpleListCall.reset();
+    m_simpleListQueue.clear();
+    m_isLoading = false;
     m_filesCall.reset();
     m_filesQueue.clear();
     m_filesRow = -1;
@@ -744,7 +778,7 @@ void GitLogList::contextMenuEvent(QContextMenuEvent *event)
 
 bool GitLogList::isBusy() const
 {
-    return m_logCall != nullptr;
+    return m_isLoading;
 }
 
 GitLogListModel *GitLogList::logModel() const
@@ -825,8 +859,7 @@ void GitLogList::onLogFinished()
         failLoad({.category = ErrorCategory::Parse, .message = QStringLiteral("git log ended inside a record")});
         return;
     }
-    viewport()->update();
-    Q_EMIT loaded();
+    finishLoadIfDone();
 }
 
 void GitLogList::requestVisibleFiles()
@@ -912,7 +945,7 @@ bool GitLogList::takeRecords()
         failLoad(revs.error());
         return false;
     }
-    m_model->appendRevs(*revs);
+    handleRevs(*revs);
     return true;
 }
 
@@ -923,6 +956,10 @@ void GitLogList::failLoad(const Error& error)
         call->disconnect(this);
         call->deleteLater();
     }
+    m_tagInfoCall.reset();
+    m_simpleListCall.reset();
+    m_simpleListQueue.clear();
+    m_isLoading = false;
     m_pending.clear();
     m_errorMessage = error.message;
     viewport()->update();

@@ -84,6 +84,7 @@ target_sources(kgtproc PRIVATE
     gitdiff.hpp
     gitloglist.cpp
     gitloglist.hpp
+    gitloglist_filter.cpp
     gitloglistmodel.cpp
     gitloglistmodel.hpp
     lanes.cpp
@@ -97,6 +98,8 @@ target_sources(kgtproc PRIVATE
     icons.qrc
     logdlg.cpp
     logdlg.hpp
+    logdlgfilter.cpp
+    logdlgfilter.hpp
     mergeabortdlg.cpp
     mergeabortdlg.hpp
     mergedlg.cpp

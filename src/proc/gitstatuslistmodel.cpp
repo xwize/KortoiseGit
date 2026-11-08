@@ -14,8 +14,10 @@
 #include <KLocalizedString>
 
 #include <QFont>
+#include <QGuiApplication>
 #include <QIcon>
 #include <QMimeDatabase>
+#include <QPalette>
 
 #include <algorithm>
 #include <iterator>
@@ -311,6 +313,12 @@ QVariant GitStatusListModel::data(const QModelIndex& index, int role) const
     case Qt::CheckStateRole:
         if (m_hasCheckboxes && index.column() == PathColumn) {
             return isChecked(rowEntry) ? Qt::Checked : Qt::Unchecked;
+        }
+        return {};
+    case Qt::ForegroundRole:
+        // CGitStatusListCtrl::OnNMCustomdraw's LOGACTIONS_GRAY
+        if (rowEntry.isGrayed) {
+            return QGuiApplication::palette().brush(QPalette::Disabled, QPalette::Text);
         }
         return {};
     case Qt::DecorationRole:

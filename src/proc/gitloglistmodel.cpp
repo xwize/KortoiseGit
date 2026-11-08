@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <iterator>
+#include <utility>
 
 namespace
 {
@@ -57,6 +58,72 @@ void GitLogListModel::appendRevs(const QList<GitRevLoglist>& revs)
     endInsertRows();
 }
 
+void GitLogListModel::appendFiltered(const QList<GitRevLoglist>& revs, const QList<bool>& visible)
+{
+    Q_ASSERT(revs.size() == visible.size());
+    QList<GitRevLoglist> shown;
+    std::vector<std::vector<Lanes::LaneType>> shownLanes;
+    for (qsizetype i = 0; i < revs.size(); ++i) {
+        std::vector<Lanes::LaneType> revLanes;
+        updateLanes(revs.at(i), m_lns, revLanes, m_onlyFirstParent);
+        if (visible.at(i)) {
+            shown.append(revs.at(i));
+            shownLanes.push_back(std::move(revLanes));
+        }
+    }
+    if (shown.isEmpty()) {
+        return;
+    }
+    const auto first = static_cast<int>(m_revs.size());
+    beginInsertRows({}, first, first + static_cast<int>(shown.size()) - 1);
+    m_revs.append(shown);
+    m_lanes.insert(m_lanes.end(), std::make_move_iterator(shownLanes.begin()), std::make_move_iterator(shownLanes.end()));
+    m_firstFreeLane = static_cast<int>(m_revs.size());
+    endInsertRows();
+}
+
+void GitLogListModel::setOnlyFirstParent(bool onlyFirstParent)
+{
+    m_onlyFirstParent = onlyFirstParent;
+}
+
+void GitLogListModel::setGraphShown(bool shown)
+{
+    m_graphShown = shown;
+}
+
+bool GitLogListModel::isGraphShown() const
+{
+    return m_graphShown;
+}
+
+void GitLogListModel::setRefMask(unsigned int mask)
+{
+    m_refMask = mask;
+}
+
+bool GitLogListModel::isRefShown(const GitRef& ref) const
+{
+    switch (ref.type) {
+    case GitRef::Type::LocalBranch:
+        return m_refMask & ShowLocalBranches;
+    case GitRef::Type::RemoteBranch:
+        return m_refMask & ShowRemoteBranches;
+    case GitRef::Type::Tag:
+        return m_refMask & ShowTags;
+    case GitRef::Type::Stash:
+        return m_refMask & ShowStash;
+    case GitRef::Type::Other:
+        if (ref.name.startsWith(QLatin1String("refs/bisect/"))) {
+            return m_refMask & ShowBisect;
+        }
+        return m_refMask & ShowOtherRefs;
+    case GitRef::Type::Head:
+        break;
+    }
+    return m_refMask & ShowOtherRefs;
+}
+
 const GitRevLoglist& GitLogListModel::rev(int row) const
 {
     Q_ASSERT(row >= 0 && row < m_revs.size());
@@ -88,8 +155,7 @@ void GitLogListModel::setLane(int row) const
     for (; i <= row; ++i) {
         auto& rowLanes = m_lanes.at(static_cast<std::size_t>(i));
         if (rowLanes.empty()) {
-            // The first-parent-only view isn't ported yet (LOG_INFO_FIRST_PARENT)
-            updateLanes(rev(i), m_lns, rowLanes, false);
+            updateLanes(rev(i), m_lns, rowLanes, m_onlyFirstParent);
         }
     }
     m_firstFreeLane = i;

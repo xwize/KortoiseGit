@@ -2,11 +2,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "git/gitrevloglist.hpp"
+#include "git/gitcall.hpp"
 #include "testrepo.hpp"
 
+#include <QHash>
 #include <QTest>
 
 #include <algorithm>
+#include <memory>
+
+Q_DECLARE_METATYPE(kgt::GitLogOptions)
 
 namespace
 {
@@ -158,6 +163,118 @@ private Q_SLOTS:
         QVERIFY(first.refs.isEmpty());
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void walkOptionArguments_data()
+    {
+        QTest::addColumn<GitLogOptions>("options");
+        QTest::addColumn<QStringList>("expected");
+        QTest::addColumn<QStringList>("absent");
+
+        const QString parents = QStringLiteral("--parents");
+        QTest::newRow("default") << GitLogOptions{} << QStringList{parents}
+                                 << QStringList{QStringLiteral("--first-parent"),
+                                                QStringLiteral("--no-merges"),
+                                                QStringLiteral("--follow"),
+                                                QStringLiteral("--full-history")};
+        QTest::newRow("first parent") << GitLogOptions{.firstParent = true} << QStringList{QStringLiteral("--first-parent"), parents} << QStringList{};
+        QTest::newRow("no merges") << GitLogOptions{.noMerges = true} << QStringList{QStringLiteral("--no-merges")} << QStringList{};
+        QTest::newRow("follow") << GitLogOptions{.follow = true} << QStringList{QStringLiteral("--follow")} << QStringList{};
+        QTest::newRow("full history") << GitLogOptions{.fullHistory = true} << QStringList{QStringLiteral("--full-history")} << QStringList{parents};
+        QTest::newRow("date range") << GitLogOptions{.from = 1000, .to = 2000}
+                                    << QStringList{QStringLiteral("--max-age=1000"), QStringLiteral("--min-age=2000")} << QStringList{};
+        QTest::newRow("no from before the epoch") << GitLogOptions{.from = 0} << QStringList{} << QStringList{QStringLiteral("--max-age=0")};
+        QTest::newRow("no date range") << GitLogOptions{} << QStringList{} << QStringList{QStringLiteral("--min-age=-1"), QStringLiteral("--max-age=-1")};
+    }
+
+    void walkOptionArguments()
+    {
+        QFETCH(const GitLogOptions, options);
+        QFETCH(const QStringList, expected);
+        QFETCH(const QStringList, absent);
+        const QStringList arguments = GitRevLoglist::logArguments({QStringLiteral("f.txt")}, {}, options);
+        QVERIFY(std::ranges::all_of(expected, [&arguments](const QString& argument) {
+            return arguments.contains(argument);
+        }));
+        QVERIFY(std::ranges::none_of(absent, [&arguments](const QString& argument) {
+            return arguments.contains(argument);
+        }));
+        QCOMPARE(arguments.constLast(), QStringLiteral("f.txt"));
+    }
+
+    void readsCommitterAndNotes()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("Subject"));
+        repo.run({QStringLiteral("notes"), QStringLiteral("add"), QStringLiteral("-m"), QStringLiteral("A note"), QStringLiteral("HEAD")});
+        const QList<GitRevLoglist> revs = parseLog(repo);
+        QCOMPARE(revs.size(), 1);
+        QCOMPARE(revs.at(0).committerName, QStringLiteral("Test"));
+        QCOMPARE(revs.at(0).committerEmail, QStringLiteral("test@example.com"));
+        QVERIFY(revs.at(0).commitDate.isValid());
+        QCOMPARE(revs.at(0).notes, QStringLiteral("A note"));
+    }
+
+    void fullRefNames()
+    {
+        QCOMPARE((GitRef{.type = GitRef::Type::LocalBranch, .name = QStringLiteral("a/b")}).fullName(), QStringLiteral("refs/heads/a/b"));
+        QCOMPARE((GitRef{.type = GitRef::Type::RemoteBranch, .name = QStringLiteral("origin/a")}).fullName(), QStringLiteral("refs/remotes/origin/a"));
+        QCOMPARE((GitRef{.type = GitRef::Type::Tag, .name = QStringLiteral("v1")}).fullName(), QStringLiteral("refs/tags/v1"));
+        QCOMPARE((GitRef{.type = GitRef::Type::Stash, .name = QStringLiteral("stash")}).fullName(), QStringLiteral("refs/stash"));
+        QCOMPARE((GitRef{.type = GitRef::Type::Other, .name = QStringLiteral("refs/x/y")}).fullName(), QStringLiteral("refs/x/y"));
+    }
+
+    void listsChangedPathsOfManyCommits()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("root.txt"), "1");
+        repo.commitAll(QStringLiteral("Root"));
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("side")});
+        repo.write(QStringLiteral("dir/side file.txt"), "1");
+        repo.commitAll(QStringLiteral("Side"));
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        repo.write(QStringLiteral("main.txt"), "1");
+        repo.commitAll(QStringLiteral("Main"));
+        repo.run({QStringLiteral("merge"),
+                  QStringLiteral("--quiet"),
+                  QStringLiteral("--no-ff"),
+                  QStringLiteral("-m"),
+                  QStringLiteral("Merge"),
+                  QStringLiteral("side")});
+
+        QByteArray hashes;
+        QHash<QString, QString> hashBySubject;
+        for (const GitRevLoglist& rev : parseLog(repo)) {
+            hashes += rev.hash.toLatin1() + '\n';
+            hashBySubject.insert(rev.subject, rev.hash);
+        }
+        const std::unique_ptr<GitCall> call = repo.git().runAsync(GitRevLoglist::simpleListArguments(), RunMode::ReadOnly, hashes);
+        call->waitForFinished();
+        const QHash<QString, QStringList> lists = GitRevLoglist::parseSimpleList(call->output());
+
+        QCOMPARE(lists.value(hashBySubject.value(QStringLiteral("Root"))), QStringList{QStringLiteral("root.txt")});
+        QCOMPARE(lists.value(hashBySubject.value(QStringLiteral("Side"))), QStringList{QStringLiteral("dir/side file.txt")});
+        // A merge lists what changed against each parent
+        const QStringList merge = lists.value(hashBySubject.value(QStringLiteral("Merge")));
+        QVERIFY(merge.contains(QStringLiteral("dir/side file.txt")));
+        QVERIFY(merge.contains(QStringLiteral("main.txt")));
+    }
+
+    void readsAnnotatedTags()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("Subject"));
+        repo.run({QStringLiteral("tag"), QStringLiteral("light")});
+        repo.run({QStringLiteral("tag"), QStringLiteral("-a"), QStringLiteral("-m"), QStringLiteral("Release one\n\nDetails"), QStringLiteral("v1")});
+
+        const QHash<QString, QString> infos = GitRevLoglist::parseTagInfo(repo.git().run(GitRevLoglist::tagInfoArguments()));
+        QCOMPARE(infos.size(), 1);
+        const QString info = infos.value(QStringLiteral("refs/tags/v1"));
+        QVERIFY(info.startsWith(QStringLiteral("tag v1\ntagger Test <test@example.com> ")));
+        QVERIFY(info.endsWith(QStringLiteral("\n\nRelease one\n\nDetails\n")));
+    }
+
     void parsesOutputInPieces()
     {
         const TestRepo repo;
@@ -202,7 +319,11 @@ private Q_SLOTS:
 
     void rejectsBadRecord()
     {
-        QByteArray buffer("not a hash\0p\0n\0e\0123\0\0s\0b\0\0", 26);
+        QByteArray buffer(
+            "not a hash\0p\0n\0e\0"
+            "123\0c\0m\0"
+            "456\0\0s\0b\0\0\0",
+            36);
         QVERIFY(!GitRevLoglist::takeRecords(buffer));
     }
 
