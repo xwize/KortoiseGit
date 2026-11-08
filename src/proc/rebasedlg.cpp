@@ -332,6 +332,8 @@ void RebaseDlg::createWidgets()
             m_abortButton->setFocus();
         }
     });
+    // PreTranslateMessage's VK_F5, wherever the focus is
+    connect(new QShortcut(QKeySequence(Qt::Key_F5), this), &QShortcut::activated, this, &RebaseDlg::refresh);
 }
 
 RebaseDlg::RebaseStage RebaseDlg::stage() const
@@ -968,9 +970,6 @@ bool RebaseDlg::handleListKey(int key, Qt::KeyboardModifiers modifiers)
         }
         return true;
     }
-    case Qt::Key_F5:
-        refresh();
-        return true;
     default:
         return false;
     }

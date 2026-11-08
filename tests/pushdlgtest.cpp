@@ -170,6 +170,24 @@ private Q_SLOTS:
         QVERIFY(!forceWithLease->isEnabled());
         QVERIFY(dlg.options().tags);
     }
+
+    void f5Refreshes()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        repo.run({QStringLiteral("tag"), QStringLiteral("v1")});
+
+        PushDlg dlg(repo.path(), nullptr, QStringLiteral("refs/tags/v1"));
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowActive(&dlg));
+        QVERIFY(dlg.options().remote.isEmpty());
+
+        addRemote(repo, QStringLiteral("origin"));
+        QTest::keyClick(&dlg, Qt::Key_F5);
+        QCOMPARE(dlg.options().remote, QStringLiteral("origin"));
+        QCOMPARE(dlg.options().localBranch, QStringLiteral("refs/tags/v1"));
+    }
 };
 
 QTEST_MAIN(PushDlgTest)

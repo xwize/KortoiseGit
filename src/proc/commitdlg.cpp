@@ -37,11 +37,13 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QTemporaryFile>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <tuple>
 #include <utility>
 
@@ -101,12 +103,12 @@ void addTask(QList<CommitStep>& steps, CommitStep step, const QStringList& paths
 /**
  * @param command The git arguments before the paths, separated by spaces.
  * @param ignoreErrors Whether a failure doesn't stop the commit.
- * @param always Whether it runs even after a failure.
+ * @param afterCommit Whether it follows git commit, and runs even if git commit failed.
  * @returns The step.
  */
-CommitStep task(QLatin1StringView command, bool ignoreErrors = false, bool always = false)
+CommitStep task(QLatin1StringView command, bool ignoreErrors = false, bool afterCommit = false)
 {
-    return CommitStep{.arguments = QString(command).split(QLatin1Char(' ')), .input = {}, .ignoreErrors = ignoreErrors, .always = always};
+    return CommitStep{.arguments = QString(command).split(QLatin1Char(' ')), .input = {}, .ignoreErrors = ignoreErrors, .afterCommit = afterCommit};
 }
 
 /**
@@ -262,7 +264,6 @@ CommitDlg::CommitDlg(const QStringList& paths, QWidget *parent)
     const QString titlePath = paths.size() == 1 ? QDir::toNativeSeparators(paths.constFirst()) : m_workingTree;
     setWindowTitle(i18nc("@title:window %1 is a path", "%1 - Commit", titlePath));
 
-    m_commitTo->setText(currentBranch(m_workingTree));
     m_fileList->setWorkingTree(m_workingTree);
     m_fileList->setPathFilter(relativePaths(m_workingTree, paths));
     m_fileList->setIncludeStaged(true);
@@ -356,7 +357,7 @@ void CommitDlg::commit()
         commitArguments.append(QStringLiteral("--amend"));
     }
     commitArguments.append({QStringLiteral("-F"), m_messageFile->fileName()});
-    m_steps.append(CommitStep{.arguments = commitArguments, .input = {}, .ignoreErrors = false, .always = false});
+    m_steps.append(CommitStep{.arguments = commitArguments, .input = {}, .ignoreErrors = false, .afterCommit = false});
     m_steps.append(plan.restoreIndex);
     setBusy(true);
     runNextStep();
@@ -476,6 +477,12 @@ void CommitDlg::createWidgets()
     connect(m_showUnversioned, &QCheckBox::toggled, this, &CommitDlg::onShowUnversionedToggled);
     // Only the user's click swaps the message (ON_BN_CLICKED); the dialog unticks it without swapping
     connect(m_amendButton, &QCheckBox::clicked, this, &CommitDlg::onAmendClicked);
+    // PreTranslateMessage's VK_F5, wherever the focus is; ignored while m_bBlock (a commit or a status load is running)
+    connect(new QShortcut(QKeySequence(Qt::Key_F5), this), &QShortcut::activated, this, [this] {
+        if (!m_isCommitting && !m_fileList->isBusy()) {
+            refresh();
+        }
+    });
 
     updateOkButton();
     resize(720, 600);
@@ -495,6 +502,7 @@ void CommitDlg::refresh()
 
 void CommitDlg::onListLoaded()
 {
+    m_commitTo->setText(currentBranch(m_workingTree));
     // StatusThread, after the list is filled: amend needs a HEAD, and isn't offered during a cherry-pick
     if (m_fileList->isInitialRepo()) {
         const QSignalBlocker blocker(m_amendButton);
@@ -568,11 +576,12 @@ void CommitDlg::onShowUnversionedToggled(bool checked)
 
 void CommitDlg::runNextStep()
 {
-    // After a failure only the steps that put the index back still run
-    if (m_commitError) {
-        m_steps.removeIf([](const CommitStep& step) {
-            return !step.always;
-        });
+    // CCommitDlg::OnOK: when preparing the index fails (bAddSuccess), neither git commit nor the steps after it run.
+    // When git commit fails only the steps after it are left, and they run; nothing unstages the checked files.
+    if (m_commitError && std::ranges::any_of(m_steps, [](const CommitStep& step) {
+            return !step.afterCommit;
+        })) {
+        m_steps.clear();
     }
     if (m_steps.isEmpty()) {
         finishCommit();
