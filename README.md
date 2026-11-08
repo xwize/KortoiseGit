@@ -25,6 +25,26 @@ Dolphin's context menu, where Abort Merge, `merge --abort`, appears while a merg
 and `log`. `switch --rev <ref>` preselects a branch, tag or commit. Pull, fetch and push ask for passwords and host keys
 through ksshaskpass, or your own `SSH_ASKPASS`/`GIT_ASKPASS`, and never on a terminal.
 
+## Install
+
+Build the latest `main` and install it for your user, into `~/.local` (no sudo):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/xwize/KortoiseGit/main/scripts/install.sh | bash
+```
+
+To uninstall, removing everything the install added and KortoiseGit's settings:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/xwize/KortoiseGit/main/scripts/uninstall.sh | bash
+```
+
+The install needs the build dependencies below, apart from `clang`. It installs no packages itself: if any are missing, it prints the
+`pacman` command that installs them and stops. Running it again upgrades to the latest `main`.
+
+When it finishes, log out and log in again, then in Dolphin open Configure Dolphin > Interface > Version Control, tick
+KortoiseGit and untick Git.
+
 ## Building on Arch Linux
 
 ```sh
