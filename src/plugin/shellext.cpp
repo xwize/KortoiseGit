@@ -6,6 +6,9 @@
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 #include "kortoisegitplugin_debug.hpp"
+#include "pathutils.hpp"
+#include "remotecachelink.hpp"
+#include "utils/buildconfig.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KFileItem>
@@ -17,11 +20,9 @@
 #include <QIcon>
 #include <QMenu>
 #include <QProcess>
-#include <QStandardPaths>
 #include <QTemporaryFile>
 
-#include <dlfcn.h>
-
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <exception>
@@ -41,9 +42,12 @@ namespace
 using namespace Qt::StringLiterals;
 
 constexpr auto procName = "kortoisegitproc"_L1;
+constexpr auto cacheName = "kortoisegitcache"_L1;
 // One git command gives several index events, KDirWatch reporting the replaced file about half a second after
 // it went: refresh once they have settled
 constexpr std::chrono::milliseconds refreshDelay{600};
+// The cache has already collected the changes of one command, and Dolphin waits a little more itself
+constexpr std::chrono::milliseconds cacheRefreshDelay{100};
 // CShellExt::InsertGitMenu's limit on the branch name in the Commit entry
 constexpr qsizetype maxMenuBranchLength = 64;
 // CGit::GetShortHASHLength
@@ -64,41 +68,6 @@ QIcon submenuIcon()
         icon.addFile(QStringLiteral(":/kortoisegitplugin/kortoisegit-%1.png").arg(size), QSize(size, size));
     }
     return icon;
-}
-
-/**
- * The directory holding this plugin's .so, like TortoiseGit's CPathUtils::GetAppDirectory(g_hmodThisDll).
- * @returns The absolute directory, or an empty string if the dynamic loader can't say.
- */
-QString appDirectory()
-{
-    static const char anchor = 0;
-    Dl_info info{};
-    if (dladdr(&anchor, &info) == 0 || info.dli_fname == nullptr) {
-        return {};
-    }
-    return QFileInfo(QFile::decodeName(info.dli_fname)).absolutePath();
-}
-
-/**
- * Finds kortoisegitproc. From the build tree the plugin is bin/dolphin/vcs/kortoisegitplugin.so and the app is
- * bin/kortoisegitproc, so that is tried first; then the install location, then $PATH.
- * @returns The executable's path, or an empty string if none was found.
- */
-QString procPath()
-{
-    const QString pluginDir = appDirectory();
-    const QStringList candidates{
-        pluginDir.isEmpty() ? QString() : QDir(pluginDir).absoluteFilePath(QStringLiteral("../../") + procName),
-        QDir(QStringLiteral(KGT_INSTALL_BINDIR)).absoluteFilePath(procName),
-    };
-    for (const QString& candidate : candidates) {
-        const QFileInfo info(candidate);
-        if (!candidate.isEmpty() && info.isFile() && info.isExecutable()) {
-            return info.canonicalFilePath();
-        }
-    }
-    return QStandardPaths::findExecutable(QString(procName));
 }
 
 /**
@@ -490,8 +459,22 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     connect(&m_indexWatch, &KDirWatch::dirty, &m_refreshTimer, qOverload<>(&QTimer::start));
     connect(&m_indexWatch, &KDirWatch::created, &m_refreshTimer, qOverload<>(&QTimer::start));
     connect(&m_indexWatch, &KDirWatch::deleted, &m_refreshTimer, qOverload<>(&QTimer::start));
+    // The cache waits out git's locks, so right after an index change git itself is asked
+    for (const auto signal : {&KDirWatch::dirty, &KDirWatch::created, &KDirWatch::deleted}) {
+        connect(&m_indexWatch, signal, this, [this] {
+            m_indexChanged = true;
+        });
+    }
     // Dolphin looks for a plugin again on itemVersionsChanged(), finding the new repository
     connect(&m_newRepoWatch, &KDirWatch::created, &m_refreshTimer, qOverload<>(&QTimer::start));
+
+    if constexpr (useStatusCache) {
+        m_cacheLink = new RemoteCacheLink(RemoteCacheLink::Options{.executable = findSiblingExecutable(cacheName)}, this);
+        m_cacheRefreshTimer.setSingleShot(true);
+        m_cacheRefreshTimer.setInterval(cacheRefreshDelay);
+        connect(&m_cacheRefreshTimer, &QTimer::timeout, this, &KVersionControlPlugin::itemVersionsChanged);
+        connect(m_cacheLink, &RemoteCacheLink::itemsChanged, this, &ShellExt::onCacheItemsChanged);
+    }
 }
 
 QString ShellExt::fileName() const
@@ -503,7 +486,15 @@ bool ShellExt::beginRetrieval(const QString& directory)
 {
     m_folderStatus.reset();
     try {
-        m_folderStatus = GitFolderStatus::fetch(directory);
+        // Dolphin's retrieval thread, so a slow cache costs at most RemoteCacheLink's short timeout
+        if (m_cacheLink != nullptr && !m_indexChanged.exchange(false)) {
+            if (const std::optional<CacheFolderStatus> cached = m_cacheLink->folderStatus(directory)) {
+                m_folderStatus = GitFolderStatus::fromCache(*cached, QDir(GitAdminDir::worktreeAdminDirPath(directory)).filePath(QStringLiteral("index")));
+            }
+        }
+        if (!m_folderStatus) {
+            m_folderStatus = GitFolderStatus::fetch(directory);
+        }
     } catch (const RuntimeError& e) {
         // Every category means the same here: no overlays. Nothing may propagate into Dolphin
         qCDebug(KGT_PLUGIN) << "No overlays for" << directory << ":" << e.error().message;
@@ -514,7 +505,8 @@ bool ShellExt::beginRetrieval(const QString& directory)
     }
     QMetaObject::invokeMethod(
         this,
-        [this, indexFile = m_folderStatus->indexFile()] {
+        [this, indexFile = m_folderStatus->indexFile(), shownFolder = QFileInfo(directory).canonicalFilePath()] {
+            m_shownFolder = shownFolder;
             watchIndex(indexFile);
         },
         Qt::QueuedConnection);
@@ -622,7 +614,7 @@ void ShellExt::runCommand(const QString& command, const QAction *action, const Q
     const QStringList paths = action->data().toStringList();
     Q_ASSERT(!paths.isEmpty());
 
-    const QString program = procPath();
+    const QString program = findSiblingExecutable(procName);
     if (program.isEmpty()) {
         qCWarning(KGT_PLUGIN) << "kortoisegitproc not found next to the plugin, in" << KGT_INSTALL_BINDIR << "or in $PATH";
         Q_EMIT errorMessage(i18n("KortoiseGitProc launch failed: kortoisegitproc was not found"));
@@ -676,6 +668,16 @@ QStringList ShellExt::pathArguments(const QStringList& paths)
         return {};
     }
     return {QStringLiteral("--pathfile"), file.fileName(), QStringLiteral("--deletepathfile")};
+}
+
+void ShellExt::onCacheItemsChanged(const QStringList& paths)
+{
+    const bool affectsShownFolder = std::ranges::any_of(paths, [this](const QString& path) {
+        return QStringView(path).first(std::max<qsizetype>(path.lastIndexOf(QLatin1Char('/')), 0)) == m_shownFolder;
+    });
+    if (affectsShownFolder) {
+        m_cacheRefreshTimer.start();
+    }
 }
 
 void ShellExt::watchIndex(const QString& indexFile)

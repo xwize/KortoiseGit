@@ -72,6 +72,23 @@ enum class IgnoredFiles {
 };
 
 /**
+ * What an item is, for overlays: TortoiseGit's git_wc_status_kind, with unstaged changes kept apart from fully staged
+ * ones as Dolphin can show both, and a file deleted from the working tree apart from one deleted in the index.
+ */
+enum class GitWcStatus {
+    None, // git_wc_status_none: nothing known
+    Unversioned,
+    Ignored,
+    Normal,
+    Modified, // Changes that are all staged
+    ModifiedUnstaged,
+    Added,
+    Deleted, // Deleted in the index
+    Missing, // Deleted in the working tree only
+    Conflicted,
+};
+
+/**
  * Reads a working tree's status. For the app, run arguments() with Git::runAsync() and parse() the output;
  * the plugin calls status(), which blocks.
  */
@@ -118,6 +135,28 @@ public:
      * @throws RuntimeError (category Git) if git fails, or (category Parse) if its output can't be read.
      */
     [[nodiscard]] static QList<GitStatusEntry> status(const Git& git, IgnoredFiles ignored = IgnoredFiles::Exclude);
+
+    /**
+     * @param entry One file's git status.
+     * @returns What the file is, for overlays.
+     */
+    [[nodiscard]] static GitWcStatus wcStatus(const GitStatusEntry& entry);
+
+    /**
+     * Ported from GitStatus::GetMoreImportant, with the ranking of GetStatusRanking.
+     * @param first A state.
+     * @param second Another state for the same item.
+     * @returns Whichever ranks higher; @p first on a tie.
+     */
+    [[nodiscard]] static GitWcStatus moreImportant(GitWcStatus first, GitWcStatus second);
+
+    /**
+     * Ported from GitStatus::AdjustFolderStatus: what a changed file makes of the folders above it. Added and deleted
+     * files make a folder modified; unstaged changes are kept apart from fully staged ones.
+     * @param status A file's state.
+     * @returns The state it gives its folders, or None if it doesn't change them (normal, untracked, ignored).
+     */
+    [[nodiscard]] static GitWcStatus adjustFolderStatus(GitWcStatus status);
 };
 
 } // namespace kgt

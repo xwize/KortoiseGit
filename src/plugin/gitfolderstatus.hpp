@@ -7,11 +7,12 @@
  * @file
  * Ported from TortoiseGit src/Git/GitFolderStatus.h, with the folder roll-up of src/Git/GitStatus.cpp
  * (GetMoreImportant, AdjustFolderStatus): the overlay state of every item in one folder, read with a single
- * git status. TortoiseGit caches whole working trees in TGitCache; Dolphin asks one folder at a time instead.
+ * git status, or taken from kortoisegitcache, TGitCache's counterpart, when that knows the folder.
  */
 
 #pragma once
 
+#include "cache/cacheinterface.hpp"
 #include "git/gitstatus.hpp"
 
 #include <Dolphin/KVersionControlPlugin>
@@ -64,6 +65,14 @@ public:
     [[nodiscard]] static GitFolderStatus fetchItem(const QString& path);
 
     /**
+     * Builds the folder's state from what kortoisegitcache answered, without running git.
+     * @param cached The cache's answer.
+     * @param indexFile The repository's index file.
+     * @returns The folder's state.
+     */
+    [[nodiscard]] static GitFolderStatus fromCache(const CacheFolderStatus& cached, const QString& indexFile);
+
+    /**
      * @param name The item's file name, directly inside the folder.
      * @param isDir Whether the item is a folder, which rolls up what is below it.
      * @returns The state Dolphin draws for it.
@@ -98,13 +107,13 @@ private:
      * What is known about one child of the folder.
      */
     struct ChildState {
-        std::optional<ItemVersion> own; // The child's own entry (a file, a submodule, or an ignored folder "name/")
-        std::optional<ItemVersion> change; // The most important change below it, if it is a folder
+        std::optional<GitWcStatus> own; // The child's own entry (a file, a submodule, or an ignored folder "name/")
+        GitWcStatus change = GitWcStatus::None; // The most important change below it, if it is a folder
         bool hasUntracked = false; // An untracked file is somewhere below it
         bool hasIgnored = false; // An ignored file or folder is somewhere below it
     };
 
-    void addEntry(const QString& path, ItemVersion version);
+    void addEntry(const QString& path, GitWcStatus status);
 
     /**
      * @param git Runs in the folder.
@@ -116,7 +125,7 @@ private:
     QString m_prefix;
     QHash<QString, ChildState> m_children;
     QSet<QString> m_trackedChildren;
-    std::optional<ItemVersion> m_wholeFolder; // Set when the folder itself lies inside an ignored or untracked folder
+    std::optional<GitWcStatus> m_wholeFolder; // Set when the folder itself lies inside an ignored or untracked folder
     bool m_hasUnversioned = false; // An untracked file lies somewhere in the folder
     QString m_indexFile;
 };

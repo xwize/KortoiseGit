@@ -3,5 +3,6 @@
 
 add_subdirectory(utils)
 add_subdirectory(git)
+add_subdirectory(cache)
 add_subdirectory(plugin)
 add_subdirectory(proc)

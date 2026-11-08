@@ -17,4 +17,10 @@ inline constexpr bool isDebugBuild = false;
 inline constexpr bool isDebugBuild = true;
 #endif
 
+/**
+ * Whether the Dolphin plugin uses kortoisegitcache for its overlays. False leaves only its per-folder git status: it
+ * then never starts the cache or calls it over D-Bus.
+ */
+inline constexpr bool useStatusCache = true;
+
 } // namespace kgt

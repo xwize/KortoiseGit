@@ -26,66 +26,33 @@ constexpr int retrievalTimeoutMs = 60000; // Per git command, on Dolphin's worke
 constexpr int menuTimeoutMs = 3000; // Per git command, on Dolphin's UI thread, which a stuck git must not hang
 
 /**
- * Like TortoiseGit's GitStatus::GetStatusRanking: when one path has two entries (git rm --cached lists the file
- * as both deleted and untracked), the higher ranked one is shown.
- * @param version A file's state.
- * @returns Its importance; higher wins.
+ * @param status What an item is.
+ * @returns The state Dolphin draws for it.
  */
-int fileRank(ItemVersion version)
+ItemVersion toItemVersion(GitWcStatus status)
 {
-    switch (version) {
-    case KVersionControlPlugin::ConflictingVersion:
-        return 6;
-    case KVersionControlPlugin::LocallyModifiedUnstagedVersion:
-    case KVersionControlPlugin::MissingVersion:
-        return 5;
-    case KVersionControlPlugin::LocallyModifiedVersion:
-    case KVersionControlPlugin::AddedVersion:
-    case KVersionControlPlugin::RemovedVersion:
-        return 4;
-    case KVersionControlPlugin::NormalVersion:
-    case KVersionControlPlugin::UpdateRequiredVersion:
-        return 3;
-    case KVersionControlPlugin::UnversionedVersion:
-        return 2;
-    case KVersionControlPlugin::IgnoredVersion:
-        return 1;
-    }
-    return 0;
-}
-
-/**
- * Like TortoiseGit's GitStatus::AdjustFolderStatus: what a changed file makes of the folders above it. Added and
- * deleted files make a folder modified; unstaged changes are kept apart from fully staged ones, as Dolphin can
- * show both.
- * @param version A file's state.
- * @returns The state it gives its folders, or nothing if it doesn't change them (normal, untracked, ignored).
- */
-std::optional<ItemVersion> folderChange(ItemVersion version)
-{
-    switch (version) {
-    case KVersionControlPlugin::ConflictingVersion:
+    switch (status) {
+    case GitWcStatus::Conflicted:
         return KVersionControlPlugin::ConflictingVersion;
-    case KVersionControlPlugin::LocallyModifiedUnstagedVersion:
-    case KVersionControlPlugin::MissingVersion:
+    case GitWcStatus::ModifiedUnstaged:
         return KVersionControlPlugin::LocallyModifiedUnstagedVersion;
-    case KVersionControlPlugin::LocallyModifiedVersion:
-    case KVersionControlPlugin::AddedVersion:
-    case KVersionControlPlugin::RemovedVersion:
+    case GitWcStatus::Missing:
+        return KVersionControlPlugin::MissingVersion;
+    case GitWcStatus::Modified:
         return KVersionControlPlugin::LocallyModifiedVersion;
-    default:
-        return std::nullopt;
+    case GitWcStatus::Added:
+        return KVersionControlPlugin::AddedVersion;
+    case GitWcStatus::Deleted:
+        return KVersionControlPlugin::RemovedVersion;
+    case GitWcStatus::Normal:
+        return KVersionControlPlugin::NormalVersion;
+    case GitWcStatus::Ignored:
+        return KVersionControlPlugin::IgnoredVersion;
+    case GitWcStatus::Unversioned:
+    case GitWcStatus::None:
+        break;
     }
-}
-
-/**
- * @param current The state so far, if any.
- * @param candidate Another state for the same item.
- * @returns Whichever ranks higher.
- */
-ItemVersion moreImportant(std::optional<ItemVersion> current, ItemVersion candidate)
-{
-    return current && fileRank(*current) >= fileRank(candidate) ? *current : candidate;
+    return KVersionControlPlugin::UnversionedVersion;
 }
 
 /**
@@ -128,10 +95,10 @@ GitFolderStatus::GitFolderStatus(const QString& prefix, const QList<GitStatusEnt
 {
     Q_ASSERT(prefix.isEmpty() || prefix.endsWith(QLatin1Char('/')));
     for (const GitStatusEntry& entry : entries) {
-        addEntry(entry.path, fileVersion(entry));
+        addEntry(entry.path, GitStatus::wcStatus(entry));
         if (!entry.origPath.isEmpty()) {
             // A rename also takes a file away from the source's folder
-            addEntry(entry.origPath, KVersionControlPlugin::RemovedVersion);
+            addEntry(entry.origPath, GitWcStatus::Deleted);
         }
     }
 }
@@ -171,24 +138,39 @@ GitFolderStatus GitFolderStatus::fetch(const Git& git, const QString& pathspec)
     return status;
 }
 
+GitFolderStatus GitFolderStatus::fromCache(const CacheFolderStatus& cached, const QString& indexFile)
+{
+    Q_ASSERT(cached.names.size() == cached.states.size());
+    GitFolderStatus status({}, {}, {});
+    status.m_wholeFolder = cached.wholeFolder;
+    status.m_hasUnversioned = cached.hasUnversioned;
+    status.m_indexFile = indexFile;
+    for (qsizetype i = 0; i < cached.names.size(); ++i) {
+        const CacheItemState item = unpackItemState(cached.states.at(i));
+        status.m_children.insert(cached.names.at(i),
+                                 ChildState{.own = item.status, .change = GitWcStatus::None, .hasUntracked = item.hasUntracked, .hasIgnored = false});
+    }
+    return status;
+}
+
 KVersionControlPlugin::ItemVersion GitFolderStatus::itemVersion(const QString& name, bool isDir) const
 {
     if (name == QLatin1String(".git")) {
         return KVersionControlPlugin::UnversionedVersion;
     }
     if (m_wholeFolder) {
-        return *m_wholeFolder;
+        return toItemVersion(*m_wholeFolder);
     }
     const ChildState child = m_children.value(name);
     if (child.own) {
-        return *child.own;
+        return toItemVersion(*child.own);
     }
     if (!isDir) {
         // git status lists every untracked and ignored file, so an unlisted file is tracked and unchanged
         return KVersionControlPlugin::NormalVersion;
     }
-    if (child.change) {
-        return *child.change;
+    if (child.change != GitWcStatus::None) {
+        return toItemVersion(child.change);
     }
     if (m_trackedChildren.contains(name)) {
         return KVersionControlPlugin::NormalVersion;
@@ -217,63 +199,36 @@ const QString& GitFolderStatus::indexFile() const
 
 KVersionControlPlugin::ItemVersion GitFolderStatus::fileVersion(const GitStatusEntry& entry)
 {
-    switch (entry.kind) {
-    case GitStatusKind::Unmerged:
-        return KVersionControlPlugin::ConflictingVersion;
-    case GitStatusKind::Untracked:
-        return KVersionControlPlugin::UnversionedVersion;
-    case GitStatusKind::Ignored:
-        return KVersionControlPlugin::IgnoredVersion;
-    case GitStatusKind::Changed:
-    case GitStatusKind::RenamedOrCopied:
-        break;
-    }
-    if (entry.worktree == FileState::Deleted) {
-        return KVersionControlPlugin::MissingVersion;
-    }
-    if (entry.worktree != FileState::Unmodified) {
-        return KVersionControlPlugin::LocallyModifiedUnstagedVersion;
-    }
-    switch (entry.index) {
-    case FileState::Unmodified:
-        return KVersionControlPlugin::NormalVersion;
-    case FileState::Deleted:
-        return KVersionControlPlugin::RemovedVersion;
-    case FileState::Added:
-    case FileState::Copied:
-        return KVersionControlPlugin::AddedVersion;
-    default:
-        return KVersionControlPlugin::LocallyModifiedVersion;
-    }
+    return toItemVersion(GitStatus::wcStatus(entry));
 }
 
-void GitFolderStatus::addEntry(const QString& path, ItemVersion version)
+void GitFolderStatus::addEntry(const QString& path, GitWcStatus status)
 {
     // An ignored or untracked folder ("build/") that holds this whole folder
     if (path.endsWith(QLatin1Char('/')) && m_prefix.startsWith(path)) {
-        m_wholeFolder = version;
-        m_hasUnversioned = version == KVersionControlPlugin::UnversionedVersion;
+        m_wholeFolder = status;
+        m_hasUnversioned = status == GitWcStatus::Unversioned;
         return;
     }
     if (!path.startsWith(m_prefix) || path.size() == m_prefix.size()) {
         return;
     }
-    m_hasUnversioned = m_hasUnversioned || version == KVersionControlPlugin::UnversionedVersion;
+    m_hasUnversioned = m_hasUnversioned || status == GitWcStatus::Unversioned;
     const QString relative = path.mid(m_prefix.size());
     const qsizetype slash = relative.indexOf(QLatin1Char('/'));
     // A file, or a folder git reports as a whole ("build/" when ignored, "nested/" for an untracked repository)
     if (slash < 0 || slash == relative.size() - 1) {
         ChildState& child = m_children.try_emplace(slash < 0 ? relative : relative.left(slash)).first->second;
-        child.own = moreImportant(child.own, version);
+        child.own = child.own ? GitStatus::moreImportant(*child.own, status) : status;
         return;
     }
     ChildState& child = m_children.try_emplace(relative.left(slash)).first->second;
-    if (version == KVersionControlPlugin::UnversionedVersion) {
+    if (status == GitWcStatus::Unversioned) {
         child.hasUntracked = true;
-    } else if (version == KVersionControlPlugin::IgnoredVersion) {
+    } else if (status == GitWcStatus::Ignored) {
         child.hasIgnored = true;
-    } else if (const std::optional<ItemVersion> change = folderChange(version)) {
-        child.change = moreImportant(child.change, *change);
+    } else {
+        child.change = GitStatus::moreImportant(child.change, GitStatus::adjustFolderStatus(status));
     }
 }
 

@@ -28,6 +28,8 @@ main() {
     if [[ -f $manifest ]]; then
         remove_manifest_files "$manifest" "$prefix"
     fi
+    # After removing its files, so that nothing can start it again
+    stop_status_cache
     rm -rf -- "$data_dir"
     rm -f -- "$env_script"
     rmdir -- "$env_dir" 2>/dev/null || true
@@ -43,6 +45,11 @@ main() {
     fi
 
     echo "KortoiseGit is uninstalled. Log out and log in again to clear it from Dolphin's plugin path."
+}
+
+# Stops a running kortoisegitcache. Linux keeps 15 characters of a process's name, so the full name would match nothing
+stop_status_cache() {
+    pkill -x -u "$EUID" kortoisegitcach 2>/dev/null || true
 }
 
 # Takes KortoiseGit out of the version control plugins enabled in Configure Dolphin, if the user ticked it there

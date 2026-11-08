@@ -16,8 +16,8 @@ plugin="$build_dir/bin/dolphin/vcs/kortoisegitplugin.so"
 if [[ ! -f "$build_dir/CMakeCache.txt" ]]; then
     cmake --preset "$preset" -S "$source_dir"
 fi
-# The plugin and the app it launches
-cmake --build "$build_dir" --target kortoisegitplugin kortoisegitproc
+# The plugin, the app it launches and the status cache
+cmake --build "$build_dir" --target kortoisegitplugin kortoisegitproc kortoisegitcache
 
 if [[ ! -f "$plugin" ]]; then
     echo "Plugin not found at $plugin" >&2
@@ -41,6 +41,15 @@ if pgrep -x dolphin >/dev/null; then
         pkill -9 -x dolphin || true
     fi
 fi
+
+# An already running or installed cache would own the bus name: start the build tree's instead. It exits when idle
+pkill -x -u "$EUID" kortoisegitcach 2>/dev/null || true # Linux keeps 15 characters of a process's name
+for _ in {1..50}; do
+    pgrep -x -u "$EUID" kortoisegitcach >/dev/null || break
+    sleep 0.1
+done
+setsid "$build_dir/bin/kortoisegitcache" >/dev/null 2>&1 </dev/null &
+disown
 
 echo "Starting Dolphin with $plugin"
 echo "In Configure Dolphin, enable KortoiseGit and disable Git in the version control plugins, if not done already."

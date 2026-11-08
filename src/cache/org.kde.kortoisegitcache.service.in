@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+[D-BUS Service]
+Name=org.kde.kortoisegitcache
+Exec=@KDE_INSTALL_FULL_BINDIR@/kortoisegitcache
