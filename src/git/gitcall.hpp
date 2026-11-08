@@ -87,7 +87,13 @@ public:
     [[nodiscard]] static QProcessEnvironment environment(RunMode mode);
 
     /**
+     * @param arguments The arguments after "git".
      * @returns The command line, for messages: "git" followed by the arguments, quoted where they hold spaces.
+     */
+    [[nodiscard]] static QString formatCommandLine(const QStringList& arguments);
+
+    /**
+     * @returns This call's command line, as formatCommandLine() writes it.
      */
     [[nodiscard]] QString commandLine() const;
 

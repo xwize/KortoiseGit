@@ -11,6 +11,7 @@
 #include "createbranchtagdlg.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
+#include "git/gitcall.hpp"
 #include "gitswitchdlg.hpp"
 #include "kortoisegitproc_debug.hpp"
 #include "mergeabortdlg.hpp"
@@ -18,9 +19,11 @@
 #include "pushdlg.hpp"
 #include "utils/runtimeerror.hpp"
 
+#include <KConfigGroup>
 #include <KGuiItem>
 #include <KLocalizedString>
 #include <KMessageBox>
+#include <KSharedConfig>
 
 #include <QClipboard>
 #include <QCoreApplication>
@@ -35,7 +38,7 @@
 /**
  * Registers icons.qrc, which a static library has to do itself. Q_INIT_RESOURCE must be outside any namespace.
  */
-static void initIconResources()
+static void registerIconResources()
 {
     Q_INIT_RESOURCE(icons);
 }
@@ -43,9 +46,62 @@ static void initIconResources()
 namespace kgt
 {
 
+void AppUtils::initIconResources()
+{
+    registerIconResources();
+}
+
+KConfigGroup AppUtils::generalSettings()
+{
+    return KSharedConfig::openConfig()->group(QStringLiteral("General"));
+}
+
+bool AppUtils::askYesNo(QWidget *parent, const QString& question, bool warning)
+{
+    const KGuiItem yesItem(i18n("&Yes"));
+    const KGuiItem noItem(i18n("&No"));
+    // Like TortoiseGit's message boxes, these don't also raise a desktop notification
+    constexpr KMessageBox::Options noNotify = KMessageBox::Options();
+    const auto answer = warning ? KMessageBox::warningTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify)
+                                : KMessageBox::questionTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify);
+    return answer == KMessageBox::PrimaryAction;
+}
+
+QByteArray AppUtils::outputOrEmpty(const GitCall& call)
+{
+    try {
+        return call.output();
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        qCWarning(KGT_PROC) << "Loading the branches or tags failed:" << e.error().message;
+        return {};
+    }
+}
+
+void AppUtils::hintMergeConflictsOnFailure(ProgressDlg& progress, const Git& git)
+{
+    QObject::connect(&progress, &ProgressDlg::commandsFinished, &progress, [&progress, git] {
+        if (progress.gitStatus() == 0) {
+            return;
+        }
+        try {
+            if (git.hasWorkingTreeConflicts()) {
+                showMergeConflictsHint(&progress);
+            }
+        } catch (const RuntimeError& e) {
+            if (e.error().category != ErrorCategory::Git) {
+                throw;
+            }
+            KMessageBox::error(&progress, i18n("Checking for conflicts failed.") + QLatin1Char('\n') + e.error().message, QString(), KMessageBox::Options());
+        }
+    });
+}
+
 QIcon AppUtils::appIcon()
 {
-    initIconResources();
+    registerIconResources();
     QIcon bundled;
     for (const int size : std::array{16, 22, 32, 48, 64, 128, 256}) {
         bundled.addFile(QStringLiteral(":/kortoisegit/icons/kortoisegit-%1.png").arg(size), QSize(size, size));
@@ -203,9 +259,8 @@ SwitchOptions AppUtils::switchOptions(const GitSwitchOptions& chosen)
 {
     // If refs/heads/ is not stripped, checkout will detach HEAD; checkout prefers branches on name clashes (with tags)
     QString ref = chosen.versionName;
-    constexpr QLatin1StringView headsPrefix("refs/heads/");
-    if (ref.startsWith(headsPrefix) && !chosen.branchOverride) {
-        ref = ref.mid(headsPrefix.size());
+    if (ref.startsWith(Git::refsHeadsPrefix) && !chosen.branchOverride) {
+        ref = ref.mid(Git::refsHeadsPrefix.size());
     }
     return SwitchOptions{
         .ref = ref,
@@ -299,7 +354,7 @@ bool AppUtils::createBranchTag(const QString& workingTree, const CreateBranchTag
 
     if (params.isTag) {
         if (options.push) {
-            push(workingTree, QStringLiteral("refs/tags/") + options.branchTagName, parent);
+            push(workingTree, Git::refsTagsPrefix + options.branchTagName, parent);
         }
         return true;
     }

@@ -96,12 +96,6 @@ private:
     void updateFastForwardStates();
 
     /**
-     * @param name A configuration variable.
-     * @returns Its value, or an empty string if it is not set.
-     */
-    [[nodiscard]] QString configValue(const QString& name) const;
-
-    /**
      * @returns The settings group of this repository and mode, TortoiseGit's PullFetch\<dir>_<mode>.
      */
     [[nodiscard]] QString settingsGroup() const;

@@ -114,19 +114,8 @@ bool PullCommand::pull(const QString& workingTree)
 
     ProgressDlg progress(workingTree);
     progress.addGitCmd(pullArguments(options));
-    // DoPull's m_PostCmdCallback: a failed pull may have left conflicts to resolve
-    QObject::connect(&progress, &ProgressDlg::commandsFinished, &progress, [&progress, &git] {
-        if (progress.gitStatus() == 0) {
-            return;
-        }
-        try {
-            if (git.hasWorkingTreeConflicts()) {
-                AppUtils::showMergeConflictsHint(&progress);
-            }
-        } catch (const RuntimeError& e) {
-            KMessageBox::error(&progress, i18n("Checking for conflicts failed.") + QLatin1Char('\n') + e.error().message, QString(), KMessageBox::Options());
-        }
-    });
+    // DoPull's m_PostCmdCallback
+    AppUtils::hintMergeConflictsOnFailure(progress, git);
     progress.exec();
     return progress.gitStatus() == 0;
 }

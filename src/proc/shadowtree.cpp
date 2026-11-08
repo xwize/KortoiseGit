@@ -6,6 +6,8 @@
 
 #include "shadowtree.hpp"
 
+#include "git/git.hpp"
+
 namespace kgt
 {
 
@@ -59,7 +61,7 @@ bool ShadowTree::isFrom(QLatin1StringView from) const
 
 QString ShadowTree::refsHeadsName() const
 {
-    return refName().mid(QLatin1StringView("refs/heads/").size());
+    return refName().mid(Git::refsHeadsPrefix.size());
 }
 
 const ShadowTree *ShadowTree::findLeaf(const QString& partialRefName) const

@@ -7,6 +7,8 @@
 
 #include "git/gitrevrefbrowser.hpp"
 
+#include "git/git.hpp"
+
 #include <QList>
 #include <QTimeZone>
 
@@ -55,7 +57,6 @@ constexpr auto branchPrefix = "branch."_L1;
 constexpr auto descriptionSuffix = ".description"_L1;
 constexpr auto remotePrefix = "remote."_L1;
 constexpr auto urlSuffix = ".url"_L1;
-constexpr auto headsPrefix = "refs/heads/"_L1;
 
 /**
  * @param seconds A Unix time as git prints it.
@@ -169,8 +170,8 @@ Result<QMap<QString, GitRevRefBrowser>> GitRevRefBrowser::parseRefMap(const QByt
             continue;
         }
         GitRevRefBrowser ref = makeRef(fields);
-        if (refName.startsWith(headsPrefix)) {
-            ref.description = descriptions.value(refName.mid(headsPrefix.size()));
+        if (refName.startsWith(Git::refsHeadsPrefix)) {
+            ref.description = descriptions.value(refName.mid(Git::refsHeadsPrefix.size()));
         }
         refs.insert(refName, ref);
     }

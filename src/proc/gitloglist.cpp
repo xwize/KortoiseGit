@@ -6,6 +6,7 @@
 
 #include "gitloglist.hpp"
 
+#include "apputils.hpp"
 #include "git/git.hpp"
 #include "git/gitcall.hpp"
 #include "utils/runtimeerror.hpp"
@@ -28,14 +29,6 @@
 #include <cstddef>
 #include <tuple>
 #include <utility>
-
-/**
- * Registers icons.qrc, which a static library has to do itself. Q_INIT_RESOURCE must be outside any namespace.
- */
-static void initIconResources()
-{
-    Q_INIT_RESOURCE(icons);
-}
 
 namespace
 {
@@ -558,7 +551,7 @@ GitLogList::GitLogList(QWidget *parent)
     : QTreeView(parent)
     , m_model(new GitLogListModel(this))
 {
-    initIconResources();
+    AppUtils::initIconResources();
     setModel(m_model);
     setItemDelegate(new GitLogListDelegate(this));
     setRootIsDecorated(false);

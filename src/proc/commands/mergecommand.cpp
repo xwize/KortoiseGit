@@ -15,7 +15,6 @@
 #include "apputils.hpp"
 #include "mergedlg.hpp"
 #include "progressdlg.hpp"
-#include "utils/runtimeerror.hpp"
 
 #include <KLocalizedString>
 #include <KMessageBox>
@@ -104,22 +103,8 @@ bool MergeCommand::merge(const QString& workingTree)
 
     ProgressDlg progress(workingTree);
     progress.addGitCmd(mergeArguments(options, messageFile.fileName()));
-    // DoMerge's m_PostCmdCallback: a failed merge may have left conflicts to resolve
-    QObject::connect(&progress, &ProgressDlg::commandsFinished, &progress, [&progress, &git] {
-        if (progress.gitStatus() == 0) {
-            return;
-        }
-        try {
-            if (git.hasWorkingTreeConflicts()) {
-                AppUtils::showMergeConflictsHint(&progress);
-            }
-        } catch (const RuntimeError& e) {
-            if (e.error().category != ErrorCategory::Git) {
-                throw;
-            }
-            KMessageBox::error(&progress, i18n("Checking for conflicts failed.") + QLatin1Char('\n') + e.error().message, QString(), KMessageBox::Options());
-        }
-    });
+    // DoMerge's m_PostCmdCallback
+    AppUtils::hintMergeConflictsOnFailure(progress, git);
 
     // Leaving the progress dialog with Abort while files are in conflict offers to abort the merge
     if (progress.exec() != QDialog::Accepted && git.hasWorkingTreeConflicts()) {

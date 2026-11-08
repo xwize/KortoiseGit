@@ -10,13 +10,13 @@
 
 #include "gitswitchdlg.hpp"
 
+#include "apputils.hpp"
 #include "chooseversion.hpp"
 
 #include <KConfigGroup>
 #include <KGuiItem>
 #include <KLocalizedString>
 #include <KMessageBox>
-#include <KSharedConfig>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -36,22 +36,12 @@ namespace
 
 using namespace Qt::StringLiterals;
 
-constexpr auto headsPrefix = "refs/heads/"_L1;
 constexpr auto originPrefix = "origin/"_L1;
-constexpr auto remotesPrefix = "remotes/"_L1;
 constexpr auto newBranchForTagKey = "SwitchToTagNewBranch";
 constexpr auto newBranchForCommitKey = "SwitchToCommitNewBranch";
 // CGit::GetShortHASHLength
 constexpr qsizetype shortHashLength = 8;
 constexpr KMessageBox::Options noNotify = KMessageBox::Options();
-
-/**
- * @returns Where TortoiseGit's top-level registry values (Software\TortoiseGit\...) are kept.
- */
-KConfigGroup settings()
-{
-    return KSharedConfig::openConfig()->group(QStringLiteral("General"));
-}
 
 } // namespace
 
@@ -95,7 +85,7 @@ GitSwitchDlg::GitSwitchDlg(Git git, const QString& initialRefName, QWidget *pare
     // The constructor's defaults
     m_track->setTristate(true);
     m_track->setCheckState(Qt::PartiallyChecked);
-    const KConfigGroup config = settings();
+    const KConfigGroup config = AppUtils::generalSettings();
     m_newBranchForTag = config.readEntry(newBranchForTagKey, true);
     m_newBranchForCommit = config.readEntry(newBranchForCommitKey, true);
 
@@ -172,7 +162,7 @@ void GitSwitchDlg::accept()
         }
     }
 
-    KConfigGroup config = settings();
+    KConfigGroup config = AppUtils::generalSettings();
     if (const ChooseVersion::Choice choice = m_chooseVersion->choice(); choice == ChooseVersion::Choice::Version) {
         m_newBranchForCommit = m_branch->isChecked();
         config.writeEntry(newBranchForCommitKey, m_newBranchForCommit);
@@ -204,8 +194,8 @@ void GitSwitchDlg::setDefaultName()
     qsizetype start = -1;
     if (version.startsWith(originPrefix)) {
         start = version.indexOf(QLatin1Char('/'), originPrefix.size() + 1);
-    } else if (version.startsWith(remotesPrefix)) {
-        start = version.indexOf(QLatin1Char('/'), remotesPrefix.size() + 1);
+    } else if (version.startsWith(Git::remotesPrefix)) {
+        start = version.indexOf(QLatin1Char('/'), Git::remotesPrefix.size() + 1);
     }
 
     bool branch = false;
@@ -217,8 +207,8 @@ void GitSwitchDlg::setDefaultName()
         branch = true;
         track = Qt::PartiallyChecked;
     } else {
-        if (versionName.startsWith(headsPrefix)) {
-            version = versionName.mid(headsPrefix.size());
+        if (versionName.startsWith(Git::refsHeadsPrefix)) {
+            version = versionName.mid(Git::refsHeadsPrefix.size());
         } else if (choice == ChooseVersion::Choice::Version) {
             version = version.left(shortHashLength);
         }
@@ -254,7 +244,7 @@ void GitSwitchDlg::onNewBranchChanged()
     }
     const QString name = QLatin1Char('/') + m_newBranch->text();
     const QString remoteName = m_chooseVersion->branchCombo()->currentText();
-    if (remoteName.startsWith(remotesPrefix) && !remoteName.endsWith(name)) {
+    if (remoteName.startsWith(Git::remotesPrefix) && !remoteName.endsWith(name)) {
         m_track->setCheckState(Qt::Unchecked);
     }
 }

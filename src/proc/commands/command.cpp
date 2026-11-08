@@ -125,19 +125,6 @@ QString Command::value(const QString& name) const
     return m_values.value(name);
 }
 
-QString Command::repositoryRoot(const QString& path)
-{
-    try {
-        return Git::workingTreeRoot(path);
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        const QFileInfo info(path);
-        return info.isDir() ? info.absoluteFilePath() : info.absolutePath();
-    }
-}
-
 QString Command::gitPath(const QString& path)
 {
     // Asked of git, which resolves symlinks in the folder as it does for the working tree root

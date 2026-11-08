@@ -13,10 +13,12 @@
 #include "git/gitcall.hpp"
 
 #include <QByteArray>
+#include <QLatin1StringView>
 #include <QString>
 #include <QStringList>
 
 #include <memory>
+#include <optional>
 
 namespace kgt
 {
@@ -51,6 +53,15 @@ public:
      * @param workingDirectory The directory git runs in: a working tree or any directory inside one.
      */
     explicit Git(QString workingDirectory);
+
+    // Full ref names
+    static constexpr QLatin1StringView refsPrefix{"refs/"};
+    static constexpr QLatin1StringView refsHeadsPrefix{"refs/heads/"};
+    static constexpr QLatin1StringView refsRemotesPrefix{"refs/remotes/"};
+    static constexpr QLatin1StringView refsTagsPrefix{"refs/tags/"};
+    // Short ref names, as stripRefName() and git branch -a leave them
+    static constexpr QLatin1StringView headsPrefix{"heads/"};
+    static constexpr QLatin1StringView remotesPrefix{"remotes/"};
 
     /**
      * @returns The directory git runs in.
@@ -90,6 +101,21 @@ public:
      * @throws RuntimeError (category Git) if the path is not inside a working tree.
      */
     [[nodiscard]] static QString workingTreeRoot(const QString& path);
+
+    /**
+     * @param path A path in a working tree or a bare repository.
+     * @returns The working tree's root holding it, or, for a bare repository, which has none, the path itself.
+     */
+    [[nodiscard]] static QString repositoryRoot(const QString& path);
+
+    /**
+     * Reads one field of git's -z style output.
+     * @param output The whole output.
+     * @param[in,out] pos Where the field starts; moved past the delimiter.
+     * @param delimiter What ends the field.
+     * @returns The field, or nothing if the delimiter is missing or the field is empty.
+     */
+    [[nodiscard]] static std::optional<QString> takeField(const QByteArray& output, qsizetype& pos, char delimiter);
 
     /**
      * Ported from CGit::StripRefName.

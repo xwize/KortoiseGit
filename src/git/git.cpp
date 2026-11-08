@@ -22,10 +22,6 @@
 namespace
 {
 
-using namespace Qt::StringLiterals;
-
-constexpr auto remotesPrefix = "remotes/"_L1;
-
 /**
  * @returns The order of StrCmpLogicalW, TortoiseGit's LogicalComparePredicate: numbers by value, case ignored.
  */
@@ -94,9 +90,34 @@ QString Git::workingTreeRoot(const QString& path)
     return QString::fromUtf8(root);
 }
 
+QString Git::repositoryRoot(const QString& path)
+{
+    try {
+        return workingTreeRoot(path);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        // Commands accept a bare repository; git runs in it without a path filter
+        const QFileInfo info(path);
+        return info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+    }
+}
+
+std::optional<QString> Git::takeField(const QByteArray& output, qsizetype& pos, char delimiter)
+{
+    const qsizetype end = output.indexOf(delimiter, pos);
+    if (end <= pos) {
+        return std::nullopt;
+    }
+    QString field = QString::fromUtf8(QByteArrayView(output).sliced(pos, end - pos));
+    pos = end + 1;
+    return field;
+}
+
 QString Git::stripRefName(const QString& ref)
 {
-    for (const QLatin1StringView prefix : {QLatin1StringView("refs/heads/"), QLatin1StringView("refs/")}) {
+    for (const QLatin1StringView prefix : {refsHeadsPrefix, refsPrefix}) {
         if (ref.startsWith(prefix)) {
             return ref.mid(prefix.size());
         }
@@ -205,8 +226,8 @@ bool Git::isBranchTagNameUnique(const QString& name) const
                                        QStringLiteral("--tags"),
                                        QStringLiteral("--heads"),
                                        QStringLiteral("--"),
-                                       QStringLiteral("refs/heads/") + name,
-                                       QStringLiteral("refs/tags/") + name},
+                                       refsHeadsPrefix + name,
+                                       refsTagsPrefix + name},
                                       RunMode::ReadOnly);
         return nonEmptyLines(output).size() <= 1;
     } catch (const RuntimeError& e) {
@@ -224,8 +245,8 @@ bool Git::branchTagExists(const QString& name, bool isBranch) const
         const QByteArray output = run({QStringLiteral("show-ref"),
                                        isBranch ? QStringLiteral("--heads") : QStringLiteral("--tags"),
                                        QStringLiteral("--"),
-                                       QStringLiteral("refs/heads/") + name,
-                                       QStringLiteral("refs/tags/") + name},
+                                       refsHeadsPrefix + name,
+                                       refsTagsPrefix + name},
                                       RunMode::ReadOnly);
         return !output.isEmpty();
     } catch (const RuntimeError& e) {
@@ -243,7 +264,7 @@ bool Git::isBranchNameValid(const QString& name)
         return false;
     }
     try {
-        std::ignore = Git(QDir::tempPath()).run({QStringLiteral("check-ref-format"), QStringLiteral("refs/heads/") + name}, RunMode::ReadOnly);
+        std::ignore = Git(QDir::tempPath()).run({QStringLiteral("check-ref-format"), refsHeadsPrefix + name}, RunMode::ReadOnly);
         return true;
     } catch (const RuntimeError& e) {
         if (e.error().category != ErrorCategory::Git) {

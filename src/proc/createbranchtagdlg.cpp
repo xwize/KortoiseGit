@@ -10,6 +10,7 @@
 
 #include "createbranchtagdlg.hpp"
 
+#include "apputils.hpp"
 #include "chooseversion.hpp"
 #include "git/gitadmindir.hpp"
 
@@ -17,7 +18,6 @@
 #include <KGuiItem>
 #include <KLocalizedString>
 #include <KMessageBox>
-#include <KSharedConfig>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -37,22 +37,11 @@
 namespace
 {
 
-using namespace Qt::StringLiterals;
-
-constexpr auto remotesPrefix = "remotes/"_L1;
 constexpr auto newBranchSwitchToKey = "NewBranchSwitchTo";
 constexpr auto pushTagKey = "PushTag";
 constexpr KMessageBox::Options noNotify = KMessageBox::Options();
 // IDC_EDIT_MESSAGE's height in the resource
 constexpr int messageLines = 3;
-
-/**
- * @returns Where TortoiseGit's top-level registry values (Software\TortoiseGit\...) are kept.
- */
-KConfigGroup settings()
-{
-    return KSharedConfig::openConfig()->group(QStringLiteral("General"));
-}
 
 } // namespace
 
@@ -117,9 +106,9 @@ CreateBranchTagDlg::CreateBranchTagDlg(Git git, const CreateBranchTagParams& par
     // OnInitDialog: Sign needs a signing key, and Sign and Push only exist for tags
     if (m_isTag) {
         m_sign->setEnabled(!m_git.configValue(QStringLiteral("user.signingkey")).isEmpty());
-        m_push->setChecked(settings().readEntry(pushTagKey, false));
+        m_push->setChecked(AppUtils::generalSettings().readEntry(pushTagKey, false));
     } else {
-        m_switch->setChecked(params.switchNewBranch || settings().readEntry(newBranchSwitchToKey, false));
+        m_switch->setChecked(params.switchNewBranch || AppUtils::generalSettings().readEntry(newBranchSwitchToKey, false));
     }
     m_sign->setVisible(m_isTag);
     m_push->setVisible(m_isTag);
@@ -185,7 +174,7 @@ void CreateBranchTagDlg::accept()
 
     // TortoiseGit reads the hidden checkbox too, and then fails to switch in a bare repository
     const bool switchToNewBranch = m_switch->isEnabled() && m_switch->isChecked();
-    KConfigGroup config = settings();
+    KConfigGroup config = AppUtils::generalSettings();
     if (m_isTag) {
         config.writeEntry(pushTagKey, m_push->isChecked());
     } else if (m_switch->isEnabled()) {
@@ -252,7 +241,7 @@ void CreateBranchTagDlg::onBranchSelectionChanged()
 {
     // Ported from CCreateBranchTagDlg::OnCbnSelchangeComboboxexBranch: a remote branch offers its name and Track
     const QString selected = m_chooseVersion->branchCombo()->currentText();
-    if (selected.startsWith(remotesPrefix) && !m_isTag) {
+    if (selected.startsWith(Git::remotesPrefix) && !m_isTag) {
         QString oldName = m_oldSelectBranch;
         if (const qsizetype start = oldName.lastIndexOf(QLatin1Char('/')); start >= 0) {
             oldName = oldName.mid(start + 1);
@@ -264,7 +253,7 @@ void CreateBranchTagDlg::onBranchSelectionChanged()
         if (m_name->text().isEmpty() || isDefault) {
             QString name = selected;
             // Past remotes/<remote>/
-            if (const qsizetype start = name.indexOf(QLatin1Char('/'), remotesPrefix.size() + 1); start >= 0) {
+            if (const qsizetype start = name.indexOf(QLatin1Char('/'), Git::remotesPrefix.size() + 1); start >= 0) {
                 name = name.mid(start + 1);
             }
             m_name->setText(name);
@@ -283,7 +272,7 @@ void CreateBranchTagDlg::onNameChanged()
     }
     const QString name = QLatin1Char('/') + m_name->text();
     const QString remoteName = m_chooseVersion->branchCombo()->currentText();
-    if (remoteName.startsWith(remotesPrefix) && !remoteName.endsWith(name)) {
+    if (remoteName.startsWith(Git::remotesPrefix) && !remoteName.endsWith(name)) {
         m_track->setCheckState(Qt::Unchecked);
     }
 }

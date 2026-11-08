@@ -21,8 +21,7 @@
 #include "gitloglist.hpp"
 #include "gitloglistmodel.hpp"
 #include "gitstatuslistctrl.hpp"
-#include "kortoisegitproc_debug.hpp"
-#include "utils/runtimeerror.hpp"
+#include "historycombo.hpp"
 
 #include <KLocalizedString>
 
@@ -89,41 +88,6 @@ QStringList splitAllTexts()
         i18n("S&quash unselected"),
         i18n("E&dit unselected"),
     };
-}
-
-/**
- * Ported from CHistoryCombo::AddString: puts a text at the top of a combo box, once, and selects it.
- * @param combo The combo box.
- * @param text The text.
- */
-void addString(QComboBox *combo, const QString& text)
-{
-    if (text.isEmpty()) {
-        return;
-    }
-    const int existing = combo->findText(text, Qt::MatchExactly | Qt::MatchCaseSensitive);
-    if (existing >= 0) {
-        combo->removeItem(existing);
-    }
-    combo->insertItem(0, text);
-    combo->setCurrentIndex(0);
-}
-
-/**
- * @param call A finished git call.
- * @returns Its output, or nothing if git failed: TortoiseGit ignores errors of the branch lists.
- */
-QByteArray outputOrEmpty(const GitCall& call)
-{
-    try {
-        return call.output();
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        qCWarning(KGT_PROC) << "Loading the branches or tags failed:" << e.error().message;
-        return {};
-    }
 }
 
 } // namespace
@@ -431,7 +395,7 @@ void RebaseDlg::onBranchesLoaded()
     GitCall *tagCall = m_tagCall.release();
     branchCall->deleteLater();
     tagCall->deleteLater();
-    const QByteArray branchOutput = outputOrEmpty(*branchCall);
+    const QByteArray branchOutput = AppUtils::outputOrEmpty(*branchCall);
 
     // LoadBranchInfo
     {
@@ -445,15 +409,15 @@ void RebaseDlg::onBranchesLoaded()
         } else {
             // GetCurrentBranch(true): HEAD when detached
             const QString head = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(m_git.workingDirectory()));
-            addString(m_branchCtrl, head.isEmpty() ? QStringLiteral("HEAD") : head);
+            HistoryCombo::addString(m_branchCtrl, head.isEmpty() ? QStringLiteral("HEAD") : head, 0);
         }
 
         const BranchList upstreams = Git::parseBranchList(branchOutput, BranchAllF, false, !m_git.derefFetchHead().isEmpty());
         m_upstreamCtrl->clear();
-        m_upstreamCtrl->addItems(upstreams.branches + Git::parseTagList(outputOrEmpty(*tagCall)));
+        m_upstreamCtrl->addItems(upstreams.branches + Git::parseTagList(AppUtils::outputOrEmpty(*tagCall)));
         m_upstreamCtrl->setCurrentIndex(-1);
         if (!m_options.upstream.isEmpty()) {
-            addString(m_upstreamCtrl, m_options.upstream);
+            HistoryCombo::addString(m_upstreamCtrl, m_options.upstream, 0);
         } else {
             // Select pull-remote from current branch (GetRemoteTrackedBranchForHEAD)
             const QString current = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(m_git.workingDirectory()));
@@ -802,8 +766,8 @@ void RebaseDlg::onReverse()
     {
         const QSignalBlocker branchBlocker(m_branchCtrl);
         const QSignalBlocker upstreamBlocker(m_upstreamCtrl);
-        addString(m_branchCtrl, upstream);
-        addString(m_upstreamCtrl, branch);
+        HistoryCombo::addString(m_branchCtrl, upstream, 0);
+        HistoryCombo::addString(m_upstreamCtrl, branch, 0);
     }
     fetchLogList();
 }
@@ -817,7 +781,7 @@ void RebaseDlg::onBrowse()
     }
     {
         const QSignalBlocker blocker(m_upstreamCtrl);
-        addString(m_upstreamCtrl, Git::stripRefName(ref));
+        HistoryCombo::addString(m_upstreamCtrl, Git::stripRefName(ref), 0);
     }
     fetchLogList();
 }

@@ -44,7 +44,6 @@ enum class Field {
 constexpr qsizetype fieldCount = static_cast<qsizetype>(Field::Count);
 
 constexpr char simpleListMarker = '\x01'; // Starts each commit's header in simpleListArguments()' output
-constexpr QLatin1StringView tagPrefix("refs/tags/");
 
 /**
  * Every field ends with a NUL, and -z ends the record with one more: a message can't hold a NUL, so the fields
@@ -117,23 +116,6 @@ std::optional<GitRevLoglist> makeRev(const std::array<QByteArrayView, fieldCount
 }
 
 /**
- * Reads up to the next NUL.
- * @param output The whole output.
- * @param[in,out] pos Where the field starts; moved past the NUL.
- * @returns The field, or nothing if the NUL is missing or the field is empty.
- */
-std::optional<QString> takeNulField(const QByteArray& output, qsizetype& pos)
-{
-    const qsizetype end = output.indexOf('\0', pos);
-    if (end <= pos) {
-        return std::nullopt;
-    }
-    QString field = QString::fromUtf8(QByteArrayView(output).sliced(pos, end - pos));
-    pos = end + 1;
-    return field;
-}
-
-/**
  * Parses one raw diff record: ":srcmode dstmode srcsha dstsha status\0path\0", with the source path first for a
  * rename or copy (CTGitPathList::ParserFromLog's raw branch).
  * @param output The whole output.
@@ -159,14 +141,14 @@ std::optional<GitStatusEntry> takeRawRecord(const QByteArray& output, qsizetype&
     if (!entry.actions) {
         return std::nullopt;
     }
-    std::optional<QString> path = takeNulField(output, pos);
+    std::optional<QString> path = Git::takeField(output, pos, '\0');
     if (!path) {
         return std::nullopt;
     }
     if (status == 'R' || status == 'C') {
         entry.kind = GitStatusKind::RenamedOrCopied;
         entry.origPath = std::move(*path);
-        path = takeNulField(output, pos);
+        path = Git::takeField(output, pos, '\0');
         if (!path) {
             return std::nullopt;
         }
@@ -183,7 +165,7 @@ std::optional<GitStatusEntry> takeRawRecord(const QByteArray& output, qsizetype&
 void addTagInfo(QHash<QString, QString>& infos, const std::array<QByteArrayView, 6>& fields)
 {
     const QString refName = QString::fromUtf8(fields.at(0));
-    QString info = QStringLiteral("tag ") + refName.mid(tagPrefix.size()) + QLatin1Char('\n');
+    QString info = QStringLiteral("tag ") + refName.mid(Git::refsTagsPrefix.size()) + QLatin1Char('\n');
     const QString taggerName = QString::fromUtf8(fields.at(2));
     const QString taggerEmail = QString::fromUtf8(fields.at(3));
     if (!taggerName.isEmpty() || !taggerEmail.isEmpty()) {
@@ -281,9 +263,6 @@ QList<GitRef> GitRevLoglist::parseRefs(const QString& decoration)
 {
     static const QString headArrow = QStringLiteral("HEAD -> ");
     static const QString tagPrefix = QStringLiteral("tag: ");
-    static const QString headsPrefix = QStringLiteral("refs/heads/");
-    static const QString remotesPrefix = QStringLiteral("refs/remotes/");
-    static const QString tagsPrefix = QStringLiteral("refs/tags/");
 
     QList<GitRef> refs;
     // Ref names can't hold a space, so ", " only ever separates them
@@ -301,15 +280,15 @@ QList<GitRef> GitRevLoglist::parseRefs(const QString& decoration)
         if (item.startsWith(tagPrefix)) {
             item.remove(0, tagPrefix.size());
         }
-        if (item.startsWith(headsPrefix)) {
+        if (item.startsWith(Git::refsHeadsPrefix)) {
             ref.type = GitRef::Type::LocalBranch;
-            ref.name = item.mid(headsPrefix.size());
-        } else if (item.startsWith(remotesPrefix)) {
+            ref.name = item.mid(Git::refsHeadsPrefix.size());
+        } else if (item.startsWith(Git::refsRemotesPrefix)) {
             ref.type = GitRef::Type::RemoteBranch;
-            ref.name = item.mid(remotesPrefix.size());
-        } else if (item.startsWith(tagsPrefix)) {
+            ref.name = item.mid(Git::refsRemotesPrefix.size());
+        } else if (item.startsWith(Git::refsTagsPrefix)) {
             ref.type = GitRef::Type::Tag;
-            ref.name = item.mid(tagsPrefix.size());
+            ref.name = item.mid(Git::refsTagsPrefix.size());
         } else if (item == QLatin1String("refs/stash")) {
             ref.type = GitRef::Type::Stash;
             ref.name = QStringLiteral("stash");
@@ -325,11 +304,11 @@ QString GitRef::fullName() const
 {
     switch (type) {
     case Type::LocalBranch:
-        return QStringLiteral("refs/heads/") + name;
+        return Git::refsHeadsPrefix + name;
     case Type::RemoteBranch:
-        return QStringLiteral("refs/remotes/") + name;
+        return Git::refsRemotesPrefix + name;
     case Type::Tag:
-        return tagPrefix + name;
+        return Git::refsTagsPrefix + name;
     case Type::Stash:
         return QStringLiteral("refs/stash");
     case Type::Head:
@@ -445,7 +424,7 @@ QStringList GitRevLoglist::tagInfoArguments()
     return {
         QStringLiteral("for-each-ref"),
         QStringLiteral("--format=%(refname)%00%(objecttype)%00%(taggername)%00%(taggeremail)%00%(taggerdate:unix)%00%(contents)%00%00"),
-        tagPrefix,
+        Git::refsTagsPrefix,
     };
 }
 

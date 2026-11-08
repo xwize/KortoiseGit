@@ -104,12 +104,6 @@ protected:
     explicit Command(PathRequirement requirement);
 
     /**
-     * @param path A path in a working tree or a bare repository.
-     * @returns The working tree's root holding it, or, for a bare repository, which has none, the path itself.
-     */
-    [[nodiscard]] static QString repositoryRoot(const QString& path);
-
-    /**
      * Ported from CTGitPath::GetGitPathString.
      * @param path A file in a working tree, absolute.
      * @returns The file relative to the working tree's root, '/'-separated.

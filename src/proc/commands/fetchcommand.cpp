@@ -11,6 +11,7 @@
 
 #include "commands/fetchcommand.hpp"
 
+#include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 #include "progressdlg.hpp"
 #include "pullfetchdlg.hpp"
@@ -40,7 +41,7 @@ bool FetchCommand::execute()
         }
         return result;
     }
-    return fetch(repositoryRoot(paths().constFirst()));
+    return fetch(Git::repositoryRoot(paths().constFirst()));
 }
 
 QStringList FetchCommand::fetchArguments(const PullFetchOptions& options)

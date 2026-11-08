@@ -12,7 +12,7 @@
 
 #include "apputils.hpp"
 #include "git/gitadmindir.hpp"
-#include "utils/runtimeerror.hpp"
+#include "historycombo.hpp"
 
 #include <KConfigGroup>
 #include <KLocalizedString>
@@ -88,24 +88,6 @@ void saveHistory(const QComboBox *combo, const History& history)
     entries.prepend(current);
     group.writeEntry(QString(history.key), entries.mid(0, maxHistoryItems));
     group.sync();
-}
-
-/**
- * Ported from CHistoryCombo::AddString: appends an entry unless it is there already, and selects it.
- * @param combo A combo box.
- * @param text The entry; nothing happens if it is empty.
- */
-void addString(QComboBox *combo, const QString& text)
-{
-    if (text.isEmpty()) {
-        return;
-    }
-    int index = combo->findText(text, Qt::MatchExactly | Qt::MatchCaseSensitive);
-    if (index < 0) {
-        combo->addItem(text);
-        index = combo->count() - 1;
-    }
-    combo->setCurrentIndex(index);
 }
 
 /**
@@ -329,14 +311,14 @@ void PullFetchDlg::refresh()
     QString pullRemote;
     QString pullBranch;
     if (!currentBranch.isEmpty()) {
-        pullRemote = configValue(QStringLiteral("branch.%1.remote").arg(currentBranch));
-        pullBranch = Git::stripRefName(configValue(QStringLiteral("branch.%1.merge").arg(currentBranch)));
+        pullRemote = m_git.configValue(QStringLiteral("branch.%1.remote").arg(currentBranch));
+        pullBranch = Git::stripRefName(m_git.configValue(QStringLiteral("branch.%1.merge").arg(currentBranch)));
     }
     m_configPullRemote = pullRemote;
     m_configPullBranch = pullBranch;
 
     // Without an upstream, the branch of the same name
-    addString(m_remoteBranch, pullBranch.isEmpty() ? currentBranch : pullBranch);
+    HistoryCombo::addString(m_remoteBranch, pullBranch.isEmpty() ? currentBranch : pullBranch);
 
     if (pullRemote.isEmpty()) {
         pullRemote = historyGroup(QStringLiteral("PullRemote")).readEntry(m_git.workingDirectory(), QString());
@@ -365,7 +347,7 @@ void PullFetchDlg::onRemoteChanged()
         return;
     }
 
-    const QString tagopt = configValue(QStringLiteral("remote.%1.tagopt").arg(remote));
+    const QString tagopt = m_git.configValue(QStringLiteral("remote.%1.tagopt").arg(remote));
     QString tagDefault;
     if (tagopt == QLatin1String("--no-tags")) {
         tagDefault = i18n("None");
@@ -376,9 +358,9 @@ void PullFetchDlg::onRemoteChanged()
     }
     m_tagOpt->setText(i18nc("%1 is the default", "Default: %1", tagDefault));
 
-    QString prune = configValue(QStringLiteral("remote.%1.prune").arg(remote));
+    QString prune = m_git.configValue(QStringLiteral("remote.%1.prune").arg(remote));
     if (prune.isEmpty()) {
-        prune = configValue(QStringLiteral("fetch.prune"));
+        prune = m_git.configValue(QStringLiteral("fetch.prune"));
     }
     m_pruneDefault->setText(prune.isEmpty() ? QString() : i18nc("%1 is the default", "Default: %1", prune));
 }
@@ -437,19 +419,6 @@ void PullFetchDlg::updateFastForwardStates()
         m_noFF->setChecked(false);
     }
     m_noFF->setEnabled(!m_ffOnly->isChecked());
-}
-
-QString PullFetchDlg::configValue(const QString& name) const
-{
-    try {
-        return QString::fromUtf8(m_git.run({QStringLiteral("config"), QStringLiteral("--get"), name}, RunMode::ReadOnly)).trimmed();
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        // Exit code 1: not set
-        return {};
-    }
 }
 
 QString PullFetchDlg::settingsGroup() const

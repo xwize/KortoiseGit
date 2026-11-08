@@ -4,6 +4,7 @@
 set(kgt_tests
     adddlgtest
     appicontest
+    apputilstest
     browserefsdlgtest
     clonetest
     cmdlineargstest
@@ -18,6 +19,7 @@ set(kgt_tests
     gitstatuslistctrltest
     gitstatustest
     gittest
+    historycombotest
     lanestest
     logdlgfiltertest
     logdlgtest
@@ -31,6 +33,7 @@ set(kgt_tests
     resulttest
     reverttest
     switchtest
+    tgitpathtest
 )
 
 foreach(test ${kgt_tests})

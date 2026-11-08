@@ -15,7 +15,6 @@
 #include "git/gitrevrefbrowser.hpp"
 #include "utils/runtimeerror.hpp"
 
-#include <KGuiItem>
 #include <KLocalizedString>
 #include <KMessageBox>
 
@@ -49,9 +48,6 @@ namespace
 using namespace kgt;
 using namespace Qt::StringLiterals;
 
-constexpr auto headsPrefix = "refs/heads/"_L1;
-constexpr auto remotesPrefix = "refs/remotes/"_L1;
-constexpr auto tagsPrefix = "refs/tags/"_L1;
 constexpr int filterDelay = 1000; // IDT_FILTER's timeout in ms
 constexpr int treeWidth = 180;
 constexpr QSize initialSize(900, 480);
@@ -99,22 +95,6 @@ QByteArray configOutput(const GitCall& call)
         // Exit code 1: no remotes and no descriptions. Anything worse shows up in for-each-ref too
         return {};
     }
-}
-
-/**
- * Asks a yes/no question as TortoiseGit's MessageBox with MB_YESNO.
- * @param parent The dialog.
- * @param question The question.
- * @param warning Whether to show it as a warning (MB_ICONWARNING) rather than a question.
- * @returns Whether the user answered Yes.
- */
-bool askYesNo(QWidget *parent, const QString& question, bool warning)
-{
-    const KGuiItem yesItem(i18n("&Yes"));
-    const KGuiItem noItem(i18n("&No"));
-    const auto answer = warning ? KMessageBox::warningTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify)
-                                : KMessageBox::questionTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify);
-    return answer == KMessageBox::PrimaryAction;
 }
 
 /**
@@ -282,7 +262,7 @@ void BrowseRefsDlg::refresh(const QString& selectRef)
     m_currentBranch = currentBranchOf(m_git.workingDirectory());
     QString target = selectRef;
     if (target == "HEAD"_L1) {
-        target = m_currentBranch.isEmpty() || m_currentBranch == "HEAD"_L1 ? QStringLiteral("refs/heads") : headsPrefix + m_currentBranch;
+        target = m_currentBranch.isEmpty() || m_currentBranch == "HEAD"_L1 ? QStringLiteral("refs/heads") : Git::refsHeadsPrefix + m_currentBranch;
     } else if (target.isEmpty()) {
         target = selectedRef(false, true);
     }
@@ -327,17 +307,17 @@ void BrowseRefsDlg::onLoadFinished()
 bool BrowseRefsDlg::isRefKindShown(const QString& refName) const
 {
     // Refresh's filter callback: use refs based on m_pickRef_Kind
-    if (refName.startsWith(headsPrefix) && !(m_pickRefKind & PickRefHead)) {
+    if (refName.startsWith(Git::refsHeadsPrefix) && !(m_pickRefKind & PickRefHead)) {
         return false;
     }
-    if (refName.startsWith(tagsPrefix) && !(m_pickRefKind & PickRefTag)) {
+    if (refName.startsWith(Git::refsTagsPrefix) && !(m_pickRefKind & PickRefTag)) {
         return false;
     }
-    if (refName.startsWith(remotesPrefix) && !(m_pickRefKind & PickRefRemote)) {
+    if (refName.startsWith(Git::refsRemotesPrefix) && !(m_pickRefKind & PickRefRemote)) {
         return false;
     }
     // Don't show refs/stash if only remote branches are requested
-    return m_pickRefKind != PickRefRemote || refName.startsWith(remotesPrefix);
+    return m_pickRefKind != PickRefRemote || refName.startsWith(Git::refsRemotesPrefix);
 }
 
 void BrowseRefsDlg::populate(const QByteArray& refsOutput, const RefBrowserConfig& config)
@@ -369,7 +349,7 @@ void BrowseRefsDlg::populate(const QByteArray& refsOutput, const RefBrowserConfi
         treeNode(it.key(), nullptr, true).ref = it.value();
         anyShown = true;
     }
-    m_listModel->setCurrentBranchRef(m_currentBranch.isEmpty() || m_currentBranch == "HEAD"_L1 ? QString() : headsPrefix + m_currentBranch);
+    m_listModel->setCurrentBranchRef(m_currentBranch.isEmpty() || m_currentBranch == "HEAD"_L1 ? QString() : Git::refsHeadsPrefix + m_currentBranch);
 
     // Always expand the tree first
     m_refTree->expand(rootItem->index());
@@ -385,7 +365,7 @@ void BrowseRefsDlg::populate(const QByteArray& refsOutput, const RefBrowserConfi
 ShadowTree& BrowseRefsDlg::treeNode(QString refName, ShadowTree *treePos, bool createIfNotExist)
 {
     if (!treePos) {
-        if (refName.startsWith("refs/"_L1)) {
+        if (refName.startsWith(Git::refsPrefix)) {
             refName = refName.mid(5);
         }
         treePos = &m_treeRoot;
@@ -512,10 +492,10 @@ QString BrowseRefsDlg::selectedRef(bool onlyIfLeaf, bool pickFirstSelIfMultiSel)
         QStringList refs;
         for (const ShadowTree *leaf : leaves) {
             QString ref = leaf->refName();
-            if (ref.startsWith("refs/"_L1)) {
+            if (ref.startsWith(Git::refsPrefix)) {
                 ref = ref.mid(5);
             }
-            if (ref.startsWith("heads/"_L1)) {
+            if (ref.startsWith(Git::headsPrefix)) {
                 ref = ref.mid(6);
             }
             refs.append(ref);
@@ -656,11 +636,11 @@ std::unique_ptr<QMenu> BrowseRefsDlg::createListContextMenu()
     // TODO: with two refs selected, the compare and log range entries come with Phase 4
 
     QString deleteText;
-    if (!leaves.isEmpty() && areAllFrom(refNames, remotesPrefix)) {
+    if (!leaves.isEmpty() && areAllFrom(refNames, Git::refsRemotesPrefix)) {
         deleteText = leaves.size() == 1 ? i18n("Delete remote branch") : i18n("Delete %1 remote branches", leaves.size());
-    } else if (!leaves.isEmpty() && areAllFrom(refNames, headsPrefix)) {
+    } else if (!leaves.isEmpty() && areAllFrom(refNames, Git::refsHeadsPrefix)) {
         deleteText = leaves.size() == 1 ? i18n("Delete branch") : i18n("Delete %1 branches", leaves.size());
-    } else if (!leaves.isEmpty() && areAllFrom(refNames, tagsPrefix)) {
+    } else if (!leaves.isEmpty() && areAllFrom(refNames, Git::refsTagsPrefix)) {
         deleteText = leaves.size() == 1 ? i18n("Delete tag") : i18n("Delete %1 tags", leaves.size());
     }
     if (!deleteText.isEmpty()) {
@@ -743,12 +723,12 @@ bool BrowseRefsDlg::confirmDeleteRef(const QStringList& refNames)
 {
     Q_ASSERT(!refNames.isEmpty());
     const QString& first = refNames.constFirst();
-    const bool isRemoteBranch = first.startsWith(remotesPrefix);
-    const bool isBranch = isRemoteBranch || first.startsWith(headsPrefix);
+    const bool isRemoteBranch = first.startsWith(Git::refsRemotesPrefix);
+    const bool isBranch = isRemoteBranch || first.startsWith(Git::refsHeadsPrefix);
     QString message;
     bool warning = false;
     if (isBranch && refNames.size() == 1) {
-        const QString branchToDelete = first.mid(isRemoteBranch ? remotesPrefix.size() : headsPrefix.size());
+        const QString branchToDelete = first.mid(isRemoteBranch ? Git::refsRemotesPrefix.size() : Git::refsHeadsPrefix.size());
         message = i18n("Do you really want to delete \"%1\"?", branchToDelete);
         // Check if the branch is fully merged into HEAD
         if (!isFastForward(first, QStringLiteral("HEAD"))) {
@@ -759,21 +739,21 @@ bool BrowseRefsDlg::confirmDeleteRef(const QStringList& refNames)
         message = i18n("Do you really want to permanently delete the %1 selected refs? It can NOT be recovered!", refNames.size());
         message += QStringLiteral("\n\n") + i18n("It has not been checked if these branches have been fully merged into HEAD.");
         warning = true;
-    } else if (first.startsWith(tagsPrefix)) {
-        message = refNames.size() == 1 ? i18n("Do you really want to delete \"%1\"?", first.mid(tagsPrefix.size()))
+    } else if (first.startsWith(Git::refsTagsPrefix)) {
+        message = refNames.size() == 1 ? i18n("Do you really want to delete \"%1\"?", first.mid(Git::refsTagsPrefix.size()))
                                        : i18n("Do you really want to permanently delete the %1 selected refs? It can NOT be recovered!", refNames.size());
     }
     if (isRemoteBranch) {
         message += QStringLiteral("\n\n") + i18n("This action will remove the branches on the remote.");
         warning = true;
     }
-    return askYesNo(this, message, warning);
+    return AppUtils::askYesNo(this, message, warning);
 }
 
 bool BrowseRefsDlg::doDeleteRefs(const QStringList& refNames)
 {
     // Remote branches are deleted in one push per remote: faster, and fewer password prompts
-    if (areAllFrom(refNames, remotesPrefix)) {
+    if (areAllFrom(refNames, Git::refsRemotesPrefix)) {
         std::map<QString, QStringList> remoteBranches;
         for (const QString& refName : refNames) {
             if (const std::optional<RemoteBranch> split = splitRemoteBranchName(refName, m_remotes)) {
@@ -794,16 +774,16 @@ bool BrowseRefsDlg::doDeleteRefs(const QStringList& refNames)
 
 bool BrowseRefsDlg::doDeleteRef(const QString& completeRefName)
 {
-    if (completeRefName.startsWith(remotesPrefix)) {
+    if (completeRefName.startsWith(Git::refsRemotesPrefix)) {
         const std::optional<RemoteBranch> split = splitRemoteBranchName(completeRefName, m_remotes);
         return split && deleteRemoteRefs(split->remote, {split->branch});
     }
     // CGit::DeleteRef
     QStringList arguments;
-    if (completeRefName.startsWith(headsPrefix)) {
-        arguments = {QStringLiteral("branch"), QStringLiteral("-D"), QStringLiteral("--"), completeRefName.mid(headsPrefix.size())};
-    } else if (completeRefName.startsWith(tagsPrefix)) {
-        arguments = {QStringLiteral("tag"), QStringLiteral("-d"), QStringLiteral("--"), completeRefName.mid(tagsPrefix.size())};
+    if (completeRefName.startsWith(Git::refsHeadsPrefix)) {
+        arguments = {QStringLiteral("branch"), QStringLiteral("-D"), QStringLiteral("--"), completeRefName.mid(Git::refsHeadsPrefix.size())};
+    } else if (completeRefName.startsWith(Git::refsTagsPrefix)) {
+        arguments = {QStringLiteral("tag"), QStringLiteral("-d"), QStringLiteral("--"), completeRefName.mid(Git::refsTagsPrefix.size())};
     } else {
         return true;
     }
@@ -839,10 +819,10 @@ QStringList BrowseRefsDlg::deleteRemoteRefsArguments(const QString& remote, cons
 
 std::optional<RemoteBranch> BrowseRefsDlg::splitRemoteBranchName(QString ref, const QStringList& remotes)
 {
-    if (ref.startsWith(remotesPrefix)) {
-        ref = ref.mid(remotesPrefix.size());
-    } else if (ref.startsWith("remotes/"_L1)) {
-        ref = ref.mid(QLatin1StringView("remotes/").size());
+    if (ref.startsWith(Git::refsRemotesPrefix)) {
+        ref = ref.mid(Git::refsRemotesPrefix.size());
+    } else if (ref.startsWith(Git::remotesPrefix)) {
+        ref = ref.mid(Git::remotesPrefix.size());
     }
     for (const QString& candidate : remotes) {
         if (ref.startsWith(candidate + QLatin1Char('/'))) {

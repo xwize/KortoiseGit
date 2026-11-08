@@ -92,6 +92,7 @@ target_sources(kgtproc PRIVATE
     gitstatuslistctrl.cpp
     gitstatuslistctrl.hpp
     gitstatuslistmodel.cpp
+    historycombo.cpp
     gitstatuslistmodel.hpp
     gitswitchdlg.cpp
     gitswitchdlg.hpp

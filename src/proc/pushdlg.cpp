@@ -9,9 +9,9 @@
 
 #include "pushdlg.hpp"
 
+#include "apputils.hpp"
 #include "utils/runtimeerror.hpp"
 
-#include <KGuiItem>
 #include <KLocalizedString>
 #include <KMessageBox>
 
@@ -55,20 +55,6 @@ void selectText(QComboBox *combo, const QString& text)
     } else {
         combo->setEditText(text);
     }
-}
-
-/**
- * @param question A question.
- * @param warning Whether it warns of something, such as a deletion, rather than only asking.
- * @returns Whether the user answered Yes.
- */
-bool askYesNo(const QString& question, bool warning)
-{
-    const KGuiItem yesItem(i18n("&Yes"));
-    const KGuiItem noItem(i18n("&No"));
-    const auto answer = warning ? KMessageBox::warningTwoActions(nullptr, question, QString(), yesItem, noItem, QString(), noNotify)
-                                : KMessageBox::questionTwoActions(nullptr, question, QString(), yesItem, noItem, QString(), noNotify);
-    return answer == KMessageBox::PrimaryAction;
 }
 
 } // namespace
@@ -159,11 +145,11 @@ void PushDlg::accept()
         return;
     }
     if (chosen.localBranch.isEmpty() && chosen.remoteBranch.isEmpty()) {
-        if (!askYesNo(i18n("The local branch name and the remote branch name are empty.\nContinue?"), false)) {
+        if (!AppUtils::askYesNo(nullptr, i18n("The local branch name and the remote branch name are empty.\nContinue?"), false)) {
             return;
         }
     } else if (chosen.localBranch.isEmpty()) {
-        if (!askYesNo(i18n("The local branch/tag name is empty. This results in a remote removal.\nContinue?"), true)) {
+        if (!AppUtils::askYesNo(nullptr, i18n("The local branch/tag name is empty. This results in a remote removal.\nContinue?"), true)) {
             return;
         }
     } else if (!chosen.remoteBranch.isEmpty() && !isBranchNameValid(chosen.remoteBranch)) {
@@ -181,7 +167,7 @@ void PushDlg::refresh(const QString& selectLocalBranch)
     m_remote->setCurrentIndex(-1);
 
     const QStringList branches =
-        lines(m_git.run({QStringLiteral("for-each-ref"), QStringLiteral("--format=%(refname:short)"), QStringLiteral("refs/heads/")}, RunMode::ReadOnly));
+        lines(m_git.run({QStringLiteral("for-each-ref"), QStringLiteral("--format=%(refname:short)"), Git::refsHeadsPrefix}, RunMode::ReadOnly));
     QString current;
     try {
         current = QString::fromUtf8(
@@ -209,7 +195,8 @@ void PushDlg::refresh(const QString& selectLocalBranch)
     selectRemoteBranch(m_branchSource->currentText());
 
     // If the current branch isn't tracked yet, tracking it is the default
-    if (configValue(QStringLiteral("branch.%1.remote").arg(current)).isEmpty() && configValue(QStringLiteral("branch.%1.merge").arg(current)).isEmpty()) {
+    if (m_git.configValue(QStringLiteral("branch.%1.remote").arg(current)).isEmpty()
+        && m_git.configValue(QStringLiteral("branch.%1.merge").arg(current)).isEmpty()) {
         m_setUpstream->setChecked(true);
     }
     updateOptionStates();
@@ -222,17 +209,17 @@ void PushDlg::selectRemoteBranch(const QString& localBranch)
         return;
     }
     // CGit::GetRemotePushBranch
-    QString pushRemote = configValue(QStringLiteral("branch.%1.pushremote").arg(branch));
+    QString pushRemote = m_git.configValue(QStringLiteral("branch.%1.pushremote").arg(branch));
     if (pushRemote.isEmpty()) {
-        pushRemote = configValue(QStringLiteral("remote.pushdefault"));
+        pushRemote = m_git.configValue(QStringLiteral("remote.pushdefault"));
     }
     if (pushRemote.isEmpty()) {
-        pushRemote = configValue(QStringLiteral("branch.%1.remote").arg(branch));
+        pushRemote = m_git.configValue(QStringLiteral("branch.%1.remote").arg(branch));
     }
     // Not stripped, for gerrit's refs/for/..., as TortoiseGit's issue #1609
-    QString pushBranch = configValue(QStringLiteral("branch.%1.pushbranch").arg(branch));
+    QString pushBranch = m_git.configValue(QStringLiteral("branch.%1.pushbranch").arg(branch));
     if (pushBranch.isEmpty()) {
-        pushBranch = Git::stripRefName(configValue(QStringLiteral("branch.%1.merge").arg(branch)));
+        pushBranch = Git::stripRefName(m_git.configValue(QStringLiteral("branch.%1.merge").arg(branch)));
     }
 
     if (const int index = m_remote->findText(pushRemote); !pushRemote.isEmpty() && index >= 0) {
@@ -252,19 +239,6 @@ void PushDlg::updateOptionStates()
     // --force-with-lease and --tags don't go together
     m_tags->setEnabled(!m_forceWithLease->isChecked());
     m_forceWithLease->setEnabled(!m_tags->isChecked());
-}
-
-QString PushDlg::configValue(const QString& name) const
-{
-    try {
-        return QString::fromUtf8(m_git.run({QStringLiteral("config"), QStringLiteral("--get"), name}, RunMode::ReadOnly)).trimmed();
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        // Exit code 1: not set
-        return {};
-    }
 }
 
 bool PushDlg::isBranchNameValid(const QString& name) const

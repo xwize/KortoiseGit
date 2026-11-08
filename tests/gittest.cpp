@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "git/git.hpp"
+#include "git/gitcall.hpp"
 #include "testrepo.hpp"
 #include "utils/runtimeerror.hpp"
 
@@ -12,6 +13,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <optional>
 #include <tuple>
 
 namespace
@@ -176,6 +178,47 @@ private:
         qputenv("PATH", path);
         QVERIFY(threw);
         QVERIFY(elapsed.elapsed() < 10000);
+    }
+
+    void formatsACommandLine()
+    {
+        QCOMPARE(GitCall::formatCommandLine({QStringLiteral("commit"), QStringLiteral("-m"), QStringLiteral("two words"), QString()}),
+                 QStringLiteral("git commit -m \"two words\" \"\""));
+    }
+
+    void repositoryRootFallsBackForABareRepository()
+    {
+        const TestRepo repo;
+        QCOMPARE(Git::repositoryRoot(repo.path()), Git::workingTreeRoot(repo.path()));
+
+        const QTemporaryDir bare;
+        QVERIFY(bare.isValid());
+        std::ignore = Git(bare.path()).run({QStringLiteral("init"), QStringLiteral("--bare")});
+        QCOMPARE(Git::repositoryRoot(bare.path()), bare.path());
+    }
+
+    void takesDelimitedFields()
+    {
+        const QByteArray output("one\ttwo\0\0end", 13);
+        qsizetype pos = 0;
+        QCOMPARE(Git::takeField(output, pos, '\t'), std::optional(QStringLiteral("one")));
+        QCOMPARE(pos, 4);
+        QCOMPARE(Git::takeField(output, pos, '\0'), std::optional(QStringLiteral("two")));
+        QCOMPARE(pos, 8);
+        // An empty field, and one with no delimiter after it, leave the position alone
+        QCOMPARE(Git::takeField(output, pos, '\0'), std::nullopt);
+        QCOMPARE(pos, 8);
+        pos = 9;
+        QCOMPARE(Git::takeField(output, pos, '\0'), std::nullopt);
+        QCOMPARE(pos, 9);
+    }
+
+    void configValueKeepsAllButTheLastNewline()
+    {
+        const TestRepo repo;
+        repo.git().setConfigValue(QStringLiteral("kgt.spaced"), QStringLiteral(" value "));
+        QCOMPARE(repo.git().configValue(QStringLiteral("kgt.spaced")), QStringLiteral(" value "));
+        QVERIFY(repo.git().configValue(QStringLiteral("kgt.unset")).isEmpty());
     }
 
     void knowsAnUnbornBranch()
