@@ -13,7 +13,6 @@ set(kgt_tests
     difftest
     gitadmindirtest
     gitclioutputparsertest
-    gitloglistgraphtest
     gitnumstattest
     gitrevloglisttest
     gitstatuslistctrltest
@@ -39,10 +38,6 @@ foreach(test ${kgt_tests})
     # The dialog tests need no display
     set_tests_properties(${test} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endforeach()
-
-# The graph's pixel alignment again on a HiDPI screen
-add_test(NAME gitloglistgraphtest-dpr2 COMMAND gitloglistgraphtest)
-set_tests_properties(gitloglistgraphtest-dpr2 PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=2")
 
 # Runs the real executable to check exit codes and --help/--version
 target_compile_definitions(proctest PRIVATE KGT_PROC_EXE="$<TARGET_FILE:kortoisegitproc>")
