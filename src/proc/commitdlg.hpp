@@ -7,7 +7,7 @@
  * @file
  * Ported from TortoiseGit src/TortoiseProc/CommitDlg.h (CCommitDlg): the commit dialog. This is its core, in
  * TortoiseGit's default mode without staging support: the checked files are what gets committed, and the index
- * is prepared for them when Commit is clicked.
+ * is prepared for them when Commit is clicked. "Amend Last Commit" replaces HEAD instead of committing on top of it.
  */
 
 #pragma once
@@ -83,9 +83,11 @@ public:
     /**
      * Builds the git commands for a commit of the listed files.
      * @param model The file list; its listed entries and their check states are used.
+     * @param amendAgainstParent Whether the list is against HEAD~1 because the last commit is amended: unchecked
+     *        files are then reset to HEAD~1, so the last commit's changes to them are left out.
      * @returns The commands that prepare the index, and those that restore it after the commit.
      */
-    [[nodiscard]] static CommitPlan planCommit(const GitStatusListModel& model);
+    [[nodiscard]] static CommitPlan planCommit(const GitStatusListModel& model, bool amendAgainstParent = false);
 
     /**
      * @returns The changed-files list.
@@ -106,6 +108,11 @@ public:
      * @returns The "Show Unversioned Files" checkbox.
      */
     [[nodiscard]] QCheckBox *showUnversionedButton() const;
+
+    /**
+     * @returns The "Amend Last Commit" checkbox. Clicking it swaps the message, as the user's click does.
+     */
+    [[nodiscard]] QCheckBox *amendButton() const;
 
     /**
      * @returns Whether a commit is running.
@@ -132,6 +139,11 @@ Q_SIGNALS:
 
 private:
     void createWidgets();
+    void refresh();
+    void onListLoaded();
+    void onAmendClicked(bool checked);
+    [[nodiscard]] bool isAmending() const;
+    [[nodiscard]] bool isCherryPickActive() const;
     void updateOkButton();
     void onShowUnversionedToggled(bool checked);
     void runNextStep();
@@ -145,6 +157,7 @@ private:
     GitStatusListCtrl *m_fileList = nullptr;
     QLabel *m_statistics = nullptr;
     QCheckBox *m_showUnversioned = nullptr;
+    QCheckBox *m_amendButton = nullptr; // m_bCommitAmend
     QPushButton *m_okButton = nullptr;
     KMessageWidget *m_errorView = nullptr;
     QList<CommitStep> m_steps; // The commit's steps still to run
@@ -152,6 +165,10 @@ private:
     CommitStep m_runningStep;
     std::unique_ptr<QTemporaryFile> m_messageFile; // The message given to git commit -F
     std::optional<Error> m_commitError; // The first failure of the running commit
+    QString m_amendStr; // HEAD's message, as last shown while amending (m_AmendStr)
+    QString m_noAmendStr; // The message typed before amend was ticked (m_NoAmendStr)
+    bool m_amendDiffToLastCommit = false; // HEAD is a root commit, so amending compares with HEAD itself
+    bool m_mergeActive = false; // A merge is being concluded (CTGitPath::IsMergeActive)
     bool m_isCommitting = false;
 };
 

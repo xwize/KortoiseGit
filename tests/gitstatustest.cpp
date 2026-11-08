@@ -241,6 +241,52 @@ private Q_SLOTS:
         };
         QVERIFY(std::ranges::all_of(malformed, isRejected));
     }
+
+    void againstParentListsLastCommitsFiles()
+    {
+        const TestRepo repo;
+        for (const char *path : {"a.txt", "b.txt", "c.txt", "gone.txt", "old.txt"}) {
+            repo.write(QString::fromLatin1(path), QByteArray("several lines of\ncontent so that\na rename is found\nin ") + path + '\n');
+        }
+        repo.commitAll(QStringLiteral("base"));
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+        repo.write(QStringLiteral("c.txt"), "changed\n");
+        repo.remove(QStringLiteral("gone.txt"));
+        repo.write(QStringLiteral("new.txt"), "new\n");
+        repo.run({QStringLiteral("mv"), QStringLiteral("old.txt"), QStringLiteral("renamed.txt")});
+        repo.commitAll(QStringLiteral("last"));
+        // a.txt: the index goes back to HEAD~1, the working tree keeps HEAD's change
+        repo.run({QStringLiteral("reset"), QStringLiteral("--quiet"), QStringLiteral("HEAD~1"), QStringLiteral("--"), QStringLiteral("a.txt")});
+        // c.txt: back to HEAD~1 in both, so nothing differs from it
+        repo.run({QStringLiteral("checkout"), QStringLiteral("HEAD~1"), QStringLiteral("--"), QStringLiteral("c.txt")});
+        repo.write(QStringLiteral("b.txt"), "changed\n");
+        repo.write(QStringLiteral("untracked.txt"), "untracked\n");
+
+        const QList<GitStatusEntry> status = GitStatus::status(repo.git());
+        const Result<QList<GitStatusEntry>> merged =
+            GitStatus::withIndexDiff(status, repo.git().run(GitStatus::indexDiffArguments(QStringLiteral("HEAD~1")), RunMode::ReadOnly));
+        QVERIFY(merged);
+
+        const QList<GitStatusEntry> expected{
+            changed(QStringLiteral("a.txt"), FileState::Unmodified, FileState::Modified, Action::Modified),
+            changed(QStringLiteral("b.txt"), FileState::Unmodified, FileState::Modified, Action::Modified),
+            changed(QStringLiteral("gone.txt"), FileState::Deleted, FileState::Unmodified, Action::Deleted),
+            changed(QStringLiteral("new.txt"), FileState::Added, FileState::Unmodified, Action::Added),
+            GitStatusEntry{.kind = GitStatusKind::RenamedOrCopied,
+                           .path = QStringLiteral("renamed.txt"),
+                           .origPath = QStringLiteral("old.txt"),
+                           .index = FileState::Renamed,
+                           .worktree = FileState::Unmodified,
+                           .actions = Action::Replaced},
+            GitStatusEntry{.kind = GitStatusKind::Untracked,
+                           .path = QStringLiteral("untracked.txt"),
+                           .origPath = {},
+                           .index = FileState::Unmodified,
+                           .worktree = FileState::Unmodified,
+                           .actions = Action::Unversioned},
+        };
+        QCOMPARE(*merged, expected);
+    }
 };
 
 QTEST_GUILESS_MAIN(GitStatusTest)

@@ -96,6 +96,19 @@ public:
     void setIncludeStaged(bool include);
 
     /**
+     * Lists the changes against HEAD~1 rather than HEAD, so the last commit's files are listed too, and compares and
+     * reverts files against HEAD~1 (CGitStatusListCtrl::m_amend). The commit dialog sets it while amending. Takes
+     * effect on the next reload().
+     * @param amend Whether to compare with HEAD~1.
+     */
+    void setAmend(bool amend);
+
+    /**
+     * @returns Whether the last load found a branch without commits (CGit::IsInitRepos).
+     */
+    [[nodiscard]] bool isInitialRepo() const;
+
+    /**
      * Picks which entries are listed and which start checked (CGitStatusListCtrl::Show). Reloads if ignored files
      * are wanted and the last load left them out.
      * @param show The kinds of entries to list.
@@ -242,6 +255,8 @@ protected:
 
 private:
     void onStatusFinished();
+    void onIndexDiffFinished();
+    void loadNumStat();
     void onNumStatFinished();
     void finishLoad(const QList<NumStatEntry>& numStat);
     void failLoad(const Error& error);
@@ -262,6 +277,7 @@ private:
     void onResolveFinished();
     [[nodiscard]] const GitStatusListEntry *focusedEntry() const;
     [[nodiscard]] QStringList pathSpec() const;
+    [[nodiscard]] QString baseRevision() const;
     [[nodiscard]] bool isInPathFilter(const GitStatusEntry& entry) const;
 
     GitStatusListModel *m_model;
@@ -271,6 +287,7 @@ private:
     QString m_workingTree;
     QStringList m_pathFilter;
     std::unique_ptr<GitCall> m_statusCall;
+    std::unique_ptr<GitCall> m_indexDiffCall; // The index against HEAD~1, while amending
     std::unique_ptr<GitCall> m_numStatCall;
     std::unique_ptr<RevertProgressCommand> m_revertCommand; // The running revert, if any
     std::unique_ptr<GitCall> m_resolveCall; // The running git add of Resolved, if any
@@ -283,6 +300,7 @@ private:
     bool m_isInitialRepo = false; // No commit yet (CGit::IsInitRepos): there is no HEAD to compare with
     bool m_hasIgnored = false; // Whether the last load listed ignored files
     bool m_includeStaged = false; // Whether staged changes outside m_pathFilter are listed too
+    bool m_amend = false; // Changes are against HEAD~1 (m_amend)
     bool m_isBusy = false; // The owner is loading the entries (setBusy)
     bool m_hasDirectFiles = false; // The direct files have been taken from the path filter (m_setDirectFiles)
     ContextMenus m_contextMenus = ContextMenu::All; // TortoiseGit's m_dwContextMenus

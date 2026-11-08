@@ -92,6 +92,25 @@ public:
     [[nodiscard]] static Result<QList<GitStatusEntry>> parse(const QByteArray& output);
 
     /**
+     * The index against another commit than HEAD, as CGit::GetWorkingTreeChanges compares with HEAD~1 when
+     * amending. git status only compares with HEAD, so this diff replaces its index column (withIndexAgainst()).
+     * @param base The commit to compare the index with, such as "HEAD~1".
+     * @returns The git arguments for a diff that withIndexDiff() understands.
+     */
+    [[nodiscard]] static QStringList indexDiffArguments(const QString& base);
+
+    /**
+     * Puts a status against another commit: the index column comes from the diff, while the working tree column,
+     * conflicts, untracked and ignored files stay as they are. A file that differs from neither is dropped, and one
+     * the diff has but the status doesn't is added. Tracked files come first, sorted by path, as git status lists
+     * them.
+     * @param status The status, against HEAD.
+     * @param indexDiffOutput The stdout of git with indexDiffArguments().
+     * @returns The status against the other commit, or a Parse error if the diff can't be read.
+     */
+    [[nodiscard]] static Result<QList<GitStatusEntry>> withIndexDiff(const QList<GitStatusEntry>& status, const QByteArray& indexDiffOutput);
+
+    /**
      * Runs git status and waits for it, without taking optional locks.
      * @param git Runs in the working tree.
      * @param ignored Whether to list ignored files.

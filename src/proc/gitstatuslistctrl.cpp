@@ -159,7 +159,7 @@ void GitStatusListCtrl::setPathFilter(const QStringList& paths)
 void GitStatusListCtrl::setShowFlags(GitStatusListModel::ShowFlags show, GitStatusListModel::ShowFlags check)
 {
     m_model->setShowFlags(show, check);
-    const bool loadedBefore = m_statusCall || m_numStatCall || !m_model->allEntries().isEmpty();
+    const bool loadedBefore = m_statusCall || m_indexDiffCall || m_numStatCall || !m_model->allEntries().isEmpty();
     if (loadedBefore && show.testFlag(GitStatusListModel::Show::Ignored) && !m_hasIgnored) {
         reload();
     }
@@ -168,6 +168,16 @@ void GitStatusListCtrl::setShowFlags(GitStatusListModel::ShowFlags show, GitStat
 void GitStatusListCtrl::setIncludeStaged(bool include)
 {
     m_includeStaged = include;
+}
+
+void GitStatusListCtrl::setAmend(bool amend)
+{
+    m_amend = amend;
+}
+
+bool GitStatusListCtrl::isInitialRepo() const
+{
+    return m_isInitialRepo;
 }
 
 void GitStatusListCtrl::setHasCheckboxes(bool hasCheckboxes)
@@ -202,6 +212,7 @@ const QString& GitStatusListCtrl::currentVersion() const
 void GitStatusListCtrl::updateWithGitPathList(const QList<GitStatusListEntry>& entries)
 {
     m_statusCall.reset();
+    m_indexDiffCall.reset();
     m_numStatCall.reset();
     m_errorMessage.clear();
     m_isBusy = false;
@@ -243,6 +254,7 @@ void GitStatusListCtrl::reload()
         m_model->setDirectFiles(directFiles);
         m_hasDirectFiles = true;
     }
+    m_indexDiffCall.reset();
     m_numStatCall.reset();
     m_errorMessage.clear();
     m_hasIgnored = m_model->showFlags().testFlag(GitStatusListModel::Show::Ignored);
@@ -257,7 +269,7 @@ void GitStatusListCtrl::reload()
 
 bool GitStatusListCtrl::isBusy() const
 {
-    return m_isBusy || m_statusCall || m_numStatCall || m_revertCommand || m_resolveCall;
+    return m_isBusy || m_statusCall || m_indexDiffCall || m_numStatCall || m_revertCommand || m_resolveCall;
 }
 
 void GitStatusListCtrl::setSelectButton(QCheckBox *button)
@@ -394,20 +406,50 @@ void GitStatusListCtrl::onStatusFinished()
         return;
     }
     m_pendingStatus = std::move(*status);
+    m_isInitialRepo = output.startsWith(initialBranchHeader);
+    if (m_amend && !m_isInitialRepo) {
+        // CGit::GetWorkingTreeChanges compares the index with HEAD~1; git status only knows HEAD
+        m_indexDiffCall = Git(m_workingTree).runAsync(GitStatus::indexDiffArguments(baseRevision()), RunMode::ReadOnly);
+        connect(m_indexDiffCall.get(), &GitCall::finished, this, &GitStatusListCtrl::onIndexDiffFinished);
+        return;
+    }
+    loadNumStat();
+}
+
+void GitStatusListCtrl::onIndexDiffFinished()
+{
+    const GitCall *call = takeFinished(m_indexDiffCall);
+    QByteArray output;
+    try {
+        output = call->output();
+    } catch (const RuntimeError& e) {
+        failLoad(e.error());
+        return;
+    }
+    Result<QList<GitStatusEntry>> status = GitStatus::withIndexDiff(m_pendingStatus, output);
+    if (!status) {
+        failLoad(status.error());
+        return;
+    }
+    m_pendingStatus = std::move(*status);
+    loadNumStat();
+}
+
+void GitStatusListCtrl::loadNumStat()
+{
     if (m_includeStaged) {
         // The status covered the whole working tree: keep what the filter selects, and everything staged
         m_pendingStatus.removeIf([this](const GitStatusEntry& entry) {
             return !isInPathFilter(entry) && entry.index == FileState::Unmodified;
         });
     }
-    m_isInitialRepo = output.startsWith(initialBranchHeader);
     if (m_isInitialRepo) {
         // Nothing to count lines against; TortoiseGit lists an initial commit's files without counts too
         finishLoad({});
         return;
     }
     const QStringList numStatPaths = m_includeStaged ? QStringList() : m_pathFilter;
-    m_numStatCall = Git(m_workingTree).runAsync(GitNumStat::arguments(QStringLiteral("HEAD"), numStatPaths), RunMode::ReadOnly);
+    m_numStatCall = Git(m_workingTree).runAsync(GitNumStat::arguments(baseRevision(), numStatPaths), RunMode::ReadOnly);
     connect(m_numStatCall.get(), &GitCall::finished, this, &GitStatusListCtrl::onNumStatFinished);
 }
 
@@ -612,7 +654,8 @@ QList<GitStatusListEntry> GitStatusListCtrl::selectedEntries() const
 
 void GitStatusListCtrl::startDiff(const GitStatusListEntry& entry)
 {
-    // The working tree against HEAD, or against the index before the first commit (CGitStatusListCtrl::StartDiff)
+    // The working tree against HEAD (HEAD~1 when amending), or against the index before the first commit
+    // (CGitStatusListCtrl::StartDiff)
     QStringList arguments{QStringLiteral("difftool"), QStringLiteral("--no-prompt")};
     if (!m_currentVersion.isEmpty()) {
         arguments.append(revisionDiffArguments(entry.parentNo));
@@ -623,7 +666,7 @@ void GitStatusListCtrl::startDiff(const GitStatusListEntry& entry)
     } else if (m_isInitialRepo) {
         arguments.append(QStringLiteral("--cached"));
     } else {
-        arguments.append({QStringLiteral("-M"), QStringLiteral("HEAD")});
+        arguments.append({QStringLiteral("-M"), baseRevision()});
     }
     arguments.append(QStringLiteral("--"));
     if (!entry.origPath.isEmpty()) {
@@ -694,8 +737,8 @@ void GitStatusListCtrl::revertSelected()
             return;
         }
     }
-    // TortoiseGit reverts an amended commit's files to HEAD~1; the commit dialog has no amend yet
-    m_revertCommand = std::make_unique<RevertProgressCommand>();
+    // While amending, files go back to HEAD~1 (IDGITLC_REVERT's revertToCommit)
+    m_revertCommand = std::make_unique<RevertProgressCommand>(baseRevision());
     m_revertCommand->setPathList(selected);
     connect(m_revertCommand.get(), &RevertProgressCommand::finished, this, &GitStatusListCtrl::onRevertFinished);
     setCursor(Qt::BusyCursor);
@@ -726,6 +769,11 @@ QStringList GitStatusListCtrl::pathSpec() const
         return {};
     }
     return QStringList{QStringLiteral("--")} + m_pathFilter;
+}
+
+QString GitStatusListCtrl::baseRevision() const
+{
+    return m_amend ? QStringLiteral("HEAD~1") : QStringLiteral("HEAD");
 }
 
 bool GitStatusListCtrl::isInPathFilter(const GitStatusEntry& entry) const

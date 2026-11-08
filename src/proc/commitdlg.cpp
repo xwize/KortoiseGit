@@ -6,8 +6,8 @@
 /**
  * @file
  * Ported from TortoiseGit src/TortoiseProc/CommitDlg.cpp: OnInitDialog (the layout), StatusThread (what the list
- * shows and checks), OnUpdateOKButton, OnBnClickedShowunversioned, OnCheck (All and None), and OnOK with
- * PrepareIndexForCommitWithoutStagingSupport. TortoiseGit's progress dialog for git commit becomes an error message
+ * shows and checks), OnUpdateOKButton, OnBnClickedShowunversioned, OnBnClickedCommitAmend, OnCheck (All and None),
+ * and OnOK with PrepareIndexForCommitWithoutStagingSupport. TortoiseGit's progress dialog for git commit becomes an error message
  * inside the dialog.
  */
 
@@ -34,6 +34,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QTemporaryFile>
 #include <QVBoxLayout>
@@ -214,6 +215,35 @@ GitStatusListModel::ShowFlags checkFlags(GitStatusListModel::ShowFlags show)
     return show & ~GitStatusListModel::ShowFlags(Show::Unversioned);
 }
 
+/**
+ * @param root The working tree root.
+ * @param name A file in the working tree's admin directory, such as "MERGE_HEAD".
+ * @returns Whether it exists.
+ */
+bool adminFileExists(const QString& root, const QString& name)
+{
+    return QFileInfo::exists(QDir(GitAdminDir::worktreeAdminDirPath(root)).filePath(name));
+}
+
+/**
+ * @param root The working tree root.
+ * @returns Whether HEAD has no parent, as a root commit (GitRev::ParentsCount() < 1).
+ */
+bool isHeadRootCommit(const QString& root)
+{
+    try {
+        const QByteArray line =
+            Git(root).run({QStringLiteral("rev-list"), QStringLiteral("--parents"), QStringLiteral("-n"), QStringLiteral("1"), QStringLiteral("HEAD")},
+                          RunMode::ReadOnly);
+        return line.trimmed().split(' ').size() < 2;
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        return false;
+    }
+}
+
 } // namespace
 
 namespace kgt
@@ -235,13 +265,13 @@ CommitDlg::CommitDlg(const QStringList& paths, QWidget *parent)
     m_fileList->setPathFilter(relativePaths(m_workingTree, paths));
     m_fileList->setIncludeStaged(true);
     onShowUnversionedToggled(m_showUnversioned->isChecked());
-    m_fileList->reload();
+    refresh();
     m_message->setFocus();
 }
 
 CommitDlg::~CommitDlg() = default;
 
-CommitPlan CommitDlg::planCommit(const GitStatusListModel& model)
+CommitPlan CommitDlg::planCommit(const GitStatusListModel& model, bool amendAgainstParent)
 {
     CommitPlan plan;
     IndexTasks tasks;
@@ -261,7 +291,7 @@ CommitPlan CommitDlg::planCommit(const GitStatusListModel& model)
     addTask(plan.prepareIndex, task("update-index"_L1), tasks.updateIndex);
     addTask(plan.prepareIndex, task("rm --ignore-unmatch --quiet"_L1), tasks.rm);
     addTask(plan.prepareIndex, task("rm -f --cached --quiet"_L1), tasks.rmFCache);
-    addTask(plan.prepareIndex, task("reset --quiet"_L1, true), tasks.reset);
+    addTask(plan.prepareIndex, task(amendAgainstParent ? "reset --quiet HEAD~1"_L1 : "reset --quiet"_L1, true), tasks.reset);
 
     if (readdUnselectedAddedFilesAfterCommit) {
         addTask(plan.restoreIndex, task("add --ignore-errors -f"_L1, false, true), tasks.reAddAfterCommit);
@@ -290,6 +320,11 @@ QCheckBox *CommitDlg::showUnversionedButton() const
     return m_showUnversioned;
 }
 
+QCheckBox *CommitDlg::amendButton() const
+{
+    return m_amendButton;
+}
+
 bool CommitDlg::isCommitting() const
 {
     return m_isCommitting;
@@ -312,10 +347,14 @@ void CommitDlg::commit()
         return;
     }
 
-    const CommitPlan plan = planCommit(*m_fileList->statusModel());
+    const CommitPlan plan = planCommit(*m_fileList->statusModel(), isAmending() && !m_amendDiffToLastCommit);
     m_steps = plan.prepareIndex;
-    m_steps.append(
-        CommitStep{.arguments = {QStringLiteral("commit"), QStringLiteral("-F"), m_messageFile->fileName()}, .ignoreErrors = false, .always = false});
+    QStringList commitArguments{QStringLiteral("commit")};
+    if (isAmending()) {
+        commitArguments.append(QStringLiteral("--amend"));
+    }
+    commitArguments.append({QStringLiteral("-F"), m_messageFile->fileName()});
+    m_steps.append(CommitStep{.arguments = commitArguments, .ignoreErrors = false, .always = false});
     m_steps.append(plan.restoreIndex);
     setBusy(true);
     runNextStep();
@@ -352,6 +391,12 @@ void CommitDlg::createWidgets()
     m_message->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     m_message->setTabChangesFocus(true);
     messageLayout->addWidget(m_message);
+    m_amendButton = new QCheckBox(i18n("Amend &Last Commit"), messageGroup);
+    m_amendButton->setToolTip(
+        i18n("Use this to modify/replace the latest checked out commit with a new commit. The message from the original commit is used as the "
+             "starting point. Attention: This modifies the Git history."));
+    m_amendButton->setEnabled(false);
+    messageLayout->addWidget(m_amendButton);
     splitter->addWidget(messageGroup);
 
     auto *listGroup = new QGroupBox(i18n("Changes made (F5: refresh, double-click on file for diff):"), splitter);
@@ -403,20 +448,93 @@ void CommitDlg::createWidgets()
     connect(buttons, &QDialogButtonBox::rejected, this, &CommitDlg::reject);
     connect(m_message, &QPlainTextEdit::textChanged, this, &CommitDlg::updateOkButton);
     connect(m_fileList, &GitStatusListCtrl::checkedCountChanged, this, &CommitDlg::updateOkButton);
-    connect(m_fileList, &GitStatusListCtrl::loaded, this, &CommitDlg::updateOkButton);
+    connect(m_fileList, &GitStatusListCtrl::loaded, this, &CommitDlg::onListLoaded);
     connect(m_fileList, &GitStatusListCtrl::loadFailed, this, &CommitDlg::updateOkButton);
     connect(m_showUnversioned, &QCheckBox::toggled, this, &CommitDlg::onShowUnversionedToggled);
+    // Only the user's click swaps the message (ON_BN_CLICKED); the dialog unticks it without swapping
+    connect(m_amendButton, &QCheckBox::clicked, this, &CommitDlg::onAmendClicked);
 
     updateOkButton();
     resize(720, 600);
 }
 
+void CommitDlg::refresh()
+{
+    // StatusThread: amend is unavailable while the list loads, and is dropped during a cherry-pick
+    m_amendButton->setEnabled(false);
+    if (isCherryPickActive()) {
+        const QSignalBlocker blocker(m_amendButton);
+        m_amendButton->setChecked(false);
+    }
+    m_fileList->setAmend(isAmending() && !m_amendDiffToLastCommit);
+    m_fileList->reload();
+}
+
+void CommitDlg::onListLoaded()
+{
+    // StatusThread, after the list is filled: amend needs a HEAD, and isn't offered during a cherry-pick
+    if (m_fileList->isInitialRepo()) {
+        const QSignalBlocker blocker(m_amendButton);
+        m_amendButton->setChecked(false);
+        m_amendButton->setEnabled(false);
+    } else {
+        m_amendButton->setEnabled(!m_isCommitting && !isCherryPickActive());
+        // A root commit has nothing to compare with but itself
+        m_amendDiffToLastCommit = isHeadRootCommit(m_workingTree);
+    }
+    m_mergeActive = adminFileExists(m_workingTree, QStringLiteral("MERGE_HEAD"));
+    updateOkButton();
+}
+
+void CommitDlg::onAmendClicked(bool checked)
+{
+    // OnBnClickedCommitAmend: HEAD's message is the starting point, and what the user typed comes back on untick
+    if (checked && m_amendStr.isEmpty()) {
+        try {
+            // GitRev's subject and body, joined by the newline between them: the whole message
+            QString message = QString::fromUtf8(
+                Git(m_workingTree)
+                    .run({QStringLiteral("log"), QStringLiteral("-1"), QStringLiteral("--format=%B"), QStringLiteral("HEAD")}, RunMode::ReadOnly));
+            while (message.endsWith(QLatin1Char('\n'))) {
+                message.chop(1);
+            }
+            m_amendStr = message;
+        } catch (const RuntimeError& e) {
+            if (e.error().category != ErrorCategory::Git) {
+                throw;
+            }
+            m_errorView->setText(e.error().message);
+            m_errorView->show();
+        }
+    }
+    if (checked) {
+        m_noAmendStr = m_message->toPlainText();
+        m_message->setPlainText(m_amendStr);
+    } else {
+        m_amendStr = m_message->toPlainText();
+        m_message->setPlainText(m_noAmendStr);
+    }
+    m_message->setFocus();
+    refresh();
+}
+
+bool CommitDlg::isAmending() const
+{
+    return m_amendButton->isChecked();
+}
+
+bool CommitDlg::isCherryPickActive() const
+{
+    return adminFileExists(m_workingTree, QStringLiteral("CHERRY_PICK_HEAD"));
+}
+
 void CommitDlg::updateOkButton()
 {
-    // OnUpdateOKButton: a message that isn't only whitespace, and at least one file checked
+    // OnUpdateOKButton: a message that isn't only whitespace, and at least one file checked, or amending a root
+    // commit (bAmendOrSelectFilesOrMerge), or concluding a merge
     const bool hasMessage = !m_message->toPlainText().trimmed().isEmpty();
-    const bool hasFiles = !m_fileList->isBusy() && m_fileList->statusModel()->checkedCount() > 0;
-    m_okButton->setEnabled(!m_isCommitting && hasMessage && hasFiles);
+    const bool amendOrSelectFilesOrMerge = m_fileList->statusModel()->checkedCount() > 0 || (isAmending() && m_amendDiffToLastCommit) || m_mergeActive;
+    m_okButton->setEnabled(!m_isCommitting && !m_fileList->isBusy() && hasMessage && amendOrSelectFilesOrMerge);
 }
 
 void CommitDlg::onShowUnversionedToggled(bool checked)
@@ -462,14 +580,21 @@ void CommitDlg::finishCommit()
     m_messageFile.reset();
     setBusy(false);
     if (!m_commitError) {
+        // TortoiseGit resets amend after a successful commit, for when the dialog stays open
+        m_amendStr.clear();
+        {
+            const QSignalBlocker blocker(m_amendButton);
+            m_amendButton->setChecked(false);
+        }
         accept();
         return;
     }
     // TortoiseGit leaves the dialog open, with the message, after git commit fails
-    m_errorView->setText(m_commitError->message);
+    const Error error = *m_commitError;
+    m_errorView->setText(error.message);
     m_errorView->show();
-    m_fileList->reload();
-    Q_EMIT commitFailed(*m_commitError);
+    refresh();
+    Q_EMIT commitFailed(error);
 }
 
 void CommitDlg::setBusy(bool busy)
@@ -478,6 +603,9 @@ void CommitDlg::setBusy(bool busy)
     m_message->setReadOnly(busy);
     m_fileList->setEnabled(!busy);
     m_showUnversioned->setEnabled(!busy);
+    if (busy) {
+        m_amendButton->setEnabled(false);
+    }
     if (busy) {
         setCursor(Qt::BusyCursor);
     } else {

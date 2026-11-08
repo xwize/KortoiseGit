@@ -139,6 +139,52 @@ void commitTwoFiles(const TestRepo& repo)
     repo.commitAll(QStringLiteral("initial"));
 }
 
+/**
+ * commitTwoFiles(), then a second commit that changes a.txt and adds c.txt.
+ * @param repo The repository to fill.
+ */
+void commitTwice(const TestRepo& repo)
+{
+    commitTwoFiles(repo);
+    repo.write(QStringLiteral("a.txt"), "a changed\n");
+    repo.write(QStringLiteral("c.txt"), "c\n");
+    repo.commitAll(QStringLiteral("Last subject\n\nLast body."));
+}
+
+/**
+ * @param repo The repository.
+ * @param revision A commit.
+ * @returns Its message, without the final newline.
+ */
+QString commitMessage(const TestRepo& repo, const QString& revision)
+{
+    return QString::fromUtf8(repo.git().run({QStringLiteral("log"), QStringLiteral("-1"), QStringLiteral("--format=%B"), revision})).trimmed();
+}
+
+/**
+ * @param repo The repository.
+ * @returns How many commits HEAD has.
+ */
+int commitCount(const TestRepo& repo)
+{
+    return QString::fromUtf8(repo.git().run({QStringLiteral("rev-list"), QStringLiteral("--count"), QStringLiteral("HEAD")})).trimmed().toInt();
+}
+
+/**
+ * Ticks or unticks "Amend Last Commit" as the user does, and waits for the list to reload.
+ * @param dlg The dialog.
+ * @returns Whether the list reloaded.
+ */
+bool clickAmend(const CommitDlg& dlg)
+{
+    if (!dlg.amendButton()->isEnabled()) {
+        return false;
+    }
+    QSignalSpy loaded(dlg.fileList(), &GitStatusListCtrl::loaded);
+    dlg.amendButton()->click();
+    return loaded.wait(timeout);
+}
+
 } // namespace
 
 /**
@@ -304,6 +350,156 @@ private Q_SLOTS:
 
         QCOMPARE(committedFiles(repo), QStringList{QStringLiteral("a.txt")});
         QCOMPARE(stagedFiles(repo), QStringList{QStringLiteral("b.txt")});
+    }
+
+    void amendIsOfferedOnlyWithHead()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        const CommitDlg initial({repo.path()});
+        QVERIFY(waitForList(initial));
+        QVERIFY(!initial.amendButton()->isEnabled());
+        QCOMPARE(initial.amendButton()->text(), QStringLiteral("Amend &Last Commit"));
+        QVERIFY(initial.amendButton()->toolTip().startsWith(QStringLiteral("Use this to modify/replace the latest checked out commit")));
+
+        repo.commitAll(QStringLiteral("first"));
+        const CommitDlg withHead({repo.path()});
+        QVERIFY(waitForList(withHead));
+        QVERIFY(withHead.amendButton()->isEnabled());
+    }
+
+    void amendIsNotOfferedDuringCherryPick()
+    {
+        const TestRepo repo;
+        commitTwoFiles(repo);
+        repo.write(QStringLiteral(".git/CHERRY_PICK_HEAD"), repo.git().run({QStringLiteral("rev-parse"), QStringLiteral("HEAD")}));
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QVERIFY(!dlg.amendButton()->isEnabled());
+    }
+
+    void amendSwapsTheMessage()
+    {
+        const TestRepo repo;
+        commitTwice(repo);
+        repo.write(QStringLiteral("b.txt"), "changed\n");
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        dlg.messageEdit()->setPlainText(QStringLiteral("typed"));
+        QVERIFY(clickAmend(dlg));
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Last subject\n\nLast body."));
+        dlg.messageEdit()->setPlainText(QStringLiteral("Last subject, edited"));
+        QVERIFY(clickAmend(dlg));
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("typed"));
+        // The edited amend message is kept for the next tick
+        QVERIFY(clickAmend(dlg));
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Last subject, edited"));
+    }
+
+    void amendListsTheLastCommitsFiles()
+    {
+        const TestRepo repo;
+        commitTwice(repo);
+        repo.write(QStringLiteral("b.txt"), "changed\n");
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QCOMPARE(listedPaths(dlg), QStringList{QStringLiteral("b.txt")});
+        QVERIFY(clickAmend(dlg));
+        QCOMPARE(listedPaths(dlg), (QStringList{QStringLiteral("a.txt"), QStringLiteral("b.txt"), QStringLiteral("c.txt")}));
+        QCOMPARE(dlg.fileList()->checkedEntries().size(), 3);
+        QVERIFY(clickAmend(dlg));
+        QCOMPARE(listedPaths(dlg), QStringList{QStringLiteral("b.txt")});
+    }
+
+    void amendsOnlyTheMessage()
+    {
+        const TestRepo repo;
+        commitTwice(repo);
+        repo.write(QStringLiteral("b.txt"), "changed\n");
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QVERIFY(clickAmend(dlg));
+        QVERIFY(setChecked(dlg, QStringLiteral("b.txt"), false));
+        QVERIFY(commitAndWait(dlg, QStringLiteral("New message")));
+
+        QVERIFY(!dlg.amendButton()->isChecked());
+        QCOMPARE(commitCount(repo), 2);
+        QCOMPARE(commitMessage(repo, QStringLiteral("HEAD")), QStringLiteral("New message"));
+        QCOMPARE(committedFiles(repo), (QStringList{QStringLiteral("a.txt"), QStringLiteral("c.txt")}));
+        QCOMPARE(gitLines(repo, {QStringLiteral("diff"), QStringLiteral("--name-only")}), QStringList{QStringLiteral("b.txt")});
+        QVERIFY(stagedFiles(repo).isEmpty());
+    }
+
+    void amendsWithAnExtraFile()
+    {
+        const TestRepo repo;
+        commitTwice(repo);
+        repo.write(QStringLiteral("b.txt"), "changed\n");
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QVERIFY(clickAmend(dlg));
+        QVERIFY(commitAndWait(dlg, dlg.messageEdit()->toPlainText()));
+
+        QCOMPARE(commitCount(repo), 2);
+        QCOMPARE(commitMessage(repo, QStringLiteral("HEAD")), QStringLiteral("Last subject\n\nLast body."));
+        QCOMPARE(committedFiles(repo), (QStringList{QStringLiteral("a.txt"), QStringLiteral("b.txt"), QStringLiteral("c.txt")}));
+        QVERIFY(gitLines(repo, {QStringLiteral("status"), QStringLiteral("--porcelain")}).isEmpty());
+    }
+
+    void amendLeavesUncheckedFilesOutOfTheCommit()
+    {
+        const TestRepo repo;
+        commitTwice(repo);
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QVERIFY(clickAmend(dlg));
+        QVERIFY(setChecked(dlg, QStringLiteral("a.txt"), false));
+        QVERIFY(commitAndWait(dlg, QStringLiteral("Only c")));
+
+        QCOMPARE(committedFiles(repo), QStringList{QStringLiteral("c.txt")});
+        // a.txt's change from the old commit stays in the working tree
+        QCOMPARE(gitLines(repo, {QStringLiteral("diff"), QStringLiteral("--name-only")}), QStringList{QStringLiteral("a.txt")});
+    }
+
+    void amendsRootCommitWithoutFiles()
+    {
+        const TestRepo repo;
+        commitTwoFiles(repo);
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QVERIFY(clickAmend(dlg));
+        // A root commit is compared with itself, so nothing is listed, but the message alone can be amended
+        QVERIFY(listedPaths(dlg).isEmpty());
+        QVERIFY(commitAndWait(dlg, QStringLiteral("Reworded")));
+        QCOMPARE(commitCount(repo), 1);
+        QCOMPARE(commitMessage(repo, QStringLiteral("HEAD")), QStringLiteral("Reworded"));
+    }
+
+    void screenshotAmend()
+    {
+        const TestRepo repo;
+        commitTwice(repo);
+        repo.write(QStringLiteral("b.txt"), "changed\n");
+
+        CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&dlg));
+        QVERIFY(clickAmend(dlg));
+
+        const QPixmap shot = dlg.grab();
+        QVERIFY(!shot.isNull());
+        const QString screenshotDir = qEnvironmentVariable("KGT_SCREENSHOT_DIR");
+        if (!screenshotDir.isEmpty()) {
+            QVERIFY(shot.save(QDir(screenshotDir).absoluteFilePath(QStringLiteral("commitdlg-amend.png"))));
+        }
     }
 
     void screenshot()
