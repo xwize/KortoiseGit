@@ -9,9 +9,14 @@
 
 #include <QDir>
 #include <QFile>
+#include <QImage>
+#include <QPalette>
 #include <QPixmap>
 #include <QSignalSpy>
 #include <QTest>
+
+#include <initializer_list>
+#include <vector>
 
 namespace
 {
@@ -73,6 +78,84 @@ bool waitForFiles(const LogDlg& dlg)
             return !dlg.changedFileList()->isBusy();
         },
         timeout);
+}
+
+/**
+ * Fills a repository with a few branches and merges for the graph: a feature branch merged twice into main, a
+ * second branch merged across it.
+ * @param repo An empty repository.
+ */
+void makeBranchyHistory(const TestRepo& repo)
+{
+    const auto git = [&repo](std::initializer_list<const char *> arguments) {
+        QStringList list;
+        for (const char *argument : arguments) {
+            list.append(QString::fromLatin1(argument));
+        }
+        repo.run(list);
+    };
+    int counter = 0;
+    const auto commit = [&repo, &counter](const QString& message) {
+        repo.write(QStringLiteral("f%1.txt").arg(counter++), "x");
+        repo.commitAll(message);
+    };
+    commit(QStringLiteral("Root"));
+    commit(QStringLiteral("Second"));
+    git({"switch", "--quiet", "-c", "feature"});
+    commit(QStringLiteral("Feature 1"));
+    git({"switch", "--quiet", "main"});
+    commit(QStringLiteral("Main 1"));
+    git({"switch", "--quiet", "-c", "topic"});
+    commit(QStringLiteral("Topic 1"));
+    git({"switch", "--quiet", "feature"});
+    commit(QStringLiteral("Feature 2"));
+    git({"switch", "--quiet", "main"});
+    git({"merge", "--quiet", "--no-ff", "-m", "Merge feature", "feature"});
+    git({"switch", "--quiet", "topic"});
+    commit(QStringLiteral("Topic 2"));
+    git({"switch", "--quiet", "feature"});
+    commit(QStringLiteral("Feature 3"));
+    git({"switch", "--quiet", "main"});
+    git({"merge", "--quiet", "--no-ff", "-m", "Merge topic", "topic"});
+    commit(QStringLiteral("Main 2"));
+    git({"merge", "--quiet", "--no-ff", "-m", "Merge feature again", "feature"});
+}
+
+/**
+ * @returns A dark palette like Breeze Dark's.
+ */
+QPalette darkPalette()
+{
+    QPalette palette;
+    palette.setColor(QPalette::Window, QColor(32, 35, 38));
+    palette.setColor(QPalette::WindowText, QColor(252, 252, 252));
+    palette.setColor(QPalette::Base, QColor(20, 22, 24));
+    palette.setColor(QPalette::AlternateBase, QColor(29, 31, 34));
+    palette.setColor(QPalette::Text, QColor(252, 252, 252));
+    palette.setColor(QPalette::Button, QColor(41, 44, 48));
+    palette.setColor(QPalette::ButtonText, QColor(252, 252, 252));
+    palette.setColor(QPalette::Highlight, QColor(61, 174, 233));
+    palette.setColor(QPalette::HighlightedText, QColor(252, 252, 252));
+    return palette;
+}
+
+/**
+ * @param image A picture of the log list's viewport.
+ * @param rect The Graph column's cells.
+ * @param background The list's background colour.
+ * @returns How many pixels of the column differ from the background.
+ */
+int graphPixels(const QImage& image, const QRect& rect, const QColor& background)
+{
+    int count = 0;
+    for (int y = rect.top(); y <= rect.bottom(); ++y) {
+        for (int x = rect.left(); x <= rect.right(); ++x) {
+            if (image.pixelColor(x, y) != background) {
+                ++count;
+            }
+        }
+    }
+    return count;
 }
 
 } // namespace
@@ -198,6 +281,46 @@ private Q_SLOTS:
         const QString screenshotDir = qEnvironmentVariable("KGT_SCREENSHOT_DIR");
         if (!screenshotDir.isEmpty()) {
             QVERIFY(screenshot.save(QDir(screenshotDir).absoluteFilePath(QStringLiteral("logdlg.png"))));
+        }
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void drawsGraph_data()
+    {
+        QTest::addColumn<bool>("isDark");
+        QTest::newRow("light") << false;
+        QTest::newRow("dark") << true;
+    }
+
+    void drawsGraph()
+    {
+        QFETCH(const bool, isDark);
+        const TestRepo repo;
+        makeBranchyHistory(repo);
+        LogDlg dlg({repo.path()});
+        if (isDark) {
+            dlg.setPalette(darkPalette());
+        }
+        QVERIFY(waitForLog(dlg));
+        const GitLogListModel *model = dlg.logList()->logModel();
+        QCOMPARE(model->rowCount(), 12);
+        // The last merge starts a lane for feature on its right
+        QCOMPARE(model->lanes(0), (std::vector<Lanes::LaneType>{Lanes::LaneType::MergeForkL, Lanes::LaneType::HeadR}));
+        QCOMPARE(model->lanes(model->rowCount() - 1), (std::vector<Lanes::LaneType>{Lanes::LaneType::Initial}));
+
+        dlg.resize(900, 500);
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&dlg));
+        const GitLogList *list = dlg.logList();
+        const QImage viewport = list->viewport()->grab().toImage();
+        const int graphWidth = list->columnWidth(GitLogListModel::GraphColumn);
+        const QRect graphCells = QRect(0, 0, graphWidth, viewport.height()).intersected(viewport.rect());
+        QVERIFY(graphPixels(viewport, graphCells, list->palette().color(QPalette::Base)) > 0);
+
+        const QString screenshotDir = qEnvironmentVariable("KGT_SCREENSHOT_DIR");
+        if (!screenshotDir.isEmpty()) {
+            const QString name = isDark ? QStringLiteral("logdlg-graph-dark.png") : QStringLiteral("logdlg-graph-light.png");
+            QVERIFY(dlg.grab().save(QDir(screenshotDir).absoluteFilePath(name)));
         }
     }
 };

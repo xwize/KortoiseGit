@@ -15,6 +15,7 @@ set(kgt_tests
     gitstatuslistctrltest
     gitstatustest
     gittest
+    lanestest
     logdlgtest
     massivegittasktest
     mergetest

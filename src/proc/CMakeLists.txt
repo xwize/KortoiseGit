@@ -74,6 +74,8 @@ target_sources(kgtproc PRIVATE
     gitloglist.hpp
     gitloglistmodel.cpp
     gitloglistmodel.hpp
+    lanes.cpp
+    lanes.hpp
     gitstatuslistctrl.cpp
     gitstatuslistctrl.hpp
     gitstatuslistmodel.cpp

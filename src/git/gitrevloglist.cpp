@@ -180,6 +180,9 @@ QStringList GitRevLoglist::logArguments(const QStringList& paths, const QString&
         QStringLiteral("--no-show-signature"),
         QStringLiteral("--no-color"),
         QStringLiteral("--encoding=UTF-8"),
+        // CGit::GetLogCmd without LOG_INFO_FULL_HISTORY: rewrites %P to the parents that are listed when a path
+        // limits the log, so the graph's lanes join up
+        QStringLiteral("--parents"),
         logFormat,
     };
     if (noMerges) {

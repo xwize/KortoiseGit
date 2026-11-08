@@ -26,6 +26,26 @@ progress), `clone`, `repocreate` and `log`. `switch --rev <ref>` preselects a br
 `rebase --upstream <ref>` an upstream (`--force` checks "Force Rebase"). Pull, fetch and push ask for passwords and
 host keys through ksshaskpass, or your own `SSH_ASKPASS`/`GIT_ASKPASS`, and never on a terminal.
 
+## Install
+
+Build the latest `main` and install it for your user, into `~/.local` (no sudo):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/xwize/KortoiseGit/main/scripts/install.sh | bash
+```
+
+To uninstall, removing everything the install added and KortoiseGit's settings:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/xwize/KortoiseGit/main/scripts/uninstall.sh | bash
+```
+
+The install needs the build dependencies below, apart from `clang`. It installs no packages itself: if any are missing, it prints the
+`pacman` command that installs them and stops. Running it again upgrades to the latest `main`.
+
+When it finishes, log out and log in again, then in Dolphin open Configure Dolphin > Interface > Version Control, tick
+KortoiseGit and untick Git.
+
 ## Building on Arch Linux
 
 ```sh
@@ -82,6 +102,10 @@ run configuration that starts `/usr/bin/dolphin` with the environment variable
 
 GPL-2.0-or-later; see [LICENSES/](LICENSES/). Files ported from TortoiseGit keep its copyright lines and say which
 file they come from.
+
+The commit graph's lane code, `src/proc/lanes.hpp` and `lanes.cpp`, comes from TortoiseGit's `lanes.cpp`, which it
+took from [QGit](https://github.com/tibirna/qgit) (Marco Costalba). Those two files are GPL-2.0-only, which makes the
+combined program GPL-2.0-only.
 
 The log list's action icons in `src/proc/icons/` are TortoiseGit's (`src/Resources/action*.ico`, converted to PNG),
 derived from the [TortoiseSVN](https://tortoisesvn.net/) project's icons. TortoiseGit offers them under the GPL or

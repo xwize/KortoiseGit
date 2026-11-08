@@ -16,6 +16,7 @@
 #include <QLocale>
 #include <QStringList>
 
+#include <cstddef>
 #include <iterator>
 
 namespace
@@ -38,6 +39,9 @@ void GitLogListModel::clear()
 {
     beginResetModel();
     m_revs.clear();
+    m_lanes.clear();
+    m_lns.clear();
+    m_firstFreeLane = 0;
     endResetModel();
 }
 
@@ -49,6 +53,7 @@ void GitLogListModel::appendRevs(const QList<GitRevLoglist>& revs)
     const auto first = static_cast<int>(m_revs.size());
     beginInsertRows({}, first, first + static_cast<int>(revs.size()) - 1);
     m_revs.append(revs);
+    m_lanes.resize(static_cast<std::size_t>(m_revs.size()));
     endInsertRows();
 }
 
@@ -56,6 +61,84 @@ const GitRevLoglist& GitLogListModel::rev(int row) const
 {
     Q_ASSERT(row >= 0 && row < m_revs.size());
     return m_revs.at(row);
+}
+
+const std::vector<Lanes::LaneType>& GitLogListModel::lanes(int row) const
+{
+    Q_ASSERT(row >= 0 && row < m_revs.size());
+    const auto& rowLanes = m_lanes.at(static_cast<std::size_t>(row));
+    if (rowLanes.empty()) {
+        setLane(row);
+    }
+    return rowLanes;
+}
+
+void GitLogListModel::resetLanes()
+{
+    // The graph is drawn again from the top for the changed order
+    m_lanes.assign(static_cast<std::size_t>(m_revs.size()), {});
+    m_lns.clear();
+    m_firstFreeLane = 0;
+}
+
+void GitLogListModel::setLane(int row) const
+{
+    // CLogDataVector::setLane: every row from the first not yet computed down to this one, in list order
+    int i = m_firstFreeLane;
+    for (; i <= row; ++i) {
+        auto& rowLanes = m_lanes.at(static_cast<std::size_t>(i));
+        if (rowLanes.empty()) {
+            // The first-parent-only view isn't ported yet (LOG_INFO_FIRST_PARENT)
+            updateLanes(rev(i), m_lns, rowLanes, false);
+        }
+    }
+    m_firstFreeLane = i;
+}
+
+void GitLogListModel::updateLanes(const GitRevLoglist& rev, Lanes& lns, std::vector<Lanes::LaneType>& lanes, bool onlyFirstParent)
+{
+    // CLogDataVector::updateLanes
+    if (lns.isEmpty()) {
+        lns.init(rev.hash);
+    }
+
+    bool isDiscontinuity = false;
+    const bool isFork = lns.isFork(rev.hash, isDiscontinuity);
+    const bool isMerge = rev.parents.size() > 1;
+    const bool isInitial = rev.parents.isEmpty();
+
+    if (isDiscontinuity) {
+        lns.changeActiveLane(rev.hash); // Uses previous isBoundary state
+    }
+
+    lns.setBoundary(rev.isBoundary, isInitial); // Update must be here
+
+    if (isFork) {
+        lns.setFork(rev.hash);
+    }
+    if (isMerge) {
+        lns.setMerge(rev.parents, onlyFirstParent);
+    }
+    if (isInitial) {
+        lns.setInitial();
+    }
+
+    lanes = lns.lanes(); // Here lanes are snapshotted
+
+    lns.nextParent(isInitial ? QString() : rev.parents.constFirst());
+
+    if (isMerge) {
+        lns.afterMerge();
+    }
+    if (isFork) {
+        lns.afterFork();
+        if (isInitial) {
+            lns.setInitial();
+        }
+    }
+    if (lns.isBranch()) {
+        lns.afterBranch();
+    }
 }
 
 void GitLogListModel::setFiles(int row, const QList<GitRevFiles>& files)
@@ -107,6 +190,7 @@ void GitLogListModel::removeRev(int row)
     Q_ASSERT(row >= 0 && row < m_revs.size());
     beginRemoveRows({}, row, row);
     m_revs.removeAt(row);
+    resetLanes();
     endRemoveRows();
     if (m_rebaseMode && row > 0) {
         // The IDs above it count down from the row count
@@ -120,6 +204,7 @@ void GitLogListModel::swapWithNext(int row)
     // Moving the lower row up keeps the IDs, which belong to the positions, where they are
     beginMoveRows({}, row + 1, row + 1, {}, row);
     m_revs.swapItemsAt(row, row + 1);
+    resetLanes();
     endMoveRows();
     if (m_rebaseMode) {
         Q_EMIT dataChanged(index(row, ActionsColumn), index(row + 1, ActionsColumn));
