@@ -146,6 +146,69 @@ bool Git::hasWorkingTreeConflicts() const
     return !run({QStringLiteral("ls-files"), QStringLiteral("-u")}, RunMode::ReadOnly).isEmpty();
 }
 
+Result<ConflictHashes> Git::parseConflictHashesFromLsFile(const QByteArray& output)
+{
+    if (output.isEmpty()) {
+        return makeError(ErrorCategory::Parse, QStringLiteral("The file is not in conflict."));
+    }
+    const auto malformed = [] {
+        return makeError(ErrorCategory::Parse, QStringLiteral("Unexpected output from git ls-files -u -t -z."));
+    };
+    ConflictHashes hashes;
+    qsizetype pos = 0;
+    while (pos < output.size()) {
+        // M <mode> <hash> <stage>\t<name>\0
+        const std::optional<QString> tag = takeField(output, pos, ' ');
+        const std::optional<QString> mode = tag ? takeField(output, pos, ' ') : std::nullopt;
+        const std::optional<QString> hash = mode ? takeField(output, pos, ' ') : std::nullopt;
+        const std::optional<QString> stage = hash ? takeField(output, pos, '\t') : std::nullopt;
+        const std::optional<QString> name = stage ? takeField(output, pos, '\0') : std::nullopt;
+        if (!name || *tag != QLatin1Char('M') || !isHash(hash->toLatin1())) {
+            return malformed();
+        }
+        const bool isFile = *mode != QLatin1String("160000");
+        if (*stage == QLatin1Char('1')) {
+            hashes.baseHash = *hash;
+            hashes.baseIsFile = isFile;
+        } else if (*stage == QLatin1Char('2')) {
+            hashes.localHash = *hash;
+            hashes.localIsFile = isFile;
+        } else if (*stage == QLatin1Char('3')) {
+            hashes.remoteHash = *hash;
+            hashes.remoteIsFile = isFile;
+        } else {
+            return malformed();
+        }
+    }
+    return hashes;
+}
+
+std::optional<QString> Git::guessRefForHash(const QString& hash) const
+{
+    // --points-at also finds annotated tags, which CGit::GetMapHashToFriendName lists peeled
+    const QStringList arguments{
+        QStringLiteral("for-each-ref"),
+        QStringLiteral("--format=%(refname)"),
+        QStringLiteral("--points-at=") + hash,
+    };
+    const QByteArray output = run(arguments, RunMode::ReadOnly);
+    const QStringList refs = QString::fromUtf8(output).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    const QList<QLatin1StringView> prefixes{
+        QLatin1StringView("refs/heads/"),
+        QLatin1StringView("refs/remotes/"),
+        QLatin1StringView("refs/tags/"),
+    };
+    for (const QLatin1StringView prefix : prefixes) {
+        const auto found = std::ranges::find_if(refs, [prefix](const QString& ref) {
+            return ref.startsWith(prefix);
+        });
+        if (found != refs.cend()) {
+            return found->mid(prefix.size());
+        }
+    }
+    return std::nullopt;
+}
+
 bool Git::isUnbornBranch() const
 {
     try {

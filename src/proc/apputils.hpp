@@ -18,6 +18,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
 class QWidget;
 
 namespace kgt
@@ -26,6 +28,7 @@ namespace kgt
 class Git;
 class GitCall;
 enum class ResetType;
+struct ConflictHashes;
 struct CreateBranchTagOptions;
 struct CreateBranchTagParams;
 struct GitSwitchOptions;
@@ -44,6 +47,15 @@ struct SwitchOptions {
 };
 
 /**
+ * What CAppUtils::ConflictEdit does with an unmerged file.
+ */
+enum class ConflictKind {
+    Content, // Both sides have the file: a merge tool can resolve it
+    DeleteModify, // One side has no such file: DeleteConflictDlg asks which side wins
+    Submodule, // A side is a submodule: CSubmoduleResolveConflictDlg, not ported yet
+};
+
+/**
  * How a git stash apply or git stash pop ended.
  */
 enum class StashOutcome {
@@ -58,6 +70,8 @@ enum class StashOutcome {
 class AppUtils
 {
 public:
+    using IsInstalled = std::function<bool(const QString&)>; // Says whether an executable is on the PATH
+
     AppUtils() = delete;
 
     /**
@@ -299,6 +313,33 @@ public:
      * @returns False if no branch was given.
      */
     static bool updateBranchDescription(const Git& git, const QString& branch, QString description);
+
+    /**
+     * The choice CAppUtils::ConflictEdit makes from the stages of an unmerged file.
+     * @param hashes The file's stages.
+     * @returns What to do with it.
+     */
+    [[nodiscard]] static ConflictKind conflictKind(const ConflictHashes& hashes);
+
+    /**
+     * The command line that opens a content conflict in a merge tool. git asks before starting a tool it guessed,
+     * even with --no-prompt, and with no terminal it gets no answer, so without merge.tool the tool is named here.
+     * @param configuredTool The value of merge.tool; empty if it isn't set.
+     * @param isInstalled Says whether an executable is on the PATH.
+     * @returns The arguments after "git", without the file, or an empty list if merge.tool isn't set and no supported
+     *          tool is installed.
+     */
+    [[nodiscard]] static QStringList mergeToolArguments(const QString& configuredTool, const IsInstalled& isInstalled);
+
+    /**
+     * Ported from CAppUtils::ConflictEdit: opens a content conflict in git mergetool, and a delete/modify conflict in
+     * DeleteConflictDlg. Errors are shown to the user.
+     * @param git Runs git at the working tree's root.
+     * @param path The unmerged file, relative to the root.
+     * @param parent Parent of the dialogs.
+     * @returns True if DeleteConflictDlg ran to its end, so the caller should reload the file's status.
+     */
+    static bool conflictEdit(const Git& git, const QString& path, QWidget *parent = nullptr);
 };
 
 } // namespace kgt

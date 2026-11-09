@@ -11,6 +11,7 @@
 #pragma once
 
 #include "git/gitcall.hpp"
+#include "utils/result.hpp"
 
 #include <QByteArray>
 #include <QString>
@@ -39,6 +40,18 @@ enum BranchType : unsigned int { // NOLINT(cppcoreguidelines-use-enum-class): Co
 struct BranchList {
     QStringList branches; // Local first, then remotes/..., each part in logical order
     int current = -1; // Index of the current branch, or -1 (detached HEAD, or skipped)
+};
+
+/**
+ * What the index holds for an unmerged file, the out-parameters of CGit::ParseConflictHashesFromLsFile.
+ */
+struct ConflictHashes {
+    QString baseHash; // Stage 1, empty if the common ancestor has no such file
+    QString localHash; // Stage 2, empty if our side has no such file
+    QString remoteHash; // Stage 3, empty if their side has no such file
+    bool baseIsFile = true; // False for a submodule (mode 160000)
+    bool localIsFile = true; // False for a submodule
+    bool remoteIsFile = true; // False for a submodule
 };
 
 /**
@@ -139,6 +152,22 @@ public:
      * @returns Whether it is a full commit hash (SHA-1 or SHA-256) in git's lower-case hex.
      */
     [[nodiscard]] static bool isHash(QByteArrayView text);
+
+    /**
+     * Ported from CGit::ParseConflictHashesFromLsFile.
+     * @param output What git ls-files -u -t -z printed for one file.
+     * @returns That file's stages, or an error if the output is empty (the file isn't in conflict) or malformed.
+     */
+    [[nodiscard]] static Result<ConflictHashes> parseConflictHashesFromLsFile(const QByteArray& output);
+
+    /**
+     * Ported from CGit::GuessRefForHash: a friendly name for a commit, preferring a branch, then a remote branch,
+     * then a tag.
+     * @param hash A full commit hash.
+     * @returns The ref's short name, or nothing if no ref points at the commit.
+     * @throws RuntimeError (category Git) if git fails.
+     */
+    [[nodiscard]] std::optional<QString> guessRefForHash(const QString& hash) const;
 
     /**
      * Ported from CGit::HasWorkingTreeConflicts: whether the index holds unmerged entries, with git ls-files -u.

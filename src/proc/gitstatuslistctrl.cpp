@@ -7,6 +7,7 @@
 
 #include "gitstatuslistctrl.hpp"
 
+#include "apputils.hpp"
 #include "git/git.hpp"
 #include "git/gitcall.hpp"
 #include "git/massivegittask.hpp"
@@ -711,18 +712,16 @@ void GitStatusListCtrl::onAddFinished()
 
 void GitStatusListCtrl::editConflict(const GitStatusListEntry& entry)
 {
-    /**
-     * TortoiseGit's CAppUtils::ConflictEdit opens TortoiseMerge; here git mergetool runs the user's merge tool,
-     * detached, and marks the file resolved itself when the tool reports success. F5 shows the result.
-     */
-    const QStringList arguments{QStringLiteral("--literal-pathspecs"),
-                                QStringLiteral("mergetool"),
-                                QStringLiteral("--no-prompt"),
-                                QStringLiteral("--"),
-                                entry.path};
-    if (!QProcess::startDetached(QStringLiteral("git"), arguments, m_workingTree)) {
-        QMessageBox::warning(this, i18n("Edit conflicts"), i18n("Could not start git mergetool."));
-    }
+    // After the menu or double click, so the Conflict dialog isn't nested in it and the entry can't change under it
+    QMetaObject::invokeMethod(
+        this,
+        [this, path = entry.path] {
+            // IDGITLC_EDITCONFLICT in CGitStatusListCtrl::OnContextMenuList
+            if (AppUtils::conflictEdit(Git(m_workingTree), path, this)) {
+                reload();
+            }
+        },
+        Qt::QueuedConnection);
 }
 
 void GitStatusListCtrl::resolveSelected()
