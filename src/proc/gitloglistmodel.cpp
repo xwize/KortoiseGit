@@ -288,6 +288,11 @@ void GitLogListModel::swapWithNext(int row)
     }
 }
 
+QString GitLogListModel::formatDate(const QDateTime& date)
+{
+    return QLocale().toString(date, QLocale::ShortFormat);
+}
+
 QString GitLogListModel::rebaseActionName(unsigned int action)
 {
     if (action & GitRevLoglist::RebaseEdit) {
@@ -388,8 +393,7 @@ QVariant GitLogListModel::displayData(const QModelIndex& index) const
     case AuthorColumn:
         return rev.authorName;
     case DateColumn:
-        // CLoglistUtils::FormatDateAndTime with the system's short date and time format
-        return QLocale().toString(rev.authorDate, QLocale::ShortFormat);
+        return formatDate(rev.authorDate);
     default:
         return {};
     }

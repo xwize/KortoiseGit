@@ -6,7 +6,8 @@
  * @file
  * Ported from TortoiseGit src/TortoiseProc/GitLogListBase.cpp (CGitLogListBase::OnContextMenu) and
  * GitLogListAction.cpp (CGitLogListBase::ContextMenuAction): the log's right-click menu. Entries are added in
- * OnContextMenu's order, each section ending with its separators, so the entries not ported yet can slot in.
+ * OnContextMenu's order, each section ending with its separators, so the entries not ported yet can slot in. Also
+ * CGitLogListBase::CopySelectionToClipBoard, which waits for what TortoiseGit reads synchronously.
  */
 
 #include "gitloglist.hpp"
@@ -15,6 +16,8 @@
 #include "createbranchtagdlg.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
+#include "git/gitcall.hpp"
+#include "gitstatuslistmodel.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KLocalizedString>
@@ -26,7 +29,9 @@
 #include <QMenu>
 
 #include <algorithm>
+#include <array>
 #include <functional>
+#include <utility>
 
 namespace
 {
@@ -89,6 +94,83 @@ void showingGitErrors(QWidget *parent, const std::function<void()>& action)
     }
 }
 
+/**
+ * Ported from GitRevLoglist::GetSubjectBody. TortoiseGit's m_Body starts with the blank line after the subject.
+ * @param rev A commit.
+ * @returns Its message.
+ */
+QString subjectBody(const GitRevLoglist& rev)
+{
+    QString text = rev.subject + QLatin1Char('\n');
+    if (!rev.body.isEmpty()) {
+        text += QLatin1Char('\n') + rev.body;
+    }
+    return text;
+}
+
+/**
+ * @param rev A commit.
+ * @param tagInfo The annotated tags' text by full ref name.
+ * @returns Its Notes and Tag Info sections, each with its "----" line; empty if it has neither.
+ */
+QString notesAndTagsText(const GitRevLoglist& rev, const QHash<QString, QString>& tagInfo)
+{
+    QString text;
+    if (!rev.notes.isEmpty()) {
+        // TortoiseGit's m_Notes keeps the note's final newline
+        text = QStringLiteral("----\n") + i18n("Notes") + QStringLiteral(":\n") + rev.notes + QLatin1Char('\n');
+    }
+    // CGitLogListBase::GetTagInfo
+    QString tags;
+    for (const QString& ref : sortedRefNames(rev)) {
+        tags += tagInfo.value(ref);
+    }
+    if (!tags.isEmpty()) {
+        text += QStringLiteral("----\n") + i18n("Tag Info") + QStringLiteral(":\n") + tags;
+    }
+    return text;
+}
+
+/**
+ * @param rev A commit, with its files loaded.
+ * @returns The "----" line and one line per changed path, against every parent.
+ */
+QString changedPathsText(const GitRevLoglist& rev)
+{
+    const TGitPath::Actions movedFrom = TGitPath::Action::Replaced | TGitPath::Action::Copy;
+    QString text = QStringLiteral("----");
+    for (const GitRevFiles& diff : rev.files) {
+        for (const GitStatusEntry& entry : diff.status) {
+            const QString action = GitStatusListModel::actionName(entry.actions);
+            text += QLatin1Char('\n') + action + QStringLiteral(": ") + entry.path;
+            if ((entry.actions & movedFrom) && !entry.origPath.isEmpty()) {
+                text += QLatin1Char(' ') + i18n("(from %1)", entry.origPath);
+            }
+        }
+    }
+    return text + QLatin1Char('\n');
+}
+
+/**
+ * @param rev A commit.
+ * @param tagInfo The annotated tags' text by full ref name.
+ * @param withPaths Whether to add the changed paths.
+ * @returns The commit's text for the two Full formats, ending with a blank line.
+ */
+QString fullCommitText(const GitRevLoglist& rev, const QHash<QString, QString>& tagInfo, bool withPaths)
+{
+    const QString author = rev.authorName + QStringLiteral(" <") + rev.authorEmail + QLatin1Char('>');
+    QString text = i18n("Revision") + QStringLiteral(": ") + rev.hash + QLatin1Char('\n');
+    text += i18n("Author") + QStringLiteral(": ") + author + QLatin1Char('\n');
+    text += i18n("Date") + QStringLiteral(": ") + GitLogListModel::formatDate(rev.authorDate) + QLatin1Char('\n');
+    text += i18n("Message") + QStringLiteral(":\n") + subjectBody(rev) + QLatin1Char('\n');
+    text += notesAndTagsText(rev, tagInfo);
+    if (withPaths) {
+        text += changedPathsText(rev);
+    }
+    return text + QLatin1Char('\n');
+}
+
 } // namespace
 
 namespace kgt
@@ -106,17 +188,17 @@ void GitLogList::showLogMenu(QContextMenuEvent *event)
     const QPoint anchor = fromKeyboard ? viewport()->mapToGlobal(visualRect(first).center()) : event->globalPos();
 
     QMenu menu(this);
+    std::optional<LogMenuTarget> target;
     if (rows.size() == 1) {
         const int row = rows.constFirst();
         const GitRevLoglist& rev = m_model->rev(row);
         const QStringList refs = sortedRefNames(rev);
         const std::optional<GitRef> label = fromKeyboard ? std::nullopt : refLabelAt(row, event->pos());
-        const LogMenuTarget target{.hash = rev.hash, .refs = refs, .label = label, .isStash = isOnStash(row)};
-        addSingleCommitEntries(menu, target);
+        target = LogMenuTarget{.hash = rev.hash, .refs = refs, .label = label, .isStash = isOnStash(row)};
+        addSingleCommitEntries(menu, *target);
     }
-    if (!menu.isEmpty()) {
-        menu.exec(anchor);
-    }
+    addClipboardEntries(menu, target);
+    menu.exec(anchor);
 }
 
 bool GitLogList::isOnStash(int row) const
@@ -215,6 +297,150 @@ bool GitLogList::addDeleteEntries(QMenu& menu, const LogMenuTarget& target)
         deleteRefs(refs);
     });
     return true;
+}
+
+void GitLogList::addClipboardEntries(QMenu& menu, const std::optional<LogMenuTarget>& target)
+{
+    const QIcon icon = QIcon::fromTheme(QStringLiteral("edit-copy"));
+    QMenu *submenu = menu.addMenu(i18n("Copy to clipboard"));
+    const std::array entries{
+        std::pair{i18n("Full data"), CopyFormat::Full},
+        std::pair{i18n("Full commit data without changed paths"), CopyFormat::FullNoPaths},
+        std::pair{i18n("SHA-1"), CopyFormat::Hash},
+        std::pair{i18n("Authors (full)"), CopyFormat::AuthorsFull},
+        std::pair{i18n("Author names"), CopyFormat::AuthorsName},
+        std::pair{i18n("Author email addresses"), CopyFormat::AuthorsEmail},
+        std::pair{i18n("Subjects"), CopyFormat::Subjects},
+        std::pair{i18n("Messages"), CopyFormat::Messages},
+    };
+    for (const auto& entry : entries) {
+        submenu->addAction(icon, entry.first, this, [this, format = entry.second] {
+            copySelectionToClipboard(format);
+        });
+    }
+    if (target && !target->refs.isEmpty()) {
+        submenu->addAction(icon, i18n("Tag/branch names"), this, [refs = target->refs, label = target->label] {
+            AppUtils::copyToClipboard(refNamesText(refs, label));
+        });
+    }
+}
+
+void GitLogList::copySelectionToClipboard(CopyFormat format)
+{
+    // CGitLogListBase::CopySelectionToClipBoard. GetFiles and GetTagInfo don't wait here: the text is built when
+    // the files and tag info have arrived
+    const QList<int> rows = selectedRows();
+    if (rows.isEmpty()) {
+        return;
+    }
+    cancelCopy();
+    m_copy = PendingCopy{.format = format, .rows = rows, .tagInfo = {}};
+    if (format == CopyFormat::Full) {
+        for (const int row : rows) {
+            requestFiles(row);
+        }
+    }
+    const auto hasTag = [this](int row) {
+        return std::ranges::any_of(m_model->rev(row).refs, [](const GitRef& ref) {
+            return ref.type == GitRef::Type::Tag;
+        });
+    };
+    if ((format == CopyFormat::Full || format == CopyFormat::FullNoPaths) && std::ranges::any_of(rows, hasTag)) {
+        // Read afresh, as GetTagInfo does: m_tagInfo is only there for a filter and misses tags made since
+        m_copyTagInfoCall = Git(m_workingTree).runAsync(GitRevLoglist::tagInfoArguments(), RunMode::ReadOnly);
+        connect(m_copyTagInfoCall.get(), &GitCall::finished, this, &GitLogList::onCopyTagInfoFinished);
+    }
+    finishCopyIfReady();
+}
+
+void GitLogList::onCopyTagInfoFinished()
+{
+    // Deleted from the event loop: it is still emitting
+    GitCall *call = m_copyTagInfoCall.release();
+    Q_ASSERT(call && m_copy);
+    call->deleteLater();
+    try {
+        m_copy->tagInfo = GitRevLoglist::parseTagInfo(call->output());
+    } catch (const RuntimeError& e) {
+        // As CGit::GetTagInfo's callers do, a tag that can't be read adds nothing
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+    }
+    finishCopyIfReady();
+}
+
+void GitLogList::finishCopyIfReady()
+{
+    if (!m_copy || m_copyTagInfoCall) {
+        return;
+    }
+    const auto isResolved = [this](int row) {
+        return m_model->rev(row).filesState != GitRevLoglist::FilesState::NotLoaded;
+    };
+    if (m_copy->format == CopyFormat::Full && !std::ranges::all_of(m_copy->rows, isResolved)) {
+        return;
+    }
+    QList<GitRevLoglist> revs;
+    revs.reserve(m_copy->rows.size());
+    for (const int row : std::as_const(m_copy->rows)) {
+        revs.append(m_model->rev(row));
+    }
+    AppUtils::copyToClipboard(copyText(m_copy->format, revs, m_copy->tagInfo));
+    m_copy.reset();
+}
+
+void GitLogList::cancelCopy()
+{
+    m_copy.reset();
+    m_copyTagInfoCall.reset();
+}
+
+QString GitLogList::copyText(CopyFormat format, const QList<GitRevLoglist>& revs, const TagInfo& tags)
+{
+    // CGitLogListBase::CopySelectionToClipBoard
+    QString text;
+    QStringList lines;
+    for (const GitRevLoglist& rev : revs) {
+        switch (format) {
+        case CopyFormat::Full:
+        case CopyFormat::FullNoPaths:
+            text += fullCommitText(rev, tags, format == CopyFormat::Full);
+            break;
+        case CopyFormat::Hash:
+            lines.append(rev.hash);
+            break;
+        case CopyFormat::AuthorsFull:
+            lines.append(rev.authorName + QStringLiteral(" <") + rev.authorEmail + QLatin1Char('>'));
+            break;
+        case CopyFormat::AuthorsName:
+            lines.append(rev.authorName);
+            break;
+        case CopyFormat::AuthorsEmail:
+            lines.append(rev.authorEmail);
+            break;
+        case CopyFormat::Subjects:
+            text += QStringLiteral("* ") + rev.subject.trimmed() + QStringLiteral("\n\n");
+            break;
+        case CopyFormat::Messages:
+            text += QStringLiteral("* ") + subjectBody(rev) + QStringLiteral("\n\n");
+            break;
+        }
+    }
+    return text + lines.join(QLatin1Char('\n'));
+}
+
+QString GitLogList::refNamesText(const QStringList& refs, const std::optional<GitRef>& label)
+{
+    // ID_COPYCLIPBOARDBRANCHTAG. Our refs never carry show-ref's ^{}: they come from git log's decorations
+    if (label) {
+        return label->type == GitRef::Type::Tag ? label->name : Git::stripRefName(label->fullName());
+    }
+    QString text;
+    for (const QString& ref : refs) {
+        text += ref + QLatin1Char('\n');
+    }
+    return text;
 }
 
 void GitLogList::resetToCommit(const LogMenuTarget& target)

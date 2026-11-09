@@ -73,6 +73,11 @@ public:
     [[nodiscard]] static QIcon appIcon();
 
     /**
+     * @param text What to put on the clipboard.
+     */
+    static void copyToClipboard(const QString& text);
+
+    /**
      * Ported from CAppUtils::GetClipboardLink: a repository URL on the clipboard, for prefilling a dialog.
      * @param skipGitPrefix A command such as "git clone " that may precede the URL, to be skipped.
      * @param paramsCount How many words after the prefix to keep.

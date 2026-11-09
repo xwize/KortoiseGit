@@ -22,7 +22,6 @@
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
-#include <QClipboard>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -115,16 +114,6 @@ bool askYesNo(QWidget *parent, const QString& question, bool warning)
     const auto answer = warning ? KMessageBox::warningTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify)
                                 : KMessageBox::questionTwoActions(parent, question, QString(), yesItem, noItem, QString(), noNotify);
     return answer == KMessageBox::PrimaryAction;
-}
-
-/**
- * @param text What to put on the clipboard.
- */
-void copyToClipboard(const QString& text)
-{
-    if (QClipboard *clipboard = QGuiApplication::clipboard()) {
-        clipboard->setText(text);
-    }
 }
 
 } // namespace
@@ -683,13 +672,13 @@ std::unique_ptr<QMenu> BrowseRefsDlg::createListContextMenu()
         hashes.append(leaf->ref.hash);
     }
     connect(popupMenu->addAction(QIcon::fromTheme(QStringLiteral("edit-copy")), i18n("Copy ref names")), &QAction::triggered, this, [names] {
-        copyToClipboard(names.join(QLatin1Char('\n')));
+        AppUtils::copyToClipboard(names.join(QLatin1Char('\n')));
     });
     // Not in TortoiseGit's ref menu, whose log list has it instead
     QAction *copyHash = popupMenu->addAction(QIcon::fromTheme(QStringLiteral("edit-copy")), i18n("Copy SHA-1"));
     copyHash->setEnabled(!hashes.isEmpty());
     connect(copyHash, &QAction::triggered, this, [hashes] {
-        copyToClipboard(hashes.join(QLatin1Char('\n')));
+        AppUtils::copyToClipboard(hashes.join(QLatin1Char('\n')));
     });
     return popupMenu;
 }

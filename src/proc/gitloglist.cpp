@@ -647,6 +647,7 @@ void GitLogList::reload()
     if (const int row = selectedRow(); row >= 0) {
         m_lastSelectedHash = m_model->rev(row).hash;
     }
+    cancelCopy();
     m_logCall.reset();
     m_tagInfoCall.reset();
     m_simpleListCall.reset();
@@ -689,6 +690,7 @@ void GitLogList::setRange(const QString& range, bool noMerges)
 
 void GitLogList::showText(const QString& text)
 {
+    cancelCopy();
     if (GitCall *call = m_logCall.release()) {
         call->disconnect(this);
         call->deleteLater();
@@ -872,6 +874,11 @@ int GitLogList::selectedRow() const
 
 void GitLogList::keyPressEvent(QKeyEvent *event)
 {
+    // IDR_ACC_LOGDLG's ID_EDIT_COPY (CLogDlg::OnEditCopy); the rebase dialog's list keeps the view's own copy
+    if (m_logMenu && event->matches(QKeySequence::Copy)) {
+        copySelectionToClipboard(CopyFormat::Full);
+        return;
+    }
     if (event->key() == Qt::Key_F5 || event->matches(QKeySequence::Refresh)) {
         reload();
         return;
@@ -1018,6 +1025,7 @@ void GitLogList::finishFiles(bool succeeded)
         m_model->setFilesFailed(row);
     }
     Q_EMIT filesLoaded(row);
+    finishCopyIfReady();
     startNextFiles();
 }
 
