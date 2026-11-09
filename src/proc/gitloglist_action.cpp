@@ -124,20 +124,6 @@ void showingGitErrors(QWidget *parent, const std::function<void()>& action)
 }
 
 /**
- * Ported from GitRevLoglist::GetSubjectBody. TortoiseGit's m_Body starts with the blank line after the subject.
- * @param rev A commit.
- * @returns Its message.
- */
-QString subjectBody(const GitRevLoglist& rev)
-{
-    QString text = rev.subject + QLatin1Char('\n');
-    if (!rev.body.isEmpty()) {
-        text += QLatin1Char('\n') + rev.body;
-    }
-    return text;
-}
-
-/**
  * @param rev A commit.
  * @param tagInfo The annotated tags' text by full ref name.
  * @returns Its Notes and Tag Info sections, each with its "----" line; empty if it has neither.
@@ -192,7 +178,7 @@ QString fullCommitText(const GitRevLoglist& rev, const QHash<QString, QString>& 
     QString text = i18n("Revision") + QStringLiteral(": ") + rev.hash + QLatin1Char('\n');
     text += i18n("Author") + QStringLiteral(": ") + author + QLatin1Char('\n');
     text += i18n("Date") + QStringLiteral(": ") + GitLogListModel::formatDate(rev.authorDate) + QLatin1Char('\n');
-    text += i18n("Message") + QStringLiteral(":\n") + subjectBody(rev) + QLatin1Char('\n');
+    text += i18n("Message") + QStringLiteral(":\n") + rev.subjectBody() + QLatin1Char('\n');
     text += notesAndTagsText(rev, tagInfo);
     if (withPaths) {
         text += changedPathsText(rev);
@@ -629,7 +615,7 @@ QString GitLogList::copyText(CopyFormat format, const QList<GitRevLoglist>& revs
             text += QStringLiteral("* ") + rev.subject.trimmed() + QStringLiteral("\n\n");
             break;
         case CopyFormat::Messages:
-            text += QStringLiteral("* ") + subjectBody(rev) + QStringLiteral("\n\n");
+            text += QStringLiteral("* ") + rev.subjectBody() + QStringLiteral("\n\n");
             break;
         }
     }

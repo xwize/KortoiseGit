@@ -56,6 +56,14 @@ public:
     [[nodiscard]] static bool isBareRepo(const QString& path);
 
     /**
+     * Ported from GitAdminDir::GetAdminDirPath: a linked worktree's admin directory names the main repository's in
+     * its "commondir" file.
+     * @param worktreeAdminDir A working tree's own admin directory.
+     * @returns The directory holding the repository's objects and refs.
+     */
+    [[nodiscard]] static QString commonAdminDirPath(const QString& worktreeAdminDir);
+
+    /**
      * Ported from CTGitPath::HasStashDir: whether refs/stash exists, loose or packed, by the repository's files.
      * @param worktreeAdminDir A working tree's admin directory, from worktreeAdminDirPath(). A linked worktree's
      *                         stash is the main repository's, so the common directory is the one searched.

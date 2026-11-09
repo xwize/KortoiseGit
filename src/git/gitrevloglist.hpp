@@ -132,6 +132,8 @@ struct GitRevLoglist {
     FilesState filesState = FilesState::NotLoaded; // Whether files and actions are known
     bool isBoundary = false; // GitRevLoglist::IsBoundary(): marked '-' by git log --boundary, which isn't used yet
     unsigned int rebaseAction = 0; // GitRevLoglist::m_RebaseAction: RebaseAction bits, set by the rebase dialog
+    QString ref; // GitRevLoglist::m_Ref: a reflog entry's name, such as refs/stash@{1}
+    QString refAction; // GitRevLoglist::m_RefAction: what made a reflog entry, such as "commit (amend)"
 
     bool operator==(const GitRevLoglist&) const = default;
 
@@ -143,6 +145,28 @@ struct GitRevLoglist {
      *          takeRecords() reads.
      */
     [[nodiscard]] static QStringList logArguments(const QStringList& paths = {}, const QString& range = {}, const GitLogOptions& options = {});
+
+    /**
+     * Ported from GitRevLoglist::GetSubjectBody. TortoiseGit's m_Body starts with the blank line after the subject.
+     * @returns The commit's message, ending with a newline.
+     */
+    [[nodiscard]] QString subjectBody() const;
+
+    /**
+     * @param ref A ref or HEAD.
+     * @returns The arguments after "git" of the command GitRevLoglist::GetRefLog runs.
+     */
+    [[nodiscard]] static QStringList refLogArguments(const QString& ref);
+
+    /**
+     * Ported from GitRevLoglist::GetRefLog. A line that isn't an entry, such as a signature check's, takes no
+     * position, while the numbering keeps every entry git printed.
+     * @param output What refLogArguments() printed.
+     * @param ref The same ref.
+     * @returns The entries, newest first, each named <ref>@{<n>}, with its message split at the first ": " into
+     *          refAction and subject.
+     */
+    [[nodiscard]] static QList<GitRevLoglist> parseRefLog(const QByteArray& output, const QString& ref);
 
     /**
      * @returns The arguments after "git" of the command CGit::GetMapHashToFriendName runs, plus HEAD.
