@@ -74,6 +74,27 @@ QString commonAdminDir(const QString& worktreeAdminDir)
 namespace kgt
 {
 
+bool GitAdminDir::hasStashDir(const QString& worktreeAdminDir)
+{
+    const QDir adminDir(commonAdminDir(worktreeAdminDir));
+    if (QFileInfo::exists(adminDir.filePath(QStringLiteral("refs/stash")))) {
+        return true;
+    }
+    QFile packedRefs(adminDir.filePath(QStringLiteral("packed-refs")));
+    if (!packedRefs.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    // One "<hash> <ref>" per line, with "#" header and "^" peeled-tag lines in between. Read by line, unlike
+    // TortoiseGit: this runs on Dolphin's thread and can stop at the entry
+    while (!packedRefs.atEnd()) {
+        const QByteArray line = packedRefs.readLine().trimmed();
+        if (!line.startsWith('#') && !line.startsWith('^') && line.endsWith(" refs/stash")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 QString GitAdminDir::projectTopDir(const QString& path)
 {
     if (path.isEmpty()) {

@@ -35,6 +35,40 @@ private Q_SLOTS:
         QVERIFY(GitAdminDir::worktreeAdminDirPath(notARepo.path()).isEmpty());
     }
 
+    void findsStash()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("initial"));
+        const QString adminDir = GitAdminDir::worktreeAdminDirPath(repo.path());
+        // Names that only look like it, packed
+        repo.run({QStringLiteral("update-ref"), QStringLiteral("refs/stashes"), QStringLiteral("HEAD")});
+        repo.run({QStringLiteral("branch"), QStringLiteral("refs/stash")});
+        repo.run({QStringLiteral("pack-refs"), QStringLiteral("--all")});
+        QVERIFY(!GitAdminDir::hasStashDir(adminDir));
+        // git itself can't create the stash beside that branch
+        repo.run({QStringLiteral("branch"), QStringLiteral("-D"), QStringLiteral("refs/stash")});
+
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+        repo.run({QStringLiteral("stash"), QStringLiteral("push")});
+        QVERIFY(QFileInfo::exists(repo.filePath(QStringLiteral(".git/refs/stash"))));
+        QVERIFY(GitAdminDir::hasStashDir(adminDir));
+
+        repo.run({QStringLiteral("pack-refs"), QStringLiteral("--all")});
+        QVERIFY(!QFileInfo::exists(repo.filePath(QStringLiteral(".git/refs/stash"))));
+        QVERIFY(GitAdminDir::hasStashDir(adminDir));
+
+        // A linked worktree shares the main repository's refs/stash
+        const QTemporaryDir parent;
+        const QString worktree = QDir(parent.path()).filePath(QStringLiteral("wt"));
+        repo.run({QStringLiteral("worktree"), QStringLiteral("add"), QStringLiteral("--detach"), worktree});
+        QVERIFY(GitAdminDir::hasStashDir(GitAdminDir::worktreeAdminDirPath(worktree)));
+
+        repo.run({QStringLiteral("stash"), QStringLiteral("drop")});
+        QVERIFY(!GitAdminDir::hasStashDir(adminDir));
+        QVERIFY(!GitAdminDir::hasStashDir(GitAdminDir::worktreeAdminDirPath(worktree)));
+    }
+
     void findsProjectTopDir()
     {
         const TestRepo repo;

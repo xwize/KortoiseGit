@@ -138,9 +138,9 @@ private:
 
     /**
      * The entries TortoiseGit's menu gives the selection: Clone, Pull, Fetch, Push, Commit, Show log, Browse
-     * References, Rebase, Stash changes, Abort Merge, Revert, Switch/Checkout, Merge, Create repository and Add, each
-     * where its MenuInfo condition holds. Decided afresh on every request from the items' own paths, as
-     * CShellExt::Initialize and QueryContextMenu do.
+     * References, Rebase, Stash changes, Stash Apply, Stash Pop, Abort Merge, Revert, Switch/Checkout, Merge, Create
+     * repository and Add, each where its MenuInfo condition holds. Decided afresh on every request from the items' own
+     * paths, as CShellExt::Initialize and QueryContextMenu do.
      * @param selected The selected paths, or the folder shown when nothing is selected.
      * @returns The top-level actions, in TortoiseGit's menu order, then the "KortoiseGit" submenu's action if the submenu
      *          has entries. Every entry's data is set to the paths.
@@ -169,6 +169,8 @@ private:
     QAction *m_refBrowseAction;
     QAction *m_rebaseAction;
     QAction *m_stashSaveAction;
+    QAction *m_stashApplyAction;
+    QAction *m_stashPopAction;
     QAction *m_switchAction;
     QAction *m_mergeAction;
     QAction *m_branchAction;

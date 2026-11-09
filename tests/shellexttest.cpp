@@ -684,6 +684,49 @@ private Q_SLOTS:
         QVERIFY(layout({root}).contains(stashChanges()));
     }
 
+    void stashRestoreEntries()
+    {
+        const QString apply = QStringLiteral("Stash Apply");
+        const QString pop = QStringLiteral("Stash Pop");
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.write(QStringLiteral("dir/b.txt"), "b\n");
+        repo.commitAll(QStringLiteral("initial"));
+
+        const ShellExt plugin(nullptr, {});
+        const auto layout = [&plugin](const KFileItemList& items) {
+            return submenuLayout(plugin.versionControlActions(items));
+        };
+        const KFileItem root = item(repo.path());
+        const KFileItem dir = item(repo.filePath(QStringLiteral("dir")));
+
+        // ITEMIS_STASH: no stash yet
+        QVERIFY(!layout({root}).contains(apply));
+        QVERIFY(!layout({root}).contains(pop));
+
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+        repo.run({QStringLiteral("stash"), QStringLiteral("push")});
+
+        // MenuInfo's order: directly after Stash changes
+        const QStringList atRoot = layout({root});
+        const qsizetype stashSave = atRoot.indexOf(stashChanges());
+        QVERIFY(stashSave >= 0);
+        QCOMPARE(atRoot.indexOf(apply), stashSave + 1);
+        QCOMPARE(atRoot.indexOf(pop), stashSave + 2);
+
+        // ITEMIS_FOLDERINGIT|ITEMIS_ONLYONE: one folder, not a file or several items
+        QVERIFY(layout({dir}).contains(apply));
+        QVERIFY(!layout({item(repo.filePath(QStringLiteral("a.txt")))}).contains(apply));
+        QVERIFY(!layout({root, dir}).contains(apply));
+
+        // Unlike Stash changes they stay during a merge
+        repo.write(QStringLiteral(".git/MERGE_HEAD"), "x\n");
+        const QStringList merging = layout({root});
+        QVERIFY(!merging.contains(stashChanges()));
+        QVERIFY(merging.contains(apply));
+        QVERIFY(merging.contains(pop));
+    }
+
     void cloneEntryForIgnoredFolders()
     {
         const TestRepo repo;

@@ -30,12 +30,17 @@
 
 #include <QClipboard>
 #include <QCoreApplication>
+#include <QDialog>
 #include <QDir>
 #include <QGuiApplication>
+#include <QLabel>
+#include <QMessageBox>
 #include <QProcess>
 #include <QTemporaryFile>
+#include <QVBoxLayout>
 
 #include <array>
+#include <memory>
 #include <tuple>
 
 /**
@@ -52,6 +57,68 @@ namespace
 using namespace kgt;
 
 constexpr KMessageBox::Options noNotify = KMessageBox::Options();
+
+/**
+ * What the messages of CAppUtils::StashApply and StashPop say.
+ */
+struct StashMessages {
+    QString success;
+    QString conflicts;
+    QString failed;
+};
+
+/**
+ * The IDS_PROC_STASHRUNNING window, TortoiseGit's CSysProgressDlg. It closes when git ends and not before, as the
+ * result is read then.
+ */
+class StashRunningDlg : public QDialog
+{
+public:
+    using QDialog::QDialog;
+
+    /**
+     * Ignores Esc and the window's close button.
+     */
+    void reject() override
+    {
+    }
+};
+
+/**
+ * The body CAppUtils::StashApply and StashPop share.
+ * @param workingTree The working tree's root.
+ * @param arguments The arguments after "git".
+ * @param messages What to tell the user.
+ * @param parent Parent of the windows.
+ * @returns False if git failed.
+ */
+bool runStash(const QString& workingTree, const QStringList& arguments, const StashMessages& messages, QWidget *parent)
+{
+    const std::unique_ptr<GitCall> call = Git(workingTree).runAsync(arguments);
+
+    StashRunningDlg running(parent);
+    running.setWindowTitle(i18n("KortoiseGit"));
+    auto *layout = new QVBoxLayout(&running);
+    layout->addWidget(new QLabel(i18n("Stash operation running..."), &running));
+    layout->addWidget(new QLabel(i18n("Please wait..."), &running));
+    QObject::connect(call.get(), &GitCall::finished, &running, &QDialog::accept);
+    running.exec();
+
+    const QString output = call->combinedOutput();
+    // TODO: TortoiseGit adds IDS_SEECHANGES to these and opens repostatus, once that is ported
+    switch (AppUtils::stashOutcome(call->exitCode(), output)) {
+    case StashOutcome::Success:
+        QMessageBox::information(parent, i18n("KortoiseGit"), messages.success);
+        return true;
+    case StashOutcome::Conflicts:
+        QMessageBox::warning(parent, i18n("KortoiseGit"), messages.conflicts);
+        return true;
+    case StashOutcome::Failed:
+        break;
+    }
+    QMessageBox::critical(parent, i18n("KortoiseGit"), messages.failed + QLatin1Char('\n') + output);
+    return false;
+}
 
 /**
  * Asks a question with two choices and Abort.
@@ -374,6 +441,35 @@ bool AppUtils::stashSave(const Git& git, const QString& message, QWidget *parent
     ProgressDlg progress(git.workingDirectory(), parent);
     progress.addGitCmd(stashSaveArguments(dlg.options()));
     return progress.exec() == QDialog::Accepted && progress.gitStatus() == 0;
+}
+
+StashOutcome AppUtils::stashOutcome(int exitCode, const QString& output)
+{
+    const bool hasConflicts = output.contains(QLatin1String("CONFLICT"));
+    if (exitCode != 0 && !(exitCode == 1 && hasConflicts)) {
+        return StashOutcome::Failed;
+    }
+    return hasConflicts ? StashOutcome::Conflicts : StashOutcome::Success;
+}
+
+bool AppUtils::stashApply(const QString& workingTree, QWidget *parent)
+{
+    const StashMessages messages{
+        .success = i18n("Stash Apply successful"),
+        .conflicts = i18n("Stash Apply failed, there are conflicts"),
+        .failed = i18n("Stash Apply failed!"),
+    };
+    return runStash(workingTree, {QStringLiteral("stash"), QStringLiteral("apply")}, messages, parent);
+}
+
+bool AppUtils::stashPop(const QString& workingTree, QWidget *parent)
+{
+    const StashMessages messages{
+        .success = i18n("Stash POP successful"),
+        .conflicts = i18n("Stash POP failed, there are conflicts"),
+        .failed = i18n("Stash POP failed!"),
+    };
+    return runStash(workingTree, {QStringLiteral("stash"), QStringLiteral("pop")}, messages, parent);
 }
 
 bool AppUtils::switchTo(const QString& workingTree, const QString& initialRefName, QWidget *parent)

@@ -56,6 +56,14 @@ public:
     [[nodiscard]] static bool isBareRepo(const QString& path);
 
     /**
+     * Ported from CTGitPath::HasStashDir: whether refs/stash exists, loose or packed, by the repository's files.
+     * @param worktreeAdminDir A working tree's admin directory, from worktreeAdminDirPath(). A linked worktree's
+     *                         stash is the main repository's, so the common directory is the one searched.
+     * @returns True if the repository has a stash.
+     */
+    [[nodiscard]] static bool hasStashDir(const QString& worktreeAdminDir);
+
+    /**
      * Ported from CGit::GetCurrentBranchFromFile: reads HEAD directly, as git-gui does.
      * @param adminDir A working tree's admin directory, from worktreeAdminDirPath().
      * @param fallback Give a detached HEAD's commit hash instead of "HEAD".

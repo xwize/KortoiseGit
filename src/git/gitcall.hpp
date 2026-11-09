@@ -78,6 +78,20 @@ public:
     [[nodiscard]] QByteArray output() const;
 
     /**
+     * For a caller that decides by the exit code itself, as those of CGit::Run do.
+     * @returns git's exit code, or -1 if it failed to start, crashed or timed out. Must only be called once
+     *          isFinished().
+     */
+    [[nodiscard]] int exitCode() const;
+
+    /**
+     * Ported from CGit::Run with one output string. Unlike output() it doesn't throw when git failed.
+     * @returns What git wrote to stdout, then, on a line of its own, what it wrote to stderr. Must only be called
+     *          once isFinished().
+     */
+    [[nodiscard]] QString combinedOutput() const;
+
+    /**
      * The environment every git process gets: the inherited one with the C locale, and set up so git never
      * waits for a terminal (GIT_TERMINAL_PROMPT=0) but asks through ksshaskpass, unless SSH_ASKPASS, GIT_ASKPASS
      * or SSH_ASKPASS_REQUIRE are set already.

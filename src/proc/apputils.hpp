@@ -44,6 +44,15 @@ struct SwitchOptions {
 };
 
 /**
+ * How a git stash apply or git stash pop ended.
+ */
+enum class StashOutcome {
+    Success,
+    Conflicts, // The stash was restored, leaving conflicts to resolve
+    Failed,
+};
+
+/**
  * Helpers shared by several dialogs and commands, TortoiseGit's CAppUtils.
  */
 class AppUtils
@@ -169,6 +178,31 @@ public:
      * @returns True if git succeeded and the progress dialog was closed with Close.
      */
     static bool stashSave(const Git& git, const QString& message = {}, QWidget *parent = nullptr);
+
+    /**
+     * The decision shared by CAppUtils::StashApply and StashPop.
+     * @param exitCode git's exit code.
+     * @param output What git wrote, stdout and stderr.
+     * @returns How the command ended: exit code 1 with a CONFLICT in the output is not a failure.
+     */
+    [[nodiscard]] static StashOutcome stashOutcome(int exitCode, const QString& output);
+
+    /**
+     * Ported from CAppUtils::StashApply, for the latest stash: runs git stash apply without blocking, then reports
+     * how it went.
+     * @param workingTree The working tree's root.
+     * @param parent Parent of the windows.
+     * @returns False if git failed; true if it applied the stash, even with conflicts.
+     */
+    static bool stashApply(const QString& workingTree, QWidget *parent = nullptr);
+
+    /**
+     * Ported from CAppUtils::StashPop: runs git stash pop without blocking, then reports how it went.
+     * @param workingTree The working tree's root.
+     * @param parent Parent of the windows.
+     * @returns False if git failed; true if it restored the stash, even with conflicts.
+     */
+    static bool stashPop(const QString& workingTree, QWidget *parent = nullptr);
 
     /**
      * Ported from CAppUtils::Switch: asks what to switch to in GitSwitchDlg, then switches.
