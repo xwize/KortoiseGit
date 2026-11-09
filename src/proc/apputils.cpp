@@ -10,6 +10,7 @@
 #include "browserefsdlg.hpp"
 #include "commands/pushcommand.hpp"
 #include "createbranchtagdlg.hpp"
+#include "deleteconflictdlg.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 #include "git/gitcall.hpp"
@@ -32,13 +33,18 @@
 #include <QCoreApplication>
 #include <QDialog>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QLabel>
 #include <QMessageBox>
 #include <QProcess>
+#include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <tuple>
@@ -57,6 +63,18 @@ namespace
 using namespace kgt;
 
 constexpr KMessageBox::Options noNotify = KMessageBox::Options();
+
+/**
+ * The titles and hashes of the two sides of a conflict, as CAppUtils::GetConflictTitles fills them in.
+ */
+struct ConflictTitles {
+    QString mineText; // Our side
+    QString mineHash; // Set only for a rebase found through rebase-apply/onto
+    QString theirsText; // Their side
+    QString theirsHash; // Empty during a rebase
+};
+
+constexpr qsizetype shortHashLength = 8;
 
 /**
  * What the messages of CAppUtils::StashApply and StashPop say.
@@ -224,6 +242,281 @@ bool deleteStash(const Git& git, const QString& ref, QWidget *parent)
         KMessageBox::error(parent, e.error().message, QString(), KMessageBox::Options());
     }
     return true;
+}
+
+/**
+ * Ported from CTGitPath::IsRebaseActive.
+ * @param adminDir The working tree's admin directory.
+ * @returns Whether a rebase is in progress.
+ */
+bool isRebaseActive(const QString& adminDir)
+{
+    const QDir dir(adminDir);
+    const auto isDirectory = [&dir](const QString& name) {
+        return QFileInfo(dir.filePath(name)).isDir();
+    };
+    return isDirectory(QStringLiteral("rebase-apply")) || isDirectory(QStringLiteral("tgitrebase.active"));
+}
+
+/**
+ * Ported from CStringUtils::ReadStringFromTextFile.
+ * @param path A file.
+ * @returns Its first line, or nothing if it can't be read.
+ */
+std::optional<QString> readFirstLine(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return std::nullopt;
+    }
+    return QString::fromUtf8(file.readLine()).trimmed();
+}
+
+/**
+ * Ported from CGit::GetHash.
+ * @param git Where to look.
+ * @param ref A ref or a file in the admin directory that holds a hash, such as MERGE_HEAD.
+ * @returns The hash, or an empty string if there is no such ref.
+ */
+QString hashOf(const Git& git, const QString& ref)
+{
+    const QStringList arguments{
+        QStringLiteral("rev-parse"),
+        QStringLiteral("--verify"),
+        QStringLiteral("--quiet"),
+        ref,
+    };
+    try {
+        return QString::fromLatin1(git.run(arguments, RunMode::ReadOnly)).trimmed();
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        return {};
+    }
+}
+
+/**
+ * The ref-and-hash text CAppUtils::GetConflictTitles builds with CGit::GuessRefForHash.
+ * @param git Where to look.
+ * @param hash A commit.
+ * @returns "ref, hash", or the short hash alone if no ref points at it.
+ */
+QString guessedRefText(const Git& git, const QString& hash)
+{
+    const QString shortHash = hash.left(shortHashLength);
+    const std::optional<QString> ref = git.guessRefForHash(hash);
+    return ref ? *ref + QStringLiteral(", ") + shortHash : shortHash;
+}
+
+/**
+ * The rebase branch of CAppUtils::GetConflictTitles.
+ * @param git Where to look.
+ * @param adminDir The working tree's admin directory.
+ * @returns The titles, with our side being the branch rebased onto.
+ */
+ConflictTitles rebaseConflictTitles(const Git& git, const QString& adminDir)
+{
+    ConflictTitles titles{
+        .mineText = i18n("Branch being rebased onto"),
+        .mineHash = {},
+        .theirsText = i18n("Branch being rebased"),
+        .theirsHash = {},
+    };
+    const QDir dir(adminDir);
+    const QString tgitHeadName = dir.filePath(QStringLiteral("tgitrebase.active/head-name"));
+    const QString applyHeadName = dir.filePath(QStringLiteral("rebase-apply/head-name"));
+    if (const std::optional<QString> onto = readFirstLine(dir.filePath(QStringLiteral("tgitrebase.active/onto")))) {
+        titles.mineText = *onto;
+    } else if (const QString hash = hashOf(git, QStringLiteral("rebase-apply/onto")); !hash.isEmpty()) {
+        titles.mineText = guessedRefText(git, hash);
+        titles.mineHash = hash;
+    }
+    if (const std::optional<QString> head = readFirstLine(tgitHeadName)) {
+        titles.theirsText = *head;
+    } else if (const std::optional<QString> applyHead = readFirstLine(applyHeadName)) {
+        titles.theirsText = Git::stripRefName(*applyHead);
+    }
+    return titles;
+}
+
+/**
+ * The merge, cherry-pick and revert branch of CAppUtils::GetConflictTitles. Its ConflictDontGuessBranchNames setting
+ * isn't ported.
+ * @param git Where to look.
+ * @returns The titles, with our side being HEAD.
+ */
+ConflictTitles mergeConflictTitles(const Git& git)
+{
+    ConflictTitles titles{
+        .mineText = QStringLiteral("HEAD"),
+        .mineHash = {},
+        .theirsText = i18n("changes to-be-integrated"),
+        .theirsHash = {},
+    };
+    const auto headTitle = [](const QString& head, const QString& commit) {
+        return i18nc("%1 is a ref such as MERGE_HEAD, %2 names its commit", "%1 (%2)", head, commit);
+    };
+    const QString mergeHead = QStringLiteral("MERGE_HEAD");
+    const QString cherryPickHead = QStringLiteral("CHERRY_PICK_HEAD");
+    if (const QString hash = hashOf(git, mergeHead); !hash.isEmpty()) {
+        titles.theirsText = headTitle(mergeHead, guessedRefText(git, hash));
+        titles.theirsHash = hash;
+    } else if (const QString pickHash = hashOf(git, cherryPickHead); !pickHash.isEmpty()) {
+        titles.theirsText = headTitle(cherryPickHead, pickHash.left(shortHashLength));
+        titles.theirsHash = pickHash;
+    } else if (const QString revertHash = hashOf(git, QStringLiteral("REVERT_HEAD")); !revertHash.isEmpty()) {
+        titles.theirsText = i18n("Parent of %1", revertHash.left(shortHashLength));
+        titles.theirsHash = revertHash;
+    }
+    return titles;
+}
+
+/**
+ * Ported from CAppUtils::DescribeConflictFile.
+ * @param hasFile Whether this side has the file.
+ * @param hasBase Whether the common ancestor has it.
+ * @returns What this side did to the file.
+ */
+QString describeConflictFile(bool hasFile, bool hasBase)
+{
+    if (!hasFile) {
+        return i18n("Deleted");
+    }
+    return hasBase ? i18n("Modified") : i18n("Created");
+}
+
+/**
+ * The setup of CDeleteConflictDlg in CAppUtils::ConflictEdit: during a rebase the two sides swap.
+ * @param hashes The file's stages.
+ * @param titles The titles of the two sides.
+ * @param isRebase Whether a rebase is in progress.
+ * @returns The dialog's sides; the caller fills in the paths.
+ */
+DeleteConflictParams deleteConflictParams(const ConflictHashes& hashes, const ConflictTitles& titles, bool isRebase)
+{
+    const bool hasBase = !hashes.baseHash.isEmpty();
+    const bool hasLocal = !hashes.localHash.isEmpty();
+    const bool hasRemote = !hashes.remoteHash.isEmpty();
+    DeleteConflictParams params;
+    params.showModifiedButton = hasBase;
+    if (isRebase) {
+        params.localStatus = describeConflictFile(hasRemote, hasBase);
+        params.remoteStatus = describeConflictFile(hasLocal, hasBase);
+        params.localHash = titles.theirsHash;
+        params.remoteHash = titles.mineHash;
+        params.localRef = titles.theirsText;
+        params.remoteRef = titles.mineText;
+        params.diffMine = !hasLocal;
+    } else {
+        params.localStatus = describeConflictFile(hasLocal, hasBase);
+        params.remoteStatus = describeConflictFile(hasRemote, hasBase);
+        params.localHash = titles.mineHash;
+        params.remoteHash = titles.theirsHash;
+        params.localRef = titles.mineText;
+        params.remoteRef = titles.theirsText;
+        params.diffMine = hasLocal;
+    }
+    return params;
+}
+
+/**
+ * Writes the common ancestor's version of a file where it doesn't show up in the working tree, as the prepareFile
+ * step of CAppUtils::ConflictEdit does next to the file. git writes it to the root of the working tree, and
+ * --prefix doesn't change that for --temp, so it is moved out.
+ * @param git Runs git at the working tree's root.
+ * @param path The file, relative to the root.
+ * @param directory Where the copy goes.
+ * @returns The copy's path.
+ * @throws RuntimeError (category Git) if git fails, or category Io if the copy can't be moved.
+ */
+QString writeBaseVersion(const Git& git, const QString& path, const QTemporaryDir& directory)
+{
+    const QStringList arguments{
+        QStringLiteral("--literal-pathspecs"),
+        QStringLiteral("checkout-index"),
+        QStringLiteral("--temp"),
+        QStringLiteral("--stage=1"),
+        QStringLiteral("--"),
+        path,
+    };
+    const QByteArray output = git.run(arguments);
+    // <temporary name>\t<path>\n
+    const QString tempName = QString::fromUtf8(output.left(output.indexOf('\t')));
+    const QString written = QDir(git.workingDirectory()).filePath(tempName);
+    // CAppUtils::GetMergeTempFile's name, so a diff tool still sees the file's type
+    const QFileInfo info(path);
+    const QString suffix = info.suffix().isEmpty() ? QString() : QLatin1Char('.') + info.suffix();
+    const QString target = directory.filePath(info.fileName() + QStringLiteral(".BASE") + suffix);
+    if (!QFile::rename(written, target)) {
+        QFile::remove(written);
+        const QString message = i18n("Could not write the base version of %1.", path);
+        throw RuntimeError({.category = ErrorCategory::Io, .message = message});
+    }
+    return target;
+}
+
+/**
+ * The content conflict branch of CAppUtils::ConflictEdit, which opens TortoiseMerge. That has no equivalent here, so
+ * git mergetool runs the user's merge tool, detached, and marks the file resolved itself. F5 shows the result.
+ * @param git Runs git at the working tree's root.
+ * @param path The file, relative to the root.
+ * @param parent Parent of the error message.
+ */
+void startMergeTool(const Git& git, const QString& path, QWidget *parent)
+{
+    const auto isInstalled = [](const QString& tool) {
+        return !QStandardPaths::findExecutable(tool).isEmpty();
+    };
+    const QString configuredTool = git.configValue(QStringLiteral("merge.tool"));
+    const QStringList arguments = AppUtils::mergeToolArguments(configuredTool, isInstalled);
+    const auto showError = [parent](const QString& detail) {
+        KMessageBox::error(parent, i18n("Could not start external merge program!\n\n%1", detail), QString(), noNotify);
+    };
+    if (arguments.isEmpty()) {
+        showError(i18n("merge.tool is not set, and neither KDiff3 nor Meld is installed."));
+        return;
+    }
+    QProcess process;
+    process.setProgram(QStringLiteral("git"));
+    process.setArguments(arguments + QStringList{QStringLiteral("--"), path});
+    process.setWorkingDirectory(git.workingDirectory());
+    // git asks "Was the merge successful?" if the tool left the file unchanged: end-of-file answers no and cleans up
+    process.setStandardInputFile(QProcess::nullDevice());
+    if (!process.startDetached()) {
+        showError(QStringLiteral("git mergetool"));
+    }
+}
+
+/**
+ * The delete/modify branch of CAppUtils::ConflictEdit.
+ * @param git Runs git at the working tree's root.
+ * @param path The file, relative to the root.
+ * @param hashes The file's stages.
+ * @param parent Parent of the dialog.
+ * @throws RuntimeError (category Git or Io) if git or the base version's copy fails.
+ */
+void editDeleteConflict(const Git& git, const QString& path, const ConflictHashes& hashes, QWidget *parent)
+{
+    const QString adminDir = GitAdminDir::worktreeAdminDirPath(git.workingDirectory());
+    const bool isRebase = isRebaseActive(adminDir);
+    const ConflictTitles titles = isRebase ? rebaseConflictTitles(git, adminDir) : mergeConflictTitles(git);
+    DeleteConflictParams params = deleteConflictParams(hashes, titles, isRebase);
+    params.workingTree = git.workingDirectory();
+    params.file = path;
+
+    // Removed when this returns, which is when the dialog has closed
+    const QTemporaryDir baseDirectory;
+    if (params.showModifiedButton) {
+        params.fileBaseVersion = writeBaseVersion(git, path, baseDirectory);
+    }
+
+    DeleteConflictDlg dlg(params, parent);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    const QString command = dlg.isDelete() ? QStringLiteral("rm") : QStringLiteral("add");
+    std::ignore = git.run({QStringLiteral("--literal-pathspecs"), command, QStringLiteral("--"), path});
 }
 
 } // namespace
@@ -684,6 +977,74 @@ bool AppUtils::updateBranchDescription(const Git& git, const QString& branch, QS
         qCWarning(KGT_PROC) << "Updating the branch description failed:" << e.error().message;
     }
     return true;
+}
+
+ConflictKind AppUtils::conflictKind(const ConflictHashes& hashes)
+{
+    if (!hashes.baseIsFile || !hashes.localIsFile || !hashes.remoteIsFile) {
+        return ConflictKind::Submodule;
+    }
+    const bool bothSides = !hashes.localHash.isEmpty() && !hashes.remoteHash.isEmpty();
+    return bothSides ? ConflictKind::Content : ConflictKind::DeleteModify;
+}
+
+QStringList AppUtils::mergeToolArguments(const QString& configuredTool, const IsInstalled& isInstalled)
+{
+    QStringList arguments{
+        QStringLiteral("--literal-pathspecs"),
+        QStringLiteral("mergetool"),
+        QStringLiteral("--no-prompt"),
+    };
+    if (configuredTool.isEmpty()) {
+        // The graphical three-way tools, in the relative order of git's list_merge_tool_candidates
+        const QStringList candidates{QStringLiteral("kdiff3"), QStringLiteral("meld")};
+        const auto found = std::ranges::find_if(candidates, isInstalled);
+        if (found == candidates.cend()) {
+            return {};
+        }
+        arguments.append(QStringLiteral("--tool=") + *found);
+    }
+    return arguments;
+}
+
+bool AppUtils::conflictEdit(const Git& git, const QString& path, QWidget *parent)
+{
+    try {
+        const QStringList lsFiles{
+            QStringLiteral("--literal-pathspecs"),
+            QStringLiteral("ls-files"),
+            QStringLiteral("-u"),
+            QStringLiteral("-t"),
+            QStringLiteral("-z"),
+            QStringLiteral("--"),
+            path,
+        };
+        const Result<ConflictHashes> hashes = Git::parseConflictHashesFromLsFile(git.run(lsFiles, RunMode::ReadOnly));
+        if (!hashes) {
+            KMessageBox::error(parent, hashes.error().message, QString(), noNotify);
+            return false;
+        }
+        QString message;
+        switch (conflictKind(*hashes)) {
+        case ConflictKind::Submodule:
+            // TODO: CSubmoduleResolveConflictDlg. git mergetool would stop on a prompt, with no terminal to answer it
+            message = i18n("%1 is a submodule conflict, which can't be edited yet.", path);
+            KMessageBox::error(parent, message, QString(), noNotify);
+            return false;
+        case ConflictKind::Content:
+            startMergeTool(git, path, parent);
+            return false;
+        case ConflictKind::DeleteModify:
+            editDeleteConflict(git, path, *hashes, parent);
+            return true;
+        }
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git && e.error().category != ErrorCategory::Io) {
+            throw;
+        }
+        KMessageBox::error(parent, e.error().message, QString(), noNotify);
+    }
+    return false;
 }
 
 } // namespace kgt

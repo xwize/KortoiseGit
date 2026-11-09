@@ -42,7 +42,7 @@ class RevertProgressCommand;
 /**
  * The changed-files list. The owning dialog sets the working tree and the show flags, places the Select all
  * checkbox and the counter label, calls reload() and acts on checkedEntries(). Double-clicking a file compares it
- * with HEAD in git difftool, or opens a conflicted one in git mergetool; the context menu offers Edit conflicts,
+ * with HEAD in git difftool, or edits a conflicted one as Edit conflicts does; the context menu offers Edit conflicts,
  * Resolved, Add, Compare with base, Revert..., Open, Open with..., Explore to and Delete; F5 reloads, and the Delete key
  * deletes.
  */
@@ -57,7 +57,7 @@ public:
      */
     enum class ContextMenu : unsigned int {
         Revert = 0x1, // GITSLC_POPREVERT
-        Conflict = 0x2, // GITSLC_POPCONFLICT: Edit conflicts, which runs git mergetool
+        Conflict = 0x2, // GITSLC_POPCONFLICT: Edit conflicts
         Resolve = 0x4, // GITSLC_POPRESOLVE: Resolved
         Add = 0x8, // GITSLC_POPADD: Add, and with Shift Add as Executable and Add as Symlink
         All = 0xFFFFFFFF, // GITSLC_POPALL

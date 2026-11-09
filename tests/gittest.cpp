@@ -19,6 +19,8 @@
 #include <optional>
 #include <tuple>
 
+Q_DECLARE_METATYPE(kgt::ConflictKind)
+
 namespace
 {
 
@@ -232,6 +234,123 @@ private:
         repo.write(QStringLiteral("f.txt"), "1");
         repo.commitAll(QStringLiteral("One"));
         QVERIFY(!repo.git().isUnbornBranch());
+    }
+
+    void parseConflictHashesReadsEachStage()
+    {
+        const QByteArray base(40, 'a');
+        const QByteArray local(40, 'b');
+        const QByteArray remote(64, 'c');
+        QByteArray output = "M 100644 " + base + " 1\tf.txt" + '\0';
+        output += "M 100755 " + local + " 2\tf.txt" + '\0';
+        output += "M 160000 " + remote + " 3\tf.txt" + '\0';
+        const Result<ConflictHashes> hashes = Git::parseConflictHashesFromLsFile(output);
+        QVERIFY(hashes.has_value());
+        QCOMPARE(hashes->baseHash, QString::fromLatin1(base));
+        QCOMPARE(hashes->localHash, QString::fromLatin1(local));
+        QCOMPARE(hashes->remoteHash, QString::fromLatin1(remote));
+        QVERIFY(hashes->baseIsFile);
+        QVERIFY(hashes->localIsFile);
+        QVERIFY(!hashes->remoteIsFile);
+    }
+
+    void parseConflictHashesLeavesMissingStagesEmpty()
+    {
+        const QByteArray output = "M 100644 " + QByteArray(40, 'a') + " 1\tname with spaces.txt" + '\0';
+        const Result<ConflictHashes> hashes = Git::parseConflictHashesFromLsFile(output);
+        QVERIFY(hashes.has_value());
+        QVERIFY(!hashes->baseHash.isEmpty());
+        QVERIFY(hashes->localHash.isEmpty());
+        QVERIFY(hashes->remoteHash.isEmpty());
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void parseConflictHashesRejectsBadOutput_data()
+    {
+        QTest::addColumn<QByteArray>("output");
+        const QByteArray hash(40, 'a');
+        QTest::newRow("empty") << QByteArray();
+        QTest::newRow("no terminator") << "M 100644 " + hash + " 1\tf";
+        QTest::newRow("cached entry") << "H 100644 " + hash + " 1\tf" + '\0';
+        QTest::newRow("stage 0") << "M 100644 " + hash + " 0\tf" + '\0';
+        QTest::newRow("short hash") << QByteArray("M 100644 abc 1\tf") + '\0';
+        QTest::newRow("no name") << "M 100644 " + hash + " 1\t" + '\0';
+    }
+
+    void parseConflictHashesRejectsBadOutput()
+    {
+        QFETCH(const QByteArray, output);
+        QVERIFY(!Git::parseConflictHashesFromLsFile(output).has_value());
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void conflictKindFollowsConflictEdit_data()
+    {
+        QTest::addColumn<bool>("hasLocal");
+        QTest::addColumn<bool>("hasRemote");
+        QTest::addColumn<bool>("isSubmodule");
+        QTest::addColumn<ConflictKind>("expected");
+        QTest::newRow("both sides") << true << true << false << ConflictKind::Content;
+        QTest::newRow("deleted by us") << false << true << false << ConflictKind::DeleteModify;
+        QTest::newRow("deleted by them") << true << false << false << ConflictKind::DeleteModify;
+        QTest::newRow("submodule with both sides") << true << true << true << ConflictKind::Submodule;
+        QTest::newRow("submodule deleted by them") << true << false << true << ConflictKind::Submodule;
+    }
+
+    void conflictKindFollowsConflictEdit()
+    {
+        QFETCH(const bool, hasLocal);
+        QFETCH(const bool, hasRemote);
+        QFETCH(const bool, isSubmodule);
+        QFETCH(const ConflictKind, expected);
+        const QString hash(40, QLatin1Char('a'));
+        ConflictHashes hashes;
+        hashes.baseHash = hash;
+        hashes.localHash = hasLocal ? hash : QString();
+        hashes.remoteHash = hasRemote ? hash : QString();
+        hashes.localIsFile = !isSubmodule;
+        QCOMPARE(AppUtils::conflictKind(hashes), expected);
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void mergeToolArgumentsChoosesTheTool_data()
+    {
+        QTest::addColumn<QString>("configured");
+        QTest::addColumn<QStringList>("installed");
+        QTest::addColumn<QString>("toolOption");
+        const QStringList both{QStringLiteral("meld"), QStringLiteral("kdiff3")};
+        QTest::newRow("configured wins") << QStringLiteral("vimdiff") << both << QString();
+        QTest::newRow("kdiff3 before meld") << QString() << both << QStringLiteral("--tool=kdiff3");
+        const QStringList meld{QStringLiteral("meld")};
+        QTest::newRow("meld alone") << QString() << meld << QStringLiteral("--tool=meld");
+    }
+
+    void mergeToolArgumentsChoosesTheTool()
+    {
+        QFETCH(const QString, configured);
+        QFETCH(const QStringList, installed);
+        QFETCH(const QString, toolOption);
+        const auto isInstalled = [&installed](const QString& tool) {
+            return installed.contains(tool);
+        };
+        const QStringList arguments = AppUtils::mergeToolArguments(configured, isInstalled);
+        QStringList expected{
+            QStringLiteral("--literal-pathspecs"),
+            QStringLiteral("mergetool"),
+            QStringLiteral("--no-prompt"),
+        };
+        if (!toolOption.isEmpty()) {
+            expected.append(toolOption);
+        }
+        QCOMPARE(arguments, expected);
+    }
+
+    void mergeToolArgumentsWithNoToolInstalledGivesNothing()
+    {
+        const auto isInstalled = [](const QString&) {
+            return false;
+        };
+        QVERIFY(AppUtils::mergeToolArguments(QString(), isInstalled).isEmpty());
     }
 };
 
