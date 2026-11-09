@@ -24,6 +24,13 @@ if [[ ! -f "$plugin" ]]; then
     exit 1
 fi
 
+wait_for_dolphin_exit() {
+    for _ in {1..50}; do
+        pgrep -x dolphin >/dev/null || break
+        sleep 0.1
+    done
+}
+
 # Ask Dolphin to quit cleanly, then kill it if it is still running after 5 seconds
 if pgrep -x dolphin >/dev/null; then
     echo "Quitting Dolphin..."
@@ -32,13 +39,11 @@ if pgrep -x dolphin >/dev/null; then
     else
         pkill -x dolphin || true
     fi
-    for _ in {1..50}; do
-        pgrep -x dolphin >/dev/null || break
-        sleep 0.1
-    done
+    wait_for_dolphin_exit
     if pgrep -x dolphin >/dev/null; then
         echo "Dolphin did not quit; killing it"
         pkill -9 -x dolphin || true
+        wait_for_dolphin_exit # SIGKILL is asynchronous
     fi
 fi
 
@@ -53,6 +58,7 @@ disown
 
 echo "Starting Dolphin with $plugin"
 echo "In Configure Dolphin, enable KortoiseGit and disable Git in the version control plugins, if not done already."
+# --new-window: otherwise Dolphin hands over to any instance still on the bus and exits without loading our plugin
 QT_PLUGIN_PATH="$build_dir/bin${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}" \
-    setsid dolphin "$@" >/dev/null 2>&1 </dev/null &
+    setsid dolphin --new-window "$@" >/dev/null 2>&1 </dev/null &
 disown
