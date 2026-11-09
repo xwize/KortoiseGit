@@ -138,7 +138,7 @@ private:
 
     /**
      * The entries TortoiseGit's menu gives the selection: Clone, Pull, Fetch, Push, Commit, Show log, Show RefLog,
-     * Browse References, Rebase, Stash changes, Stash Apply, Stash Pop, Stash List, Abort Merge, Revert,
+     * Browse References, Rebase, Stash changes, Stash Apply, Stash Pop, Stash List, Resolve, Abort Merge, Revert,
      * Switch/Checkout, Merge, Create repository and Add, each where its MenuInfo condition holds. Decided afresh on
      * every request from the items' own paths, as CShellExt::Initialize and QueryContextMenu do.
      * @param selected The selected paths, or the folder shown when nothing is selected.
@@ -177,6 +177,7 @@ private:
     QAction *m_mergeAction;
     QAction *m_branchAction;
     QAction *m_tagAction;
+    QAction *m_resolveAction;
     QAction *m_mergeAbortAction;
     QAction *m_aboutAction;
     std::unique_ptr<QMenu> m_gitMenu; // A QMenu's parent must be a widget, so it can't be a child of the plugin
