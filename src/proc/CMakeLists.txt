@@ -73,6 +73,8 @@ target_sources(kgtproc PRIVATE
     commands/refbrowsecommand.hpp
     commands/revertcommand.cpp
     commands/revertcommand.hpp
+    commands/stashcommand.cpp
+    commands/stashcommand.hpp
     commands/switchcommand.cpp
     commands/switchcommand.hpp
     commands/tagcommand.cpp
@@ -125,6 +127,8 @@ target_sources(kgtproc PRIVATE
     revertdlg.hpp
     shadowtree.cpp
     shadowtree.hpp
+    stashsave.cpp
+    stashsave.hpp
 )
 
 target_include_directories(kgtproc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})

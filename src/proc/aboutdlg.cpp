@@ -54,7 +54,7 @@ QString gitVersion()
         return QString::fromUtf8(Git(QDir::tempPath()).run({QStringLiteral("--version")}, RunMode::ReadOnly)).trimmed();
     } catch (const RuntimeError& e) {
         // Every category means the same here: the reason is shown in the box
-        return i18n("git not found (%1)", e.error().message).trimmed();
+        return i18n("Git not found (%1)", e.error().message).trimmed();
     }
 }
 
@@ -135,7 +135,10 @@ AboutDlg::AboutDlg(QWidget *parent)
     layout->setSizeConstraint(QLayout::SetFixedSize);
 
     layout->addLayout(createLogo(this));
-    layout->addWidget(wrappedLabel(i18n("based on TortoiseGit (https://tortoisegit.org/). KortoiseGit is not affiliated with the TortoiseGit project."), this));
+    const QString basedOn = i18n(
+        "Based on TortoiseGit (https://tortoisegit.org/). "
+        "KortoiseGit is not affiliated with the TortoiseGit project.");
+    layout->addWidget(wrappedLabel(basedOn, this));
     layout->addSpacing(layout->spacing());
     layout->addWidget(wrappedLabel(i18n("Significant contributions by: (see Git repository for a complete list)"), this));
     layout->addWidget(wrappedLabel(QStringLiteral("James Jones <this.verb@gmail.com>"), this));

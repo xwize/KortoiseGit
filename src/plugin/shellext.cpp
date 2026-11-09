@@ -236,6 +236,7 @@ struct MenuEntries {
     bool log = false;
     bool refBrowse = false;
     bool rebase = false;
+    bool stashSave = false;
     bool mergeAbort = false;
     bool revert = false;
     bool switchTo = false;
@@ -270,6 +271,18 @@ std::pair<bool, bool> diffEntries(const MenuState& state)
 }
 
 /**
+ * @param state The selection's state.
+ * @returns MenuInfo's conditions for Rebase and Stash changes.
+ */
+std::pair<bool, bool> rebaseStashEntries(const MenuState& state)
+{
+    return {
+        state.folderInGit && state.onlyOne && !state.bisect && !state.mergeActive,
+        state.inGit && state.onlyOne && !state.mergeActive,
+    };
+}
+
+/**
  * The entries' conditions from MenuInfo (src/TortoiseShell/MenuInfo.cpp), matched as CShellExt::ShouldInsertItem
  * does. Its ITEMIS_EXTENDED alternatives (Explorer's Shift+right-click) are left out: Dolphin has no extended menu.
  * @param state The selection's state.
@@ -282,6 +295,7 @@ MenuEntries menuEntries(const MenuState& state)
     const bool ignoredFolder = state.folder && state.ignored;
     const auto [mergeAbort, merge] = mergeEntries(state);
     const auto [diff, prevDiff] = diffEntries(state);
+    const auto [rebase, stashSave] = rebaseStashEntries(state);
     const bool oneFolderInGit = state.folderInGit && state.onlyOne;
     return {
         .clone = outsideRepository || ignoredFolder,
@@ -294,7 +308,8 @@ MenuEntries menuEntries(const MenuState& state)
         .prevDiff = prevDiff,
         .log = (state.onlyOne && !state.added && (state.inGit || state.folderInGit)) || state.bareRepo,
         .refBrowse = (state.folderInGit && state.onlyOne) || state.bareRepo,
-        .rebase = state.folderInGit && state.onlyOne && !state.bisect && !state.mergeActive,
+        .rebase = rebase,
+        .stashSave = stashSave,
         .mergeAbort = mergeAbort,
         .revert = (state.inGit && !state.normal) || state.folderInGit,
         .switchTo = oneFolderInGit,
@@ -368,6 +383,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_cloneAction(new QAction(QIcon::fromTheme(QStringLiteral("folder-download")), i18n("Git Clone..."), this))
     , m_refBrowseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Browse References"), this))
     , m_rebaseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-rebase")), i18n("Rebase..."), this))
+    , m_stashSaveAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-stash")), i18n("Stash changes"), this))
     , m_switchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("S&witch/Checkout..."), this))
     , m_mergeAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge..."), this))
     , m_branchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Create &Branch..."), this))
@@ -425,6 +441,11 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_rebaseAction->setToolTip(i18n("Rebase..."));
     connect(m_rebaseAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("rebase"), m_rebaseAction);
+    });
+    // TortoiseGit's description of Stash changes is its menu text too (IDS_MENUSTASHSAVE)
+    m_stashSaveAction->setToolTip(i18n("Stash changes"));
+    connect(m_stashSaveAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("stashsave"), m_stashSaveAction);
     });
     m_switchAction->setToolTip(i18n("Switch/Checkout working tree to another branch/tag"));
     connect(m_switchAction, &QAction::triggered, this, [this] {
@@ -586,6 +607,7 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
             entry(entries.log, m_showLogAction),
             entry(entries.refBrowse, m_refBrowseAction),
             entry(entries.rebase, m_rebaseAction),
+            entry(entries.stashSave, m_stashSaveAction),
             separator,
             entry(entries.mergeAbort, m_mergeAbortAction),
             entry(entries.revert, m_revertAction),

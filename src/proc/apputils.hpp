@@ -29,6 +29,7 @@ enum class ResetType;
 struct CreateBranchTagOptions;
 struct CreateBranchTagParams;
 struct GitSwitchOptions;
+struct StashSaveOptions;
 
 /**
  * The arguments of CAppUtils::PerformSwitch: what git checkout switches to and how.
@@ -151,6 +152,23 @@ public:
      * @returns True if the merge was aborted.
      */
     static bool mergeAbort(const QString& workingTree, QWidget *parent = nullptr);
+
+    /**
+     * CAppUtils::StashSave's command line.
+     * @param options What the user chose in StashSaveDlg.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList stashSaveArguments(const StashSaveOptions& options);
+
+    /**
+     * Ported from CAppUtils::StashSave, without its post-command buttons or CheckUserData: asks how in StashSaveDlg,
+     * then runs git stash push in ProgressDlg.
+     * @param git Runs git in the working tree's root.
+     * @param message The message the dialog starts with.
+     * @param parent Parent of the dialogs.
+     * @returns True if git succeeded and the progress dialog was closed with Close.
+     */
+    static bool stashSave(const Git& git, const QString& message = {}, QWidget *parent = nullptr);
 
     /**
      * Ported from CAppUtils::Switch: asks what to switch to in GitSwitchDlg, then switches.

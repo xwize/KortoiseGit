@@ -55,9 +55,18 @@ QStringList submenuLayout(const QList<QAction *>& actions)
 }
 
 /**
+ * @returns The Stash changes entry's text.
+ */
+QString stashChanges()
+{
+    return QStringLiteral("Stash changes");
+}
+
+/**
  * @param actions Actions the plugin returned.
  * @returns Their texts, with the "KortoiseGit" submenu replaced by its entries and separators left out: the top-level entries
- *          come first, then the submenu's. About, which is on every menu, is left out too.
+ *          come first, then the submenu's. About, which is on every menu, is left out too, and so is Stash changes,
+ *          which stashChangesEntry checks by itself.
  */
 QStringList flatTexts(const QList<QAction *>& actions)
 {
@@ -70,6 +79,7 @@ QStringList flatTexts(const QList<QAction *>& actions)
     texts += submenuLayout(actions);
     texts.removeAll(QStringLiteral("-"));
     texts.removeAll(QStringLiteral("A&bout"));
+    texts.removeAll(stashChanges());
     return texts;
 }
 
@@ -430,6 +440,8 @@ private Q_SLOTS:
             return plugin.versionControlActions({item(name.isEmpty() ? repo.path() : repo.filePath(name))});
         };
 
+        const QString stash = stashChanges();
+
         // Commit stays at the top level; the separators around it are one in the submenu
         QList<QAction *> actions = actionsFor({});
         QCOMPARE(topLevelTexts(actions), (QStringList{commit, gitMenu()}));
@@ -441,6 +453,7 @@ private Q_SLOTS:
                               log,
                               refs,
                               rebase,
+                              stash,
                               separator(),
                               revert,
                               separator(),
@@ -456,9 +469,9 @@ private Q_SLOTS:
         // The separator after Commit's group comes first among the submenu's, and is dropped; none trails either
         actions = actionsFor(QStringLiteral("tracked.txt"));
         QCOMPARE(topLevelTexts(actions), (QStringList{commit, gitMenu()}));
-        QCOMPARE(submenuLayout(actions), (QStringList{diff, prevDiff, separator(), log, separator(), about()}));
+        QCOMPARE(submenuLayout(actions), (QStringList{diff, prevDiff, separator(), log, stash, separator(), about()}));
         QCOMPARE(submenuLayout(actionsFor(QStringLiteral("modified.txt"))),
-                 (QStringList{diff, prevDiff, separator(), log, separator(), revert, separator(), about()}));
+                 (QStringList{diff, prevDiff, separator(), log, stash, separator(), revert, separator(), about()}));
 
         // Only submenu entries
         actions = actionsFor(QStringLiteral("new.txt"));
@@ -633,6 +646,42 @@ private Q_SLOTS:
         QVERIFY(!menu({}).contains(rebase));
         QVERIFY(menu({}).contains(switchTo));
         repo.remove(QStringLiteral(".git/BISECT_START"));
+    }
+
+    void stashChangesEntry()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.write(QStringLiteral("dir/b.txt"), "b\n");
+        repo.commitAll(QStringLiteral("initial"));
+        repo.write(QStringLiteral("new.txt"), "new\n");
+
+        const ShellExt plugin(nullptr, {});
+        const auto layout = [&plugin](const KFileItemList& items) {
+            return submenuLayout(plugin.versionControlActions(items));
+        };
+        const KFileItem file = item(repo.filePath(QStringLiteral("a.txt")));
+        const KFileItem root = item(repo.path());
+
+        // MenuInfo's order: directly after Rebase
+        const QStringList atRoot = layout({root});
+        QVERIFY(atRoot.contains(stashChanges()));
+        QCOMPARE(atRoot.indexOf(stashChanges()), atRoot.indexOf(QStringLiteral("Rebase...")) + 1);
+
+        // ITEMIS_INGIT|ITEMIS_ONLYONE: one versioned file or folder
+        QVERIFY(layout({file}).contains(stashChanges()));
+        QVERIFY(layout({item(repo.filePath(QStringLiteral("dir")))}).contains(stashChanges()));
+        QVERIFY(!layout({file, root}).contains(stashChanges()));
+        QVERIFY(!layout({item(repo.filePath(QStringLiteral("new.txt")))}).contains(stashChanges()));
+        const QTemporaryDir notARepo;
+        QVERIFY(!layout({item(notARepo.path())}).contains(stashChanges()));
+
+        // Not ITEMIS_MERGEACTIVE; a bisect doesn't matter
+        repo.write(QStringLiteral(".git/MERGE_HEAD"), "x\n");
+        QVERIFY(!layout({root}).contains(stashChanges()));
+        repo.remove(QStringLiteral(".git/MERGE_HEAD"));
+        repo.write(QStringLiteral(".git/BISECT_START"), "x\n");
+        QVERIFY(layout({root}).contains(stashChanges()));
     }
 
     void cloneEntryForIgnoredFolders()
