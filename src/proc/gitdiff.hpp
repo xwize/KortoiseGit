@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "apputils.hpp"
+
 #include <QString>
 #include <QStringList>
 
@@ -71,6 +73,17 @@ public:
      * @returns The arguments after "git".
      */
     [[nodiscard]] static QStringList extDiffArguments(const QString& file1, const QString& file2);
+
+    /**
+     * Names a diff tool on a git difftool command line when the user's settings don't: Meld, otherwise KDiff3.
+     * @param arguments The arguments after "git", from one of the functions above.
+     * @param diffTool The value of diff.tool; empty if it isn't set.
+     * @param mergeTool The value of merge.tool; empty if it isn't set.
+     * @param isInstalled Says whether an executable is on the PATH.
+     * @returns The arguments, unchanged if either setting is set or neither tool is installed, which leaves it to git.
+     */
+    [[nodiscard]] static QStringList
+    withDefaultTool(const QStringList& arguments, const QString& diffTool, const QString& mergeTool, const AppUtils::IsInstalled& isInstalled);
 
     /**
      * Starts git difftool without waiting for it, and tells the user if it can't be started.

@@ -7,10 +7,15 @@
 
 #include "gitdiff.hpp"
 
+#include "git/git.hpp"
+
 #include <KLocalizedString>
 
 #include <QMessageBox>
 #include <QProcess>
+#include <QStandardPaths>
+
+#include <algorithm>
 
 namespace
 {
@@ -31,6 +36,21 @@ QStringList difftool()
 QString blob(const QString& rev, const QString& path)
 {
     return rev + QLatin1Char(':') + path;
+}
+
+/**
+ * @param invocation What to run.
+ * @returns Its arguments, with the default diff tool added if the user's git settings don't name one.
+ */
+QStringList argumentsWithTool(const kgt::DiffInvocation& invocation)
+{
+    const auto isInstalled = [](const QString& tool) {
+        return !QStandardPaths::findExecutable(tool).isEmpty();
+    };
+    const kgt::Git git(invocation.workingDirectory);
+    const QString diffTool = git.configValue(QStringLiteral("diff.tool"));
+    const QString mergeTool = git.configValue(QStringLiteral("merge.tool"));
+    return kgt::GitDiff::withDefaultTool(invocation.arguments, diffTool, mergeTool, isInstalled);
 }
 
 } // namespace
@@ -79,9 +99,27 @@ QStringList GitDiff::extDiffArguments(const QString& file1, const QString& file2
     return difftool() << QStringLiteral("--no-index") << QStringLiteral("--") << file1 << file2;
 }
 
+QStringList GitDiff::withDefaultTool(const QStringList& arguments, const QString& diffTool, const QString& mergeTool, const AppUtils::IsInstalled& isInstalled)
+{
+    // git difftool falls back to merge.tool when diff.tool isn't set (get_configured_merge_tool in git-mergetool--lib)
+    if (!diffTool.isEmpty() || !mergeTool.isEmpty()) {
+        return arguments;
+    }
+    // Not from TortoiseGit, which has TortoiseGitMerge for both jobs: this is our default until we have an equivalent.
+    // Left alone, git would try KDiff3 first (list_merge_tool_candidates), but Meld is the better fit for diffs.
+    const QStringList candidates{QStringLiteral("meld"), QStringLiteral("kdiff3")};
+    const auto found = std::ranges::find_if(candidates, isInstalled);
+    if (found == candidates.cend()) {
+        return arguments;
+    }
+    QStringList result = arguments;
+    result.insert(result.indexOf(QStringLiteral("--no-prompt")) + 1, QStringLiteral("--tool=") + *found);
+    return result;
+}
+
 bool GitDiff::start(QWidget *parent, const DiffInvocation& invocation)
 {
-    if (QProcess::startDetached(QStringLiteral("git"), invocation.arguments, invocation.workingDirectory)) {
+    if (QProcess::startDetached(QStringLiteral("git"), argumentsWithTool(invocation), invocation.workingDirectory)) {
         return true;
     }
     QMessageBox::warning(parent, i18n("KortoiseGit"), i18n("Could not start git difftool."));
