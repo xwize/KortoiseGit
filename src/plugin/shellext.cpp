@@ -236,11 +236,13 @@ struct MenuEntries {
     bool diff = false;
     bool prevDiff = false;
     bool log = false;
+    bool refLog = false;
     bool refBrowse = false;
     bool rebase = false;
     bool stashSave = false;
     bool stashApply = false;
     bool stashPop = false;
+    bool stashList = false;
     bool mergeAbort = false;
     bool revert = false;
     bool switchTo = false;
@@ -302,6 +304,7 @@ MenuEntries menuEntries(const MenuState& state)
     const auto [rebase, stashSave] = rebaseStashEntries(state);
     const bool oneFolderInGit = state.folderInGit && state.onlyOne;
     const bool stashToRestore = oneFolderInGit && state.stash;
+    const bool oneFolderOrBare = oneFolderInGit || state.bareRepo;
     return {
         .clone = outsideRepository || ignoredFolder,
         .pull = ((state.folderInGit && state.onlyOne) || state.wcRoot) && !state.bisect && !state.mergeActive,
@@ -312,11 +315,13 @@ MenuEntries menuEntries(const MenuState& state)
         .diff = diff,
         .prevDiff = prevDiff,
         .log = (state.onlyOne && !state.added && (state.inGit || state.folderInGit)) || state.bareRepo,
-        .refBrowse = (state.folderInGit && state.onlyOne) || state.bareRepo,
+        .refLog = oneFolderOrBare,
+        .refBrowse = oneFolderOrBare,
         .rebase = rebase,
         .stashSave = stashSave,
         .stashApply = stashToRestore,
         .stashPop = stashToRestore,
+        .stashList = stashToRestore,
         .mergeAbort = mergeAbort,
         .revert = (state.inGit && !state.normal) || state.folderInGit,
         .switchTo = oneFolderInGit,
@@ -382,6 +387,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_diffAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-diff")), i18n("&Diff"), this))
     , m_prevDiffAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-diff")), i18n("&Diff with previous version"), this))
     , m_showLogAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"), this))
+    , m_refLogAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &RefLog"), this))
     , m_revertAction(new QAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("Re&vert..."), this))
     , m_addAction(new QAction(QIcon::fromTheme(QStringLiteral("list-add")), i18n("&Add..."), this))
     , m_pullAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-pull")), i18n("&Pull..."), this))
@@ -393,6 +399,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_stashSaveAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-stash")), i18n("Stash changes"), this))
     , m_stashApplyAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-stash-pop")), i18n("Stash Apply"), this))
     , m_stashPopAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-stash-pop")), i18n("Stash Pop"), this))
+    , m_stashListAction(new QAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Stash List"), this))
     , m_switchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("S&witch/Checkout..."), this))
     , m_mergeAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge..."), this))
     , m_branchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Create &Branch..."), this))
@@ -425,6 +432,10 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     });
     connect(m_showLogAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("log"), m_showLogAction);
+    });
+    m_refLogAction->setToolTip(i18n("Shows reference log"));
+    connect(m_refLogAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("reflog"), m_refLogAction);
     });
     m_cloneAction->setToolTip(i18n("Clone a repository"));
     connect(m_cloneAction, &QAction::triggered, this, [this] {
@@ -464,6 +475,11 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_stashPopAction->setToolTip(i18n("Stash Pop"));
     connect(m_stashPopAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("stashpop"), m_stashPopAction);
+    });
+    m_stashListAction->setToolTip(i18n("Stash List"));
+    connect(m_stashListAction, &QAction::triggered, this, [this] {
+        const QStringList stashRef{QStringLiteral("--ref"), QStringLiteral("refs/stash")};
+        runCommand(QStringLiteral("reflog"), m_stashListAction, stashRef);
     });
     m_switchAction->setToolTip(i18n("Switch/Checkout working tree to another branch/tag"));
     connect(m_switchAction, &QAction::triggered, this, [this] {
@@ -623,11 +639,13 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
             entry(entries.prevDiff, m_prevDiffAction),
             separator,
             entry(entries.log, m_showLogAction),
+            entry(entries.refLog, m_refLogAction),
             entry(entries.refBrowse, m_refBrowseAction),
             entry(entries.rebase, m_rebaseAction),
             entry(entries.stashSave, m_stashSaveAction),
             entry(entries.stashApply, m_stashApplyAction),
             entry(entries.stashPop, m_stashPopAction),
+            entry(entries.stashList, m_stashListAction),
             separator,
             entry(entries.mergeAbort, m_mergeAbortAction),
             entry(entries.revert, m_revertAction),

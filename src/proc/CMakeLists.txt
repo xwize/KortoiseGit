@@ -71,6 +71,8 @@ target_sources(kgtproc PRIVATE
     commands/pushcommand.hpp
     commands/rebasecommand.cpp
     commands/rebasecommand.hpp
+    commands/reflogcommand.cpp
+    commands/reflogcommand.hpp
     commands/refbrowsecommand.cpp
     commands/refbrowsecommand.hpp
     commands/revertcommand.cpp
@@ -123,6 +125,12 @@ target_sources(kgtproc PRIVATE
     rebasedlg_rebase.cpp
     refleaflistmodel.cpp
     refleaflistmodel.hpp
+    reflogdlg.cpp
+    reflogdlg.hpp
+    refloglist.cpp
+    refloglist.hpp
+    refloglistmodel.cpp
+    refloglistmodel.hpp
     resetdlg.cpp
     resetdlg.hpp
     revertdlg.cpp

@@ -303,6 +303,65 @@ QList<GitRef> GitRevLoglist::parseRefs(const QString& decoration)
     return refs;
 }
 
+QString GitRevLoglist::subjectBody() const
+{
+    QString text = subject + QLatin1Char('\n');
+    if (!body.isEmpty()) {
+        text += QLatin1Char('\n') + body;
+    }
+    return text;
+}
+
+QStringList GitRevLoglist::refLogArguments(const QString& ref)
+{
+    return {QStringLiteral("reflog"),
+            QStringLiteral("show"),
+            QStringLiteral("--pretty=%H %gD: %gs"),
+            QStringLiteral("--date=raw"),
+            QStringLiteral("--end-of-options"),
+            ref};
+}
+
+QList<GitRevLoglist> GitRevLoglist::parseRefLog(const QByteArray& output, const QString& ref)
+{
+    QList<GitRevLoglist> entries;
+    const QString prefix = ref + QStringLiteral("@{");
+    int position = 0;
+    for (const QByteArray& rawLine : output.split('\n')) {
+        const qsizetype hashEnd = rawLine.indexOf(' ');
+        if (hashEnd < 0 || !Git::isHash(rawLine.first(hashEnd))) {
+            continue;
+        }
+        const QString line = QString::fromUtf8(rawLine);
+        GitRevLoglist entry;
+        entry.hash = line.left(hashEnd);
+        entry.ref = QStringLiteral("%1@{%2}").arg(ref).arg(position++);
+        if (!QStringView(line).sliced(hashEnd + 1).startsWith(prefix)) {
+            continue;
+        }
+        const qsizetype timeStart = hashEnd + 1 + prefix.size();
+        const qsizetype timeEnd = line.indexOf(QLatin1Char(' '), timeStart);
+        if (timeEnd < 0) {
+            continue;
+        }
+        const QStringView seconds = QStringView(line).sliced(timeStart, timeEnd - timeStart);
+        entry.commitDate = QDateTime::fromSecsSinceEpoch(seconds.toLongLong());
+        const qsizetype action = line.indexOf(QLatin1String("}: "), timeEnd + 1);
+        if (action > 0) {
+            const QString message = line.mid(action + 3);
+            const qsizetype split = message.indexOf(QLatin1String(": "));
+            if (split > 0) {
+                entry.refAction = message.left(split);
+                entry.subject = message.mid(split + 2);
+            } else {
+                entry.refAction = message;
+            }
+        }
+        entries.append(entry);
+    }
+    return entries;
+}
+
 QStringList GitRevLoglist::refMapArguments()
 {
     return {QStringLiteral("show-ref"), QStringLiteral("-d"), QStringLiteral("--head")};

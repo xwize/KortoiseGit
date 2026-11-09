@@ -414,6 +414,37 @@ QString Git::fixBranchName(const QString& branchName) const
     return branchName;
 }
 
+QStringList Git::refListArguments()
+{
+    return {QStringLiteral("show-ref"), QStringLiteral("-d")};
+}
+
+QStringList Git::parseRefList(const QByteArray& output)
+{
+    QStringList list;
+    for (const QByteArray& line : nonEmptyLines(output)) {
+        const qsizetype start = line.indexOf(' ');
+        if (start < 0) {
+            continue;
+        }
+        const QString name = QString::fromUtf8(line.sliced(start + 1));
+        if (list.isEmpty() || name != list.constLast() + QStringLiteral("^{}")) {
+            list.append(name);
+        }
+    }
+    std::ranges::sort(list, logicalCollator());
+    return list;
+}
+
+bool Git::hasRefLog(const QString& ref) const
+{
+    const QString worktreeAdminDir = GitAdminDir::worktreeAdminDirPath(m_workingDirectory);
+    // A bare repository's folder is its admin directory
+    const QString adminDir = worktreeAdminDir.isEmpty() ? m_workingDirectory : worktreeAdminDir;
+    const QString logFile = QStringLiteral("logs/") + ref;
+    return QDir(adminDir).exists(logFile) || QDir(GitAdminDir::commonAdminDirPath(adminDir)).exists(logFile);
+}
+
 QStringList Git::branchListArguments(unsigned int type)
 {
     QStringList arguments{QStringLiteral("branch"), QStringLiteral("--no-color")};

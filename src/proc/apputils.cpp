@@ -745,14 +745,30 @@ StashOutcome AppUtils::stashOutcome(int exitCode, const QString& output)
     return hasConflicts ? StashOutcome::Conflicts : StashOutcome::Success;
 }
 
-bool AppUtils::stashApply(const QString& workingTree, QWidget *parent)
+QStringList AppUtils::stashApplyArguments(const QString& ref)
+{
+    QStringList arguments{QStringLiteral("stash"), QStringLiteral("apply")};
+    QString name = ref;
+    if (name.startsWith(QLatin1String("refs/"))) {
+        name = name.mid(5);
+    }
+    if (name.startsWith(QLatin1String("stash{"))) {
+        name = QStringLiteral("stash@") + name.mid(5);
+    }
+    if (!name.isEmpty()) {
+        arguments.append(name);
+    }
+    return arguments;
+}
+
+bool AppUtils::stashApply(const Git& git, const QString& ref, QWidget *parent)
 {
     const StashMessages messages{
         .success = i18n("Stash Apply successful"),
         .conflicts = i18n("Stash Apply failed, there are conflicts"),
         .failed = i18n("Stash Apply failed!"),
     };
-    return runStash(workingTree, {QStringLiteral("stash"), QStringLiteral("apply")}, messages, parent);
+    return runStash(git.workingDirectory(), stashApplyArguments(ref), messages, parent);
 }
 
 bool AppUtils::stashPop(const QString& workingTree, QWidget *parent)

@@ -112,6 +112,26 @@ public:
     [[nodiscard]] static QString repositoryRoot(const QString& path);
 
     /**
+     * @returns The arguments after "git" of the command CGit::GetRefList runs.
+     */
+    [[nodiscard]] static QStringList refListArguments();
+
+    /**
+     * Ported from CGit::GetRefList.
+     * @param output What refListArguments() printed.
+     * @returns Every ref's full name, peeled tags once, in logical order.
+     */
+    [[nodiscard]] static QStringList parseRefList(const QByteArray& output);
+
+    /**
+     * Whether a reflog is there to read: git reflog show fails for a ref that no longer exists, where TortoiseGit's
+     * git_for_each_reflog_ent gives nothing. HEAD's reflog is the working tree's own, the others are shared.
+     * @param ref A full ref name or HEAD.
+     * @returns True if the ref has a reflog file.
+     */
+    [[nodiscard]] bool hasRefLog(const QString& ref) const;
+
+    /**
      * Reads one field of git's -z style output.
      * @param output The whole output.
      * @param[in,out] pos Where the field starts; moved past the delimiter.

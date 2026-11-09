@@ -41,6 +41,8 @@ constexpr auto startRevOption = "startrev"_L1;
 constexpr auto endRevOption = "endrev"_L1;
 // TortoiseGit's /msg: StashSaveCommand starts the dialog with this message
 constexpr auto msgOption = "msg"_L1;
+// TortoiseGit's /ref: RefLogCommand starts on this ref
+constexpr auto refOption = "ref"_L1;
 
 /**
  * Ported from the /pathfile handling in CTortoiseProcApp::InitInstance.
@@ -91,6 +93,8 @@ void addCmdLineOptions(QCommandLineParser& parser)
     parser.addOption(QCommandLineOption(endRevOption, i18n("With --command diff: the revision to compare to."), i18nc("@info:shell", "ref")));
     const QString msgHelp = i18n("With --command stashsave: the message to start with.");
     parser.addOption(QCommandLineOption(msgOption, msgHelp, i18nc("@info:shell", "message")));
+    const QString refHelp = i18n("With --command reflog: the ref to start on.");
+    parser.addOption(QCommandLineOption(refOption, refHelp, i18nc("@info:shell", "ref")));
 }
 
 Result<CmdLineArgs> parseCmdLine(const QCommandLineParser& parser)
@@ -129,8 +133,10 @@ Result<CmdLineArgs> parseCmdLine(const QCommandLineParser& parser)
             values.insert(name, parser.value(name));
         }
     }
-    if (parser.isSet(msgOption)) {
-        values.insert(msgOption, parser.value(msgOption));
+    for (const QLatin1StringView name : {msgOption, refOption}) {
+        if (parser.isSet(name)) {
+            values.insert(name, parser.value(name));
+        }
     }
     if (parser.isSet(path2Option)) {
         values.insert(path2Option, QDir::cleanPath(current.absoluteFilePath(parser.value(path2Option))));
