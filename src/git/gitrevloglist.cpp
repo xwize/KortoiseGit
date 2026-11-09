@@ -11,9 +11,11 @@
 #include <QByteArrayView>
 #include <QLatin1StringView>
 #include <QLocale>
+#include <QMultiHash>
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <optional>
 #include <utility>
 
@@ -177,6 +179,18 @@ void addTagInfo(QHash<QString, QString>& infos, const std::array<QByteArrayView,
     infos.insert(refName, info);
 }
 
+/**
+ * @param name A full ref name.
+ * @returns Whether git log's decorations list refs of its kind.
+ */
+bool isDecoratedRef(const QString& name)
+{
+    static const QStringList prefixes = QStringLiteral("refs/heads/ refs/remotes/ refs/tags/").split(QLatin1Char(' '));
+    return name == QLatin1String("refs/stash") || std::ranges::any_of(prefixes, [&name](const QString& prefix) {
+               return name.startsWith(prefix);
+           });
+}
+
 } // namespace
 
 namespace kgt
@@ -264,9 +278,6 @@ QList<GitRef> GitRevLoglist::parseRefs(const QString& decoration)
 {
     static const QString headArrow = QStringLiteral("HEAD -> ");
     static const QString tagPrefix = QStringLiteral("tag: ");
-    static const QString headsPrefix = QStringLiteral("refs/heads/");
-    static const QString remotesPrefix = QStringLiteral("refs/remotes/");
-    static const QString tagsPrefix = QStringLiteral("refs/tags/");
 
     QList<GitRef> refs;
     // Ref names can't hold a space, so ", " only ever separates them
@@ -284,24 +295,87 @@ QList<GitRef> GitRevLoglist::parseRefs(const QString& decoration)
         if (item.startsWith(tagPrefix)) {
             item.remove(0, tagPrefix.size());
         }
-        if (item.startsWith(headsPrefix)) {
-            ref.type = GitRef::Type::LocalBranch;
-            ref.name = item.mid(headsPrefix.size());
-        } else if (item.startsWith(remotesPrefix)) {
-            ref.type = GitRef::Type::RemoteBranch;
-            ref.name = item.mid(remotesPrefix.size());
-        } else if (item.startsWith(tagsPrefix)) {
-            ref.type = GitRef::Type::Tag;
-            ref.name = item.mid(tagsPrefix.size());
-        } else if (item == QLatin1String("refs/stash")) {
-            ref.type = GitRef::Type::Stash;
-            ref.name = QStringLiteral("stash");
-        } else {
-            ref.name = item;
-        }
+        const bool isCurrent = ref.isCurrent;
+        ref = GitRef::fromFullName(item);
+        ref.isCurrent = isCurrent;
         refs.append(std::move(ref));
     }
     return refs;
+}
+
+QStringList GitRevLoglist::refMapArguments()
+{
+    return {QStringLiteral("show-ref"), QStringLiteral("-d"), QStringLiteral("--head")};
+}
+
+GitRefMap GitRevLoglist::parseRefMap(const QByteArray& output, const QString& currentBranch)
+{
+    static const QString peeledSuffix = QStringLiteral("^{}");
+    const QString currentRef = QStringLiteral("refs/heads/") + currentBranch;
+
+    QString headHash;
+    QMultiHash<QString, QString> names;
+    for (const QByteArray& line : output.split('\n')) {
+        const qsizetype space = line.indexOf(' ');
+        if (space < 0) {
+            continue;
+        }
+        const QString hash = QString::fromLatin1(line.first(space));
+        QString name = QString::fromUtf8(line.sliced(space + 1));
+        if (name == QLatin1String("HEAD")) {
+            headHash = hash;
+            continue;
+        }
+        // An annotated tag is listed twice: as the tag object, which is no commit, and peeled to its commit
+        if (name.endsWith(peeledSuffix)) {
+            name.chop(peeledSuffix.size());
+        }
+        // git log's decorations leave out what show-ref also lists, such as refs/bisect/
+        if (isDecoratedRef(name)) {
+            names.insert(hash, name);
+        }
+    }
+
+    GitRefMap map;
+    for (const QString& hash : names.uniqueKeys()) {
+        QStringList sorted = names.values(hash);
+        // git log decorates newest-added first: descending by name, the current branch ahead of the rest
+        std::ranges::sort(sorted, std::greater<>());
+        QList<GitRef> refs;
+        for (const QString& name : std::as_const(sorted)) {
+            GitRef ref = GitRef::fromFullName(name);
+            ref.isCurrent = name == currentRef && hash == headHash;
+            refs.insert(ref.isCurrent ? 0 : refs.size(), std::move(ref));
+        }
+        map.insert(hash, refs);
+    }
+    if (!headHash.isEmpty() && std::ranges::none_of(map.value(headHash), &GitRef::isCurrent)) {
+        QList<GitRef> refs = map.value(headHash);
+        refs.prepend(GitRef{.type = GitRef::Type::Head, .name = QStringLiteral("HEAD"), .isCurrent = true});
+        map.insert(headHash, refs);
+    }
+    return map;
+}
+
+GitRef GitRef::fromFullName(const QString& fullName)
+{
+    static const QString headsPrefix = QStringLiteral("refs/heads/");
+    static const QString remotesPrefix = QStringLiteral("refs/remotes/");
+    static const QString tagsPrefix = QStringLiteral("refs/tags/");
+
+    if (fullName.startsWith(headsPrefix)) {
+        return {.type = Type::LocalBranch, .name = fullName.mid(headsPrefix.size())};
+    }
+    if (fullName.startsWith(remotesPrefix)) {
+        return {.type = Type::RemoteBranch, .name = fullName.mid(remotesPrefix.size())};
+    }
+    if (fullName.startsWith(tagsPrefix)) {
+        return {.type = Type::Tag, .name = fullName.mid(tagsPrefix.size())};
+    }
+    if (fullName == QLatin1String("refs/stash")) {
+        return {.type = Type::Stash, .name = QStringLiteral("stash")};
+    }
+    return {.type = Type::Other, .name = fullName};
 }
 
 QString GitRef::fullName() const

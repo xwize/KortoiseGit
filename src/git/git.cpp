@@ -196,6 +196,45 @@ void Git::unsetConfigValue(const QString& name) const
     std::ignore = run({QStringLiteral("config"), QStringLiteral("--local"), QStringLiteral("--unset"), QStringLiteral("--"), name});
 }
 
+void Git::deleteRef(const QString& reference) const
+{
+    // CGit::DeleteRef. Our refs never carry show-ref's ^{}: the log's come from git log's decorations
+    static const QString headsPrefix = QStringLiteral("refs/heads/");
+    static const QString tagsPrefix = QStringLiteral("refs/tags/");
+    static const QString remotesPrefix = QStringLiteral("refs/remotes/");
+    QStringList arguments;
+    QString name;
+    if (reference.startsWith(headsPrefix)) {
+        arguments = {QStringLiteral("branch"), QStringLiteral("-D")};
+        name = reference.mid(headsPrefix.size());
+    } else if (reference.startsWith(tagsPrefix)) {
+        arguments = {QStringLiteral("tag"), QStringLiteral("-d")};
+        name = reference.mid(tagsPrefix.size());
+    } else if (reference.startsWith(remotesPrefix)) {
+        arguments = {QStringLiteral("branch"), QStringLiteral("-r"), QStringLiteral("-D")};
+        name = reference.mid(remotesPrefix.size());
+    } else {
+        const QString message = QStringLiteral("unsupported reference type: %1").arg(reference);
+        throw RuntimeError({.category = ErrorCategory::Git, .message = message});
+    }
+    arguments << QStringLiteral("--") << name;
+    std::ignore = run(arguments);
+}
+
+bool Git::isFastForward(const QString& from, const QString& target) const
+{
+    const QStringList arguments{QStringLiteral("merge-base"), QStringLiteral("--is-ancestor"), from, target};
+    try {
+        std::ignore = run(arguments, RunMode::ReadOnly);
+        return true;
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        return false;
+    }
+}
+
 QString Git::currentBranch() const
 {
     const QString branch = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(m_workingDirectory));

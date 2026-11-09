@@ -208,6 +208,16 @@ public:
     static bool push(const QString& workingTree, const QString& selectLocalBranch = {}, QWidget *parent = nullptr);
 
     /**
+     * Ported from CAppUtils::DeleteRef: asks, by the kind of ref, what to do and deletes it.
+     * @param git Runs git in the working tree's root or the bare repository.
+     * @param ref The full ref name.
+     * @param parent Parent of the dialogs.
+     * @returns False if the user refused or deleting failed locally, so a caller going through several refs stops.
+     *          A stash or remote branch whose git command fails counts as handled, as in TortoiseGit.
+     */
+    static bool deleteRef(const Git& git, const QString& ref, QWidget *parent = nullptr);
+
+    /**
      * Ported from CAppUtils::UpdateBranchDescription: sets branch.<branch>.description, or removes it if the
      * description is blank. Like TortoiseGit it carries on if git refuses, which is only logged.
      * @param git Runs git in the working tree's root or the bare repository.

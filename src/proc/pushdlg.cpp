@@ -200,10 +200,14 @@ void PushDlg::refresh(const QString& selectLocalBranch)
         const QSignalBlocker blocker(m_branchSource);
         m_branchSource->clear();
         m_branchSource->addItems(branches);
+        // CPushDlg::Refresh's m_BranchSourceName
+        static const QString headsPrefix = QStringLiteral("refs/heads/");
         if (selectLocalBranch.isEmpty()) {
             selectText(m_branchSource, current);
+        } else if (selectLocalBranch.startsWith(headsPrefix)) {
+            selectText(m_branchSource, selectLocalBranch.mid(headsPrefix.size()));
         } else {
-            // A ref such as refs/tags/v1 is not in the list of branches
+            // A ref such as refs/tags/v1, or a commit, is not in the list of branches
             m_branchSource->setEditText(selectLocalBranch);
         }
     }

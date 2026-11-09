@@ -52,7 +52,15 @@ struct GitRef {
      * @returns The full ref name, as CGit::GetMapHashToFriendName lists it: "refs/heads/main".
      */
     [[nodiscard]] QString fullName() const;
+
+    /**
+     * @param fullName A full ref name such as refs/tags/v1.
+     * @returns The ref, not marked as current.
+     */
+    [[nodiscard]] static GitRef fromFullName(const QString& fullName);
 };
+
+using GitRefMap = QHash<QString, QList<GitRef>>; // Each commit's refs by full hash (CGitLogListBase::m_HashMap)
 
 /**
  * What git log walks: the walk bits of CGit::GetLogCmd's mask (LOG_INFO_*) and its CFilterData date range.
@@ -135,6 +143,20 @@ struct GitRevLoglist {
      *          takeRecords() reads.
      */
     [[nodiscard]] static QStringList logArguments(const QStringList& paths = {}, const QString& range = {}, const GitLogOptions& options = {});
+
+    /**
+     * @returns The arguments after "git" of the command CGit::GetMapHashToFriendName runs, plus HEAD.
+     */
+    [[nodiscard]] static QStringList refMapArguments();
+
+    /**
+     * Ported from CGit::GetMapHashToFriendName, for CGitLogListBase::ReloadHashMap: the refs git log's decorations
+     * would list for each commit, in the same order, so labels don't move when they are read again.
+     * @param output What refMapArguments() printed.
+     * @param currentBranch The current branch's short name (CGit::GetCurrentBranch), which is marked as current.
+     * @returns Each commit's refs by full hash. A detached HEAD gets a GitRef::Type::Head entry.
+     */
+    [[nodiscard]] static GitRefMap parseRefMap(const QByteArray& output, const QString& currentBranch);
 
     /**
      * Parses the complete records at the start of git log's output, so the log can be shown while git still

@@ -139,6 +139,40 @@ private Q_SLOTS:
         QVERIFY(isTopological(revs));
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void refMapMatchesTheDecorations_data()
+    {
+        QTest::addColumn<bool>("detached");
+        QTest::newRow("on a branch") << false;
+        QTest::newRow("detached") << true;
+    }
+
+    void refMapMatchesTheDecorations()
+    {
+        QFETCH(const bool, detached);
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        repo.run({QStringLiteral("branch"), QStringLiteral("aa")});
+        repo.run({QStringLiteral("branch"), QStringLiteral("zz")});
+        repo.run({QStringLiteral("tag"), QStringLiteral("light")});
+        repo.run({QStringLiteral("tag"), QStringLiteral("-am"), QStringLiteral("Note"), QStringLiteral("annotated")});
+        repo.run({QStringLiteral("update-ref"), QStringLiteral("refs/remotes/origin/main"), QStringLiteral("HEAD")});
+        repo.run({QStringLiteral("update-ref"), QStringLiteral("refs/bisect/good"), QStringLiteral("HEAD")});
+        if (detached) {
+            repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("--detach")});
+        }
+        const Git& git = repo.git();
+        const QStringList logArguments = QStringLiteral("log -1 --decorate=full --format=%D").split(QLatin1Char(' '));
+        const QByteArray decoration = git.run(logArguments, RunMode::ReadOnly);
+        const QByteArray head = git.run({QStringLiteral("rev-parse"), QStringLiteral("HEAD")}, RunMode::ReadOnly);
+        const QString hash = QString::fromLatin1(head).trimmed();
+
+        const QByteArray refs = git.run(GitRevLoglist::refMapArguments(), RunMode::ReadOnly);
+        const GitRefMap map = GitRevLoglist::parseRefMap(refs, git.currentBranch());
+        QCOMPARE(map.value(hash), GitRevLoglist::parseRefs(QString::fromUtf8(decoration).trimmed()));
+    }
+
     void parsesOddMessages()
     {
         const TestRepo repo;

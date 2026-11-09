@@ -244,6 +244,17 @@ bool GitLogListModel::isRebaseMode() const
     return m_rebaseMode;
 }
 
+void GitLogListModel::setRefMap(const GitRefMap& refMap)
+{
+    for (int row = 0; row < m_revs.size(); ++row) {
+        const QList<GitRef> refs = refMap.value(m_revs.at(row).hash);
+        if (refs != m_revs.at(row).refs) {
+            std::next(m_revs.begin(), row)->refs = refs;
+            Q_EMIT dataChanged(index(row, 0), index(row, ColumnCount - 1));
+        }
+    }
+}
+
 void GitLogListModel::setRebaseAction(int row, unsigned int action)
 {
     Q_ASSERT(row >= 0 && row < m_revs.size());

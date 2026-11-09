@@ -281,6 +281,7 @@ void LogDlg::createWidgets()
     splitter->setChildrenCollapsible(false);
 
     m_logList = new GitLogList(splitter);
+    m_logList->setLogMenuEnabled(true);
     m_msgView = new QTextEdit(splitter);
     m_msgView->setReadOnly(true);
     m_msgView->setAcceptRichText(false);

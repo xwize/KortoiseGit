@@ -163,6 +163,21 @@ public:
     [[nodiscard]] QString currentBranch() const;
 
     /**
+     * Ported from CGit::DeleteRef's git command line.
+     * @param reference A full ref name under refs/heads/, refs/tags/ or refs/remotes/.
+     * @throws RuntimeError (category Git) if git fails or the ref is of another kind.
+     */
+    void deleteRef(const QString& reference) const;
+
+    /**
+     * Ported from CGit::IsFastForward.
+     * @param from A revision.
+     * @param target A revision.
+     * @returns Whether @p from is an ancestor of @p target; any failure counts as no.
+     */
+    [[nodiscard]] bool isFastForward(const QString& from, const QString& target) const;
+
+    /**
      * Ported from CGit::GetFullRefName.
      * @param shortRefName A ref such as main or origin/main.
      * @returns Its full name, such as refs/heads/main, or an empty string if it isn't a ref.

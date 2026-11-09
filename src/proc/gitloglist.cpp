@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <tuple>
 #include <utility>
 
@@ -419,6 +420,43 @@ const QIcon& actionIcon(Action action)
 }
 
 /**
+ * Where one ref's label goes in a row (a value of CGitLogListBase::m_RefLabelPosMap).
+ */
+struct RefLabel {
+    const GitRef *ref = nullptr; // The ref, owned by the list passed to layOutRefLabels()
+    QRect rect; // The label
+};
+
+/**
+ * Lays the ref labels out from the left of the cell. TortoiseGit records m_RefLabelPosMap while painting and clears
+ * it per paint; Qt repaints only parts of the view, so painting and IsMouseOnRefLabel both ask this instead.
+ * @param rect The cell's text area.
+ * @param opt The cell's style.
+ * @param index The cell.
+ * @returns The labels that fit, left to right.
+ */
+QList<RefLabel> layOutRefLabels(const QRect& rect, const QStyleOptionViewItem& opt, const QModelIndex& index)
+{
+    const auto *model = qobject_cast<const GitLogListModel *>(index.model());
+    Q_ASSERT(model);
+    QList<RefLabel> labels;
+    QRect rest = rect;
+    for (const GitRef& ref : model->rev(index.row()).refs) {
+        if (rest.width() <= 0) {
+            break;
+        }
+        if (!model->isRefShown(ref)) {
+            continue;
+        }
+        const int width = opt.fontMetrics.horizontalAdvance(ref.name) + (2 * labelPadding);
+        const QRect label(rest.left(), rest.top() + 1, std::min(width, rest.width()), rest.height() - 2);
+        labels.append({.ref = &ref, .rect = label});
+        rest.setLeft(label.right() + 1 + labelSpacing);
+    }
+    return labels;
+}
+
+/**
  * Draws the Actions and Message columns, which TortoiseGit owner-draws (CGitLogListBase::OnNMCustomdrawLoglist):
  * an icon per kind of change, and the ref labels before the subject (DrawTagBranchMessage).
  */
@@ -447,12 +485,11 @@ public:
         style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, opt.widget);
         const QRect rect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget);
 
-        const GitRevLoglist& rev = model->rev(index.row());
         painter->save();
         if (column == GitLogListModel::ActionsColumn) {
-            drawActions(painter, rect, rev);
+            drawActions(painter, rect, model->rev(index.row()));
         } else {
-            const QRect textRect = drawRefs(painter, rect, rev.refs, opt, *model);
+            const QRect textRect = drawRefs(painter, rect, layOutRefLabels(rect, opt, index), opt.font);
             const bool isSelected = opt.state.testFlag(QStyle::State_Selected);
             painter->setPen(opt.palette.color(isSelected ? QPalette::HighlightedText : QPalette::Text));
             painter->setFont(opt.font);
@@ -460,6 +497,20 @@ public:
             painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, elided);
         }
         painter->restore();
+    }
+
+    /**
+     * Where paint() draws a row's labels, for CGitLogListBase::IsMouseOnRefLabel.
+     * @param option The Message cell's style and rectangle.
+     * @param index The Message cell.
+     * @returns The labels.
+     */
+    [[nodiscard]] QList<RefLabel> refLabels(const QStyleOptionViewItem& option, const QModelIndex& index) const
+    {
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        const QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
+        return layOutRefLabels(style->subElementRect(QStyle::SE_ItemViewItemText, &opt, opt.widget), opt, index);
     }
 
 private:
@@ -523,30 +574,22 @@ private:
      * Draws the ref labels from the left of the cell.
      * @param painter Draws.
      * @param rect The cell's text area.
-     * @param refs The refs pointing at the commit.
-     * @param opt The cell's style.
-     * @param model Says which refs get a label.
+     * @param labels The labels and their places.
+     * @param font The cell's font.
      * @returns What is left of the text area for the subject.
      */
-    static QRect drawRefs(QPainter *painter, const QRect& rect, const QList<GitRef>& refs, const QStyleOptionViewItem& opt, const GitLogListModel& model)
+    static QRect drawRefs(QPainter *painter, const QRect& rect, const QList<RefLabel>& labels, const QFont& font)
     {
         QRect rest = rect;
-        painter->setFont(opt.font);
-        for (const GitRef& ref : refs) {
-            if (rest.width() <= 0) {
-                break;
-            }
-            if (!model.isRefShown(ref)) {
-                continue;
-            }
-            const int width = opt.fontMetrics.horizontalAdvance(ref.name) + (2 * labelPadding);
-            const QRect label(rest.left(), rest.top() + 1, std::min(width, rest.width()), rest.height() - 2);
-            const QColor color = labelColor(ref);
+        painter->setFont(font);
+        for (const RefLabel& refLabel : labels) {
+            const QRect& label = refLabel.rect;
+            const QColor color = labelColor(*refLabel.ref);
             painter->setPen(color.darker());
             painter->setBrush(color);
             painter->drawRect(label.adjusted(0, 0, -1, -1));
             painter->setPen(color.lightness() < maxLabelBrightness ? Qt::white : Qt::black);
-            painter->drawText(label, Qt::AlignCenter | Qt::TextSingleLine, ref.name);
+            painter->drawText(label, Qt::AlignCenter | Qt::TextSingleLine, refLabel.ref->name);
             rest.setLeft(label.right() + 1 + labelSpacing);
         }
         return rest;
@@ -673,6 +716,28 @@ bool GitLogList::isRebaseMenuEnabled() const
     return m_rebaseMenu;
 }
 
+void GitLogList::setLogMenuEnabled(bool enabled)
+{
+    m_logMenu = enabled;
+}
+
+std::optional<GitRef> GitLogList::refLabelAt(int row, const QPoint& pos) const
+{
+    Q_ASSERT(row >= 0 && row < m_model->rowCount());
+    const QModelIndex index = m_model->index(row, GitLogListModel::MessageColumn);
+    QStyleOptionViewItem option;
+    initViewItemOption(&option);
+    option.rect = visualRect(index);
+    const auto *delegate = dynamic_cast<const GitLogListDelegate *>(itemDelegate());
+    Q_ASSERT(delegate);
+    for (const RefLabel& label : delegate->refLabels(option, index)) {
+        if (label.rect.contains(pos)) {
+            return label.ref->type == GitRef::Type::Head ? std::nullopt : std::optional<GitRef>(*label.ref);
+        }
+    }
+    return std::nullopt;
+}
+
 bool GitLogList::maySetRebaseAction(int row, unsigned int action) const
 {
     // CGitLogList::SetSelectedRebaseAction's conditions (cherry-pick mode is not ported)
@@ -752,9 +817,18 @@ void GitLogList::shiftSelectedRebaseAction()
 
 void GitLogList::contextMenuEvent(QContextMenuEvent *event)
 {
-    // The rebase entries of CGitLogListBase::OnContextMenu; the log's other entries are not ported yet
+    if (m_rebaseMenu) {
+        showRebaseMenu(event);
+    } else if (m_logMenu) {
+        showLogMenu(event);
+    }
+}
+
+void GitLogList::showRebaseMenu(QContextMenuEvent *event)
+{
+    // The rebase entries of CGitLogListBase::OnContextMenu
     const QList<int> rows = selectedRows();
-    if (!m_rebaseMenu || rows.isEmpty()) {
+    if (rows.isEmpty()) {
         return;
     }
     // pSelLogEntry: the entry the menu was opened on
