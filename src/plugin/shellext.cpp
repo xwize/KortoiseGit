@@ -166,6 +166,7 @@ struct MenuState {
     bool normal = false; // ITEMIS_NORMAL: versioned and unchanged
     bool added = false; // ITEMIS_ADDED
     bool deleted = false; // ITEMIS_DELETED
+    bool conflicted = false; // ITEMIS_CONFLICTED
     bool bisect = false; // ITEMIS_BISECT: a bisect is running
     bool mergeActive = false; // ITEMIS_MERGEACTIVE: a merge awaits its commit
     bool stash = false; // ITEMIS_STASH: the repository has a stash
@@ -209,6 +210,7 @@ MenuState menuState(const QStringList& paths)
     state.normal = status == WcStatus::Normal;
     state.added = status == WcStatus::Added;
     state.deleted = status == WcStatus::Deleted;
+    state.conflicted = status == WcStatus::Conflicted;
 
     if (GitAdminDir::isBareRepo(first)) {
         state = MenuState{.bareRepo = true};
@@ -243,6 +245,7 @@ struct MenuEntries {
     bool stashApply = false;
     bool stashPop = false;
     bool stashList = false;
+    bool resolve = false;
     bool mergeAbort = false;
     bool revert = false;
     bool switchTo = false;
@@ -289,6 +292,15 @@ std::pair<bool, bool> rebaseStashEntries(const MenuState& state)
 }
 
 /**
+ * @param state The selection's state.
+ * @returns MenuInfo's condition for Resolve, which is also met by folders with nothing in conflict.
+ */
+bool resolveEntry(const MenuState& state)
+{
+    return (state.inGit && (state.conflicted || state.folder)) || state.folderInGit;
+}
+
+/**
  * The entries' conditions from MenuInfo (src/TortoiseShell/MenuInfo.cpp), matched as CShellExt::ShouldInsertItem
  * does. Its ITEMIS_EXTENDED alternatives (Explorer's Shift+right-click) are left out: Dolphin has no extended menu.
  * @param state The selection's state.
@@ -322,6 +334,7 @@ MenuEntries menuEntries(const MenuState& state)
         .stashApply = stashToRestore,
         .stashPop = stashToRestore,
         .stashList = stashToRestore,
+        .resolve = resolveEntry(state),
         .mergeAbort = mergeAbort,
         .revert = (state.inGit && !state.normal) || state.folderInGit,
         .switchTo = oneFolderInGit,
@@ -404,6 +417,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_mergeAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge..."), this))
     , m_branchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Create &Branch..."), this))
     , m_tagAction(new QAction(QIcon::fromTheme(QStringLiteral("tag")), i18n("Create &Tag..."), this))
+    , m_resolveAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-ok-apply")), i18n("Res&olve..."), this))
     , m_mergeAbortAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Abort &Merge"), this))
     , m_aboutAction(new QAction(QIcon::fromTheme(QStringLiteral("help-about")), i18n("A&bout"), this))
     , m_gitMenu(std::make_unique<QMenu>())
@@ -496,6 +510,10 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_tagAction->setToolTip(i18n("Creates a branch or tag"));
     connect(m_tagAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("tag"), m_tagAction);
+    });
+    m_resolveAction->setToolTip(i18n("Resolves conflicted files"));
+    connect(m_resolveAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("resolve"), m_resolveAction);
     });
     m_mergeAbortAction->setToolTip(i18n("Aborts a running merge."));
     connect(m_mergeAbortAction, &QAction::triggered, this, [this] {
@@ -647,6 +665,7 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
             entry(entries.stashPop, m_stashPopAction),
             entry(entries.stashList, m_stashListAction),
             separator,
+            entry(entries.resolve, m_resolveAction),
             entry(entries.mergeAbort, m_mergeAbortAction),
             entry(entries.revert, m_revertAction),
             separator,

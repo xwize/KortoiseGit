@@ -73,6 +73,8 @@ target_sources(kgtproc PRIVATE
     commands/reflogcommand.hpp
     commands/refbrowsecommand.cpp
     commands/refbrowsecommand.hpp
+    commands/resolvecommand.cpp
+    commands/resolvecommand.hpp
     commands/revertcommand.cpp
     commands/revertcommand.hpp
     commands/stashcommand.cpp
@@ -110,6 +112,8 @@ target_sources(kgtproc PRIVATE
     mergedlg.hpp
     progresscommands/addprogresscommand.cpp
     progresscommands/addprogresscommand.hpp
+    progresscommands/resolveprogresscommand.cpp
+    progresscommands/resolveprogresscommand.hpp
     progresscommands/revertprogresscommand.cpp
     progresscommands/revertprogresscommand.hpp
     progressdlg.cpp
@@ -131,6 +135,8 @@ target_sources(kgtproc PRIVATE
     refloglistmodel.hpp
     resetdlg.cpp
     resetdlg.hpp
+    resolvedlg.cpp
+    resolvedlg.hpp
     revertdlg.cpp
     revertdlg.hpp
     shadowtree.cpp
