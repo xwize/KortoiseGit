@@ -25,4 +25,25 @@ bool StashSaveCommand::execute()
     return AppUtils::stashSave(Git(Git::workingTreeRoot(paths().constFirst())), value(QStringLiteral("msg")));
 }
 
+StashApplyCommand::StashApplyCommand()
+    : Command(PathRequirement::WorkingTreeRequired)
+{
+}
+
+bool StashApplyCommand::execute()
+{
+    return AppUtils::stashApply(Git::workingTreeRoot(paths().constFirst()));
+}
+
+StashPopCommand::StashPopCommand()
+    : Command(PathRequirement::WorkingTreeRequired)
+{
+}
+
+bool StashPopCommand::execute()
+{
+    // TortoiseGit returns !StashPop() here, which reports a successful pop as a failed command
+    return AppUtils::stashPop(Git::workingTreeRoot(paths().constFirst()));
+}
+
 } // namespace kgt

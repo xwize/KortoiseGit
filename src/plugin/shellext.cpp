@@ -168,6 +168,7 @@ struct MenuState {
     bool deleted = false; // ITEMIS_DELETED
     bool bisect = false; // ITEMIS_BISECT: a bisect is running
     bool mergeActive = false; // ITEMIS_MERGEACTIVE: a merge awaits its commit
+    bool stash = false; // ITEMIS_STASH: the repository has a stash
 };
 
 /**
@@ -199,6 +200,7 @@ MenuState menuState(const QStringList& paths)
         const QDir adminDir(GitAdminDir::worktreeAdminDirPath(first));
         state.bisect = adminDir.exists(QStringLiteral("BISECT_START"));
         state.mergeActive = adminDir.exists(QStringLiteral("MERGE_HEAD"));
+        state.stash = GitAdminDir::hasStashDir(adminDir.path());
     }
     if (status == WcStatus::Unversioned || status == WcStatus::Ignored || status == WcStatus::None) {
         state.inGit = false;
@@ -237,6 +239,8 @@ struct MenuEntries {
     bool refBrowse = false;
     bool rebase = false;
     bool stashSave = false;
+    bool stashApply = false;
+    bool stashPop = false;
     bool mergeAbort = false;
     bool revert = false;
     bool switchTo = false;
@@ -297,6 +301,7 @@ MenuEntries menuEntries(const MenuState& state)
     const auto [diff, prevDiff] = diffEntries(state);
     const auto [rebase, stashSave] = rebaseStashEntries(state);
     const bool oneFolderInGit = state.folderInGit && state.onlyOne;
+    const bool stashToRestore = oneFolderInGit && state.stash;
     return {
         .clone = outsideRepository || ignoredFolder,
         .pull = ((state.folderInGit && state.onlyOne) || state.wcRoot) && !state.bisect && !state.mergeActive,
@@ -310,6 +315,8 @@ MenuEntries menuEntries(const MenuState& state)
         .refBrowse = (state.folderInGit && state.onlyOne) || state.bareRepo,
         .rebase = rebase,
         .stashSave = stashSave,
+        .stashApply = stashToRestore,
+        .stashPop = stashToRestore,
         .mergeAbort = mergeAbort,
         .revert = (state.inGit && !state.normal) || state.folderInGit,
         .switchTo = oneFolderInGit,
@@ -384,6 +391,8 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_refBrowseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Browse References"), this))
     , m_rebaseAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-rebase")), i18n("Rebase..."), this))
     , m_stashSaveAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-stash")), i18n("Stash changes"), this))
+    , m_stashApplyAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-stash-pop")), i18n("Stash Apply"), this))
+    , m_stashPopAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-stash-pop")), i18n("Stash Pop"), this))
     , m_switchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("S&witch/Checkout..."), this))
     , m_mergeAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge..."), this))
     , m_branchAction(new QAction(QIcon::fromTheme(QStringLiteral("vcs-branch")), i18n("Create &Branch..."), this))
@@ -446,6 +455,15 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_stashSaveAction->setToolTip(i18n("Stash changes"));
     connect(m_stashSaveAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("stashsave"), m_stashSaveAction);
+    });
+    // Their descriptions are their menu texts too (IDS_MENUSTASHAPPLY, IDS_MENUSTASHPOP)
+    m_stashApplyAction->setToolTip(i18n("Stash Apply"));
+    connect(m_stashApplyAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("stashapply"), m_stashApplyAction);
+    });
+    m_stashPopAction->setToolTip(i18n("Stash Pop"));
+    connect(m_stashPopAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("stashpop"), m_stashPopAction);
     });
     m_switchAction->setToolTip(i18n("Switch/Checkout working tree to another branch/tag"));
     connect(m_switchAction, &QAction::triggered, this, [this] {
@@ -608,6 +626,8 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
             entry(entries.refBrowse, m_refBrowseAction),
             entry(entries.rebase, m_rebaseAction),
             entry(entries.stashSave, m_stashSaveAction),
+            entry(entries.stashApply, m_stashApplyAction),
+            entry(entries.stashPop, m_stashPopAction),
             separator,
             entry(entries.mergeAbort, m_mergeAbortAction),
             entry(entries.revert, m_revertAction),

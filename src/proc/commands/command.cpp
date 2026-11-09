@@ -74,6 +74,8 @@ constexpr std::array commands{
     CommandEntry{.name = u"refbrowse", .create = &create<kgt::RefBrowseCommand>},
     CommandEntry{.name = u"repocreate", .create = &create<kgt::CreateRepositoryCommand>},
     CommandEntry{.name = u"revert", .create = &create<kgt::RevertCommand>},
+    CommandEntry{.name = u"stashapply", .create = &create<kgt::StashApplyCommand>},
+    CommandEntry{.name = u"stashpop", .create = &create<kgt::StashPopCommand>},
     CommandEntry{.name = u"stashsave", .create = &create<kgt::StashSaveCommand>},
     CommandEntry{.name = u"switch", .create = &create<kgt::SwitchCommand>},
     CommandEntry{.name = u"tag", .create = &create<kgt::TagCommand>},

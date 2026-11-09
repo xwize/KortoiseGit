@@ -31,6 +31,7 @@ set(kgt_tests
     rebasetest
     resulttest
     reverttest
+    stashrestoretest
     stashsavetest
     switchtest
 )

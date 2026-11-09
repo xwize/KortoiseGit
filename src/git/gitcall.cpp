@@ -164,6 +164,28 @@ QByteArray GitCall::output() const
     return m_stdout;
 }
 
+int GitCall::exitCode() const
+{
+    Q_ASSERT(m_isFinished);
+    if (m_timedOut || m_process.error() == QProcess::FailedToStart || m_process.exitStatus() == QProcess::CrashExit) {
+        return -1;
+    }
+    return m_process.exitCode();
+}
+
+QString GitCall::combinedOutput() const
+{
+    Q_ASSERT(m_isFinished);
+    QString combined = QString::fromUtf8(m_stdout);
+    if (!m_stderr.isEmpty()) {
+        if (!combined.isEmpty()) {
+            combined += QLatin1Char('\n');
+        }
+        combined += QString::fromUtf8(m_stderr);
+    }
+    return combined;
+}
+
 QString GitCall::formatCommandLine(const QStringList& arguments)
 {
     QStringList parts{QLatin1String(gitProgram)};
