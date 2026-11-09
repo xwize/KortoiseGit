@@ -35,6 +35,16 @@ struct GitSwitchOptions;
 struct StashSaveOptions;
 
 /**
+ * The titles and hashes of the two sides of a conflict, as CAppUtils::GetConflictTitles fills them in.
+ */
+struct ConflictTitles {
+    QString mineText; // Our side
+    QString mineHash; // Set only for a rebase found through rebase-apply/onto
+    QString theirsText; // Their side
+    QString theirsHash; // Empty during a rebase
+};
+
+/**
  * The arguments of CAppUtils::PerformSwitch: what git checkout switches to and how.
  */
 struct SwitchOptions {
@@ -313,6 +323,22 @@ public:
      * @returns False if no branch was given.
      */
     static bool updateBranchDescription(const Git& git, const QString& branch, QString description);
+
+    /**
+     * Ported from CTGitPath::IsRebaseActive.
+     * @param workingTree The working tree.
+     * @returns Whether a rebase is in progress there (a rebase-apply or tgitrebase.active directory).
+     */
+    [[nodiscard]] static bool isRebaseActive(const QString& workingTree);
+
+    /**
+     * Ported from CAppUtils::GetConflictTitles.
+     * @param git Runs git at the working tree's root.
+     * @param rebaseActive Whether a rebase is in progress.
+     * @returns The titles of the two sides of a conflict.
+     * @throws RuntimeError (category Git) if git fails.
+     */
+    [[nodiscard]] static ConflictTitles getConflictTitles(const Git& git, bool rebaseActive);
 
     /**
      * The choice CAppUtils::ConflictEdit makes from the stages of an unmerged file.

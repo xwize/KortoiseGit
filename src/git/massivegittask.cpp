@@ -30,6 +30,11 @@ QStringList MassiveGitTask::arguments() const
 {
     QStringList arguments{QStringLiteral("--literal-pathspecs")};
     arguments.append(m_params);
+    if (m_params.constFirst() == QLatin1String("checkout-index")) {
+        // It has no --pathspec-from-file. TortoiseGit splits the list over command lines; --stdin takes the same list
+        arguments.append({QStringLiteral("-z"), QStringLiteral("--stdin")});
+        return arguments;
+    }
     // Options must come before --end-of-options, as in CMassiveGitTaskBase::ExecuteWithPathSpecFile
     qsizetype position = arguments.indexOf(QStringLiteral("--end-of-options"));
     if (position == -1) {

@@ -13,6 +13,7 @@
 #include "git/massivegittask.hpp"
 #include "gitdiff.hpp"
 #include "progresscommands/revertprogresscommand.hpp"
+#include "progressdlg.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KIO/ApplicationLauncherJob>
@@ -291,6 +292,8 @@ void GitStatusListCtrl::reload()
     m_numStatCall.reset();
     m_errorMessage.clear();
     m_hasIgnored = m_model->showFlags().testFlag(GitStatusListModel::Show::Ignored);
+    // CGitStatusListCtrl::GetStatus
+    m_isRevertTheirMy = AppUtils::isRebaseActive(m_workingTree);
 
     QStringList arguments = GitStatus::arguments(m_hasIgnored ? IgnoredFiles::Include : IgnoredFiles::Exclude);
     arguments.append(QStringLiteral("--branch"));
@@ -358,7 +361,7 @@ void GitStatusListCtrl::selectFirstConflict()
 
 bool GitStatusListCtrl::isModifying() const
 {
-    return m_revertCommand || m_resolveCall || m_isDeleting || m_addCommand;
+    return m_revertCommand || m_resolveCall || m_resolveCommand || m_isDeleting || m_addCommand;
 }
 
 QString GitStatusListCtrl::absolutePath(const GitStatusListEntry& entry) const
@@ -641,15 +644,35 @@ void GitStatusListCtrl::addConflictEntries(QMenu& menu, int selectedCount)
         });
         menu.setDefaultAction(edit);
     }
-    // TortoiseGit's "Resolve conflict using 'theirs'/'mine'" entries are not ported yet
-    if (m_contextMenus.testFlag(ContextMenu::Resolve) && !m_resolveCall) {
-        menu.addAction(QIcon::fromTheme(QStringLiteral("dialog-ok-apply")), i18n("Resolved"), this, [this] {
-            // After the menu has closed, so the confirmation isn't nested in it
-            QMetaObject::invokeMethod(this, &GitStatusListCtrl::resolveSelected, Qt::QueuedConnection);
-        });
+    if (m_contextMenus.testFlag(ContextMenu::Resolve) && !m_resolveCall && !m_resolveCommand) {
+        addResolveEntries(menu);
     }
     if (m_contextMenus & (ContextMenu::Conflict | ContextMenu::Resolve)) {
         menu.addSeparator();
+    }
+}
+
+void GitStatusListCtrl::addResolveEntries(QMenu& menu)
+{
+    const QIcon icon = QIcon::fromTheme(QStringLiteral("dialog-ok-apply"));
+    menu.addAction(icon, i18n("Resolved"), this, [this] {
+        // After the menu has closed, so the confirmation isn't nested in it
+        QMetaObject::invokeMethod(this, &GitStatusListCtrl::resolveSelected, Qt::QueuedConnection);
+    });
+    const QList<ResolveUsingEntry> entries = resolveUsingEntries();
+    for (const auto& [title, resolveWith] : entries) {
+        // A branch may have & in its name, which a menu would take for a shortcut
+        QString escaped = title;
+        escaped.replace(QLatin1Char('&'), QStringLiteral("&&"));
+        menu.addAction(icon, i18n("Resolve conflict using \"%1\"", escaped), this, [this, resolveWith] {
+            // After the menu has closed, so the confirmation isn't nested in it
+            QMetaObject::invokeMethod(
+                this,
+                [this, resolveWith] {
+                    resolveSelectedUsing(resolveWith);
+                },
+                Qt::QueuedConnection);
+        });
     }
 }
 
@@ -726,7 +749,7 @@ void GitStatusListCtrl::editConflict(const GitStatusListEntry& entry)
 
 void GitStatusListCtrl::resolveSelected()
 {
-    if (m_resolveCall) {
+    if (m_resolveCall || m_resolveCommand) {
         return;
     }
     QStringList paths;
@@ -735,11 +758,7 @@ void GitStatusListCtrl::resolveSelected()
             paths.append(entry.path);
         }
     }
-    if (paths.isEmpty()) {
-        return;
-    }
-    const QString question = i18n("Are you sure you want to mark the conflicted file(s) as resolved?");
-    if (QMessageBox::question(this, i18n("KortoiseGit"), question, QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+    if (paths.isEmpty() || !confirmResolve()) {
         return;
     }
     // ResolveProgressCommand: git add -f on the conflicted files (CAppUtils::RemoveTempMergeFile has nothing to remove here)
@@ -763,6 +782,79 @@ void GitStatusListCtrl::onResolveFinished()
         showError(this, e.error().message);
     }
     // TortoiseGit marks the entries modified, or refreshes the parent after an error; reloading does both
+    reload();
+    Q_EMIT resolved();
+}
+
+bool GitStatusListCtrl::confirmResolve()
+{
+    // IDS_PROC_RESOLVE
+    const QString question = i18n("Are you sure you want to mark the conflicted file(s) as resolved?");
+    const QMessageBox::StandardButtons buttons = QMessageBox::Yes | QMessageBox::No;
+    return QMessageBox::question(this, i18n("KortoiseGit"), question, buttons) == QMessageBox::Yes;
+}
+
+QList<GitStatusListCtrl::ResolveUsingEntry> GitStatusListCtrl::resolveUsingEntries()
+{
+    ConflictTitles titles;
+    try {
+        titles = AppUtils::getConflictTitles(Git(m_workingTree), m_isRevertTheirMy);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        showError(this, e.error().message);
+        return {};
+    }
+    // During a rebase CGitStatusListCtrl::OnContextMenuList swaps the two entries' command ids and its handler swaps
+    // them back, so each title always gives its own stage
+    return {
+        {.title = titles.theirsText, .resolveWith = ResolveWith::Theirs},
+        {.title = titles.mineText, .resolveWith = ResolveWith::Mine},
+    };
+}
+
+void GitStatusListCtrl::resolveSelectedUsing(ResolveWith resolveWith)
+{
+    // The IDGITLC_RESOLVETHEIRS and IDGITLC_RESOLVEMINE handler of CGitStatusListCtrl::OnContextMenuList
+    const QList<GitStatusListEntry> selected = selectedEntries();
+    if (selected.isEmpty() || m_resolveCall || m_resolveCommand || !confirmResolve()) {
+        return;
+    }
+    m_resolveCommand = std::make_unique<ResolveProgressCommand>(resolveWith);
+    m_resolveCommand->setPathList(selected);
+    const ResolveProgressCommand *command = m_resolveCommand.get();
+    connect(command, &ResolveProgressCommand::conflictInfoRead, this, &GitStatusListCtrl::onConflictInfoRead);
+    setCursor(Qt::BusyCursor);
+    Q_EMIT checkedCountChanged();
+    m_resolveCommand->readConflictInfo(m_workingTree);
+}
+
+void GitStatusListCtrl::onConflictInfoRead()
+{
+    // Deleted from the event loop: it is still emitting
+    ResolveProgressCommand *command = m_resolveCommand.release();
+    command->deleteLater();
+    unsetCursor();
+    if (const std::optional<Error>& error = command->error()) {
+        showError(this, error->message);
+    } else {
+        ProgressDlg dialog(m_workingTree, this);
+        command->setUp(m_workingTree, dialog);
+        // AUTOCLOSE_IF_NO_ERRORS. Queued: with every file skipped the commands end while the dialog is being shown
+        connect(
+            &dialog,
+            &ProgressDlg::commandsFinished,
+            &dialog,
+            [&dialog] {
+                if (dialog.gitStatus() == 0) {
+                    dialog.accept();
+                }
+            },
+            Qt::QueuedConnection);
+        dialog.exec();
+    }
+    // RefreshParent
     reload();
     Q_EMIT resolved();
 }

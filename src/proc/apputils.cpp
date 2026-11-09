@@ -64,16 +64,6 @@ using namespace kgt;
 
 constexpr KMessageBox::Options noNotify = KMessageBox::Options();
 
-/**
- * The titles and hashes of the two sides of a conflict, as CAppUtils::GetConflictTitles fills them in.
- */
-struct ConflictTitles {
-    QString mineText; // Our side
-    QString mineHash; // Set only for a rebase found through rebase-apply/onto
-    QString theirsText; // Their side
-    QString theirsHash; // Empty during a rebase
-};
-
 constexpr qsizetype shortHashLength = 8;
 
 /**
@@ -527,6 +517,19 @@ namespace kgt
 void AppUtils::initIconResources()
 {
     registerIconResources();
+}
+
+bool AppUtils::isRebaseActive(const QString& workingTree)
+{
+    return ::isRebaseActive(GitAdminDir::worktreeAdminDirPath(workingTree));
+}
+
+ConflictTitles AppUtils::getConflictTitles(const Git& git, bool rebaseActive)
+{
+    if (rebaseActive) {
+        return rebaseConflictTitles(git, GitAdminDir::worktreeAdminDirPath(git.workingDirectory()));
+    }
+    return mergeConflictTitles(git);
 }
 
 KConfigGroup AppUtils::generalSettings()
