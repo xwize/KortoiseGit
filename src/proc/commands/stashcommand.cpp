@@ -32,7 +32,7 @@ StashApplyCommand::StashApplyCommand()
 
 bool StashApplyCommand::execute()
 {
-    return AppUtils::stashApply(Git::workingTreeRoot(paths().constFirst()));
+    return AppUtils::stashApply(Git(Git::workingTreeRoot(paths().constFirst())));
 }
 
 StashPopCommand::StashPopCommand()

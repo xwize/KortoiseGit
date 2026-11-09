@@ -188,13 +188,20 @@ public:
     [[nodiscard]] static StashOutcome stashOutcome(int exitCode, const QString& output);
 
     /**
-     * Ported from CAppUtils::StashApply, for the latest stash: runs git stash apply without blocking, then reports
-     * how it went.
-     * @param workingTree The working tree's root.
+     * CAppUtils::StashApply's command line.
+     * @param ref The stash, such as refs/stash@{1} or stash{1}; empty for the latest.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList stashApplyArguments(const QString& ref);
+
+    /**
+     * Ported from CAppUtils::StashApply: runs git stash apply without blocking, then reports how it went.
+     * @param git Runs git in the working tree's root.
+     * @param ref The stash to apply; empty for the latest.
      * @param parent Parent of the windows.
      * @returns False if git failed; true if it applied the stash, even with conflicts.
      */
-    static bool stashApply(const QString& workingTree, QWidget *parent = nullptr);
+    static bool stashApply(const Git& git, const QString& ref = {}, QWidget *parent = nullptr);
 
     /**
      * Ported from CAppUtils::StashPop: runs git stash pop without blocking, then reports how it went.

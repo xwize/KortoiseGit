@@ -53,13 +53,12 @@ QString readGitLink(const QString& dotGitFile)
     return QDir::cleanPath(QFileInfo(dotGitFile).dir().absoluteFilePath(target));
 }
 
-/**
- * Ported from GitAdminDir::GetAdminDirPath: a linked worktree's admin directory names the main repository's in
- * its "commondir" file.
- * @param worktreeAdminDir A working tree's own admin directory.
- * @returns The directory holding the repository's objects and refs.
- */
-QString commonAdminDir(const QString& worktreeAdminDir)
+} // namespace
+
+namespace kgt
+{
+
+QString GitAdminDir::commonAdminDirPath(const QString& worktreeAdminDir)
 {
     QFile commonDir(QDir(worktreeAdminDir).filePath(QStringLiteral("commondir")));
     if (!commonDir.open(QIODevice::ReadOnly)) {
@@ -69,14 +68,9 @@ QString commonAdminDir(const QString& worktreeAdminDir)
     return QDir::cleanPath(QDir(worktreeAdminDir).absoluteFilePath(target));
 }
 
-} // namespace
-
-namespace kgt
-{
-
 bool GitAdminDir::hasStashDir(const QString& worktreeAdminDir)
 {
-    const QDir adminDir(commonAdminDir(worktreeAdminDir));
+    const QDir adminDir(commonAdminDirPath(worktreeAdminDir));
     if (QFileInfo::exists(adminDir.filePath(QStringLiteral("refs/stash")))) {
         return true;
     }
@@ -114,7 +108,7 @@ QString GitAdminDir::projectTopDir(const QString& path)
             if (worktreeAdminDir.isEmpty()) {
                 return {};
             }
-            const QDir adminDir(commonAdminDir(worktreeAdminDir));
+            const QDir adminDir(commonAdminDirPath(worktreeAdminDir));
             // As in TortoiseGit, refs/heads must be a directory: the reftable format makes it a file
             if (!QFileInfo::exists(adminDir.filePath(QStringLiteral("HEAD"))) || !QFileInfo::exists(adminDir.filePath(QStringLiteral("config")))
                 || !QFileInfo(adminDir.filePath(QStringLiteral("objects"))).isDir() || !QFileInfo(adminDir.filePath(QStringLiteral("refs"))).isDir()

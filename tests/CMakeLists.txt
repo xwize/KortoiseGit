@@ -29,6 +29,7 @@ set(kgt_tests
     pullfetchtest
     pushdlgtest
     rebasetest
+    reflogtest
     resulttest
     reverttest
     stashrestoretest

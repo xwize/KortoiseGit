@@ -63,10 +63,18 @@ QString stashChanges()
 }
 
 /**
+ * @returns The Show RefLog entry's text.
+ */
+QString showRefLog()
+{
+    return QStringLiteral("Show &RefLog");
+}
+
+/**
  * @param actions Actions the plugin returned.
  * @returns Their texts, with the "KortoiseGit" submenu replaced by its entries and separators left out: the top-level entries
- *          come first, then the submenu's. About, which is on every menu, is left out too, and so is Stash changes,
- *          which stashChangesEntry checks by itself.
+ *          come first, then the submenu's. About, which is on every menu, is left out too, and so are Stash changes
+ *          and Show RefLog, which stashChangesEntry and refLogEntries check by themselves.
  */
 QStringList flatTexts(const QList<QAction *>& actions)
 {
@@ -80,6 +88,7 @@ QStringList flatTexts(const QList<QAction *>& actions)
     texts.removeAll(QStringLiteral("-"));
     texts.removeAll(QStringLiteral("A&bout"));
     texts.removeAll(stashChanges());
+    texts.removeAll(showRefLog());
     return texts;
 }
 
@@ -441,30 +450,14 @@ private Q_SLOTS:
         };
 
         const QString stash = stashChanges();
+        const QStringList upToRebase{pull, fetch, push, separator(), log, showRefLog(), refs, rebase};
+        QStringList afterRebase{separator(), revert, separator(), switchTo, merge, branch, tag};
+        afterRebase << separator() << add << separator() << about();
 
         // Commit stays at the top level; the separators around it are one in the submenu
         QList<QAction *> actions = actionsFor({});
         QCOMPARE(topLevelTexts(actions), (QStringList{commit, gitMenu()}));
-        QCOMPARE(submenuLayout(actions),
-                 (QStringList{pull,
-                              fetch,
-                              push,
-                              separator(),
-                              log,
-                              refs,
-                              rebase,
-                              stash,
-                              separator(),
-                              revert,
-                              separator(),
-                              switchTo,
-                              merge,
-                              branch,
-                              tag,
-                              separator(),
-                              add,
-                              separator(),
-                              about()}));
+        QCOMPARE(submenuLayout(actions), upToRebase + QStringList(stash) + afterRebase);
 
         // The separator after Commit's group comes first among the submenu's, and is dropped; none trails either
         actions = actionsFor(QStringLiteral("tracked.txt"));
@@ -481,25 +474,7 @@ private Q_SLOTS:
         // All three top-level entries that exist, in MenuInfo's order, the submenu after them
         actions = actionsFor(QStringLiteral("vendor"));
         QCOMPARE(topLevelTexts(actions), (QStringList{clone, commit, createRepo, gitMenu()}));
-        QCOMPARE(submenuLayout(actions),
-                 (QStringList{pull,
-                              fetch,
-                              push,
-                              separator(),
-                              log,
-                              refs,
-                              rebase,
-                              separator(),
-                              revert,
-                              separator(),
-                              switchTo,
-                              merge,
-                              branch,
-                              tag,
-                              separator(),
-                              add,
-                              separator(),
-                              about()}));
+        QCOMPARE(submenuLayout(actions), upToRebase + afterRebase);
 
         // Only About for the submenu: no separator comes first
         const QTemporaryDir plain;
@@ -682,6 +657,40 @@ private Q_SLOTS:
         repo.remove(QStringLiteral(".git/MERGE_HEAD"));
         repo.write(QStringLiteral(".git/BISECT_START"), "x\n");
         QVERIFY(layout({root}).contains(stashChanges()));
+    }
+
+    void refLogEntries()
+    {
+        const QString stashList = QStringLiteral("Stash List");
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.write(QStringLiteral("dir/b.txt"), "b\n");
+        repo.commitAll(QStringLiteral("initial"));
+
+        const ShellExt plugin(nullptr, {});
+        const auto layout = [&plugin](const KFileItemList& items) {
+            return submenuLayout(plugin.versionControlActions(items));
+        };
+        const KFileItem root = item(repo.path());
+
+        // MenuInfo's order: directly after Show log
+        const QStringList atRoot = layout({root});
+        QCOMPARE(atRoot.indexOf(showRefLog()), atRoot.indexOf(QStringLiteral("Show &log")) + 1);
+        QVERIFY(layout({item(repo.filePath(QStringLiteral("dir")))}).contains(showRefLog()));
+        QVERIFY(!layout({item(repo.filePath(QStringLiteral("a.txt")))}).contains(showRefLog()));
+        QVERIFY(!layout({root, item(repo.filePath(QStringLiteral("dir")))}).contains(showRefLog()));
+
+        // ITEMIS_BAREREPO
+        const QTemporaryDir bare;
+        repo.run({QStringLiteral("init"), QStringLiteral("--quiet"), QStringLiteral("--bare"), bare.path()});
+        QVERIFY(layout({item(bare.path())}).contains(showRefLog()));
+
+        // Stash List needs a stash, and comes directly after Stash Pop
+        QVERIFY(!atRoot.contains(stashList));
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+        repo.run({QStringLiteral("stash"), QStringLiteral("push")});
+        const QStringList withStash = layout({root});
+        QCOMPARE(withStash.indexOf(stashList), withStash.indexOf(QStringLiteral("Stash Pop")) + 1);
     }
 
     void stashRestoreEntries()
