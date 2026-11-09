@@ -30,6 +30,7 @@ set(kgt_tests
     pushdlgtest
     rebasetest
     reflogtest
+    resolvetest
     resulttest
     reverttest
     stashrestoretest
