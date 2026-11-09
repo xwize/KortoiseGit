@@ -133,6 +133,12 @@ public:
     void setFiles(int row, const QList<GitRevFiles>& files);
 
     /**
+     * Replaces every listed commit's refs (CGitLogListBase::ReloadHashMap's m_HashMap), redrawing those that changed.
+     * @param refMap Each commit's refs by full hash; a commit left out has none.
+     */
+    void setRefMap(const QHash<QString, QList<GitRef>>& refMap);
+
+    /**
      * Records that a commit's files could not be fetched.
      * @param row A row of this model.
      */

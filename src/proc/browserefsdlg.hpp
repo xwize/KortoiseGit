@@ -243,7 +243,6 @@ private:
     bool doDeleteRefs(const QStringList& refNames);
     bool doDeleteRef(const QString& completeRefName);
     bool deleteRemoteRefs(const QString& remote, const QStringList& branches);
-    [[nodiscard]] bool isFastForward(const QString& from, const QString& target) const;
     void onCurrentBranchClicked();
 
     Git m_git;

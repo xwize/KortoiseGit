@@ -2,20 +2,27 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "logdlg.hpp"
+#include "chooseversion.hpp"
+#include "createbranchtagdlg.hpp"
 #include "gitloglist.hpp"
 #include "gitstatuslistctrl.hpp"
 #include "gitstatuslistmodel.hpp"
+#include "progressdlg.hpp"
+#include "pushdlg.hpp"
 #include "testrepo.hpp"
 
 #include <KConfigGroup>
 #include <KSharedConfig>
 
+#include <QApplication>
 #include <QBrush>
+#include <QContextMenuEvent>
 #include <QDateEdit>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QImage>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPainter>
@@ -24,11 +31,16 @@
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTest>
+#include <QTimer>
 
 #include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <initializer_list>
+#include <optional>
+#include <tuple>
 #include <vector>
 
 namespace
@@ -342,6 +354,222 @@ int graphPixels(const QImage& image, const QRect& rect, const QColor& background
 /**
  * The log dialog on a throwaway repository. Set KGT_SCREENSHOT_DIR to save a screenshot of it there.
  */
+/**
+ * Answers the message boxes that come up, in turn, and keeps their texts. Later dialogs are left alone.
+ */
+class BoxAnswerer
+{
+public:
+    /**
+     * @param answers The button to press in each box: Yes, No or Cancel are the first, second and third choice.
+     */
+    explicit BoxAnswerer(const QList<QDialogButtonBox::StandardButton>& answers)
+        : m_answers(answers)
+    {
+        QObject::connect(&m_timer, &QTimer::timeout, &m_timer, [this] {
+            answerNext();
+        });
+        m_timer.start(pollInterval);
+    }
+
+    /**
+     * @returns The text of each box answered.
+     */
+    [[nodiscard]] const QStringList& texts() const
+    {
+        return m_texts;
+    }
+
+private:
+    static constexpr int pollInterval = 10;
+
+    void answerNext()
+    {
+        auto *box = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        if (!box || m_answers.isEmpty() || qobject_cast<ProgressDlg *>(box)) {
+            return;
+        }
+        const auto *buttons = box->findChild<QDialogButtonBox *>();
+        if (!buttons || !buttons->button(m_answers.constFirst())) {
+            return;
+        }
+        QString text;
+        for (const QLabel *label : box->findChildren<QLabel *>()) {
+            text += label->text();
+        }
+        m_texts.append(text);
+        buttons->button(m_answers.takeFirst())->click();
+    }
+
+    QList<QDialogButtonBox::StandardButton> m_answers;
+    QStringList m_texts;
+    QTimer m_timer;
+};
+
+/**
+ * Selects a commit, right-clicks it, hands the open menu to @p handle and closes the menu.
+ * @param list The list.
+ * @param row The commit's row.
+ * @param handle Called with the open menu.
+ * @param position Where to click, in the viewport; by default on the commit's Author cell, away from any label.
+ * @returns Whether a menu opened.
+ */
+bool withMenuOn(GitLogList *list, int row, const std::function<void(QMenu *)>& handle, std::optional<QPoint> position = std::nullopt)
+{
+    list->setCurrentIndex(list->logModel()->index(row, GitLogListModel::MessageColumn));
+    bool opened = false;
+    QTimer::singleShot(0, list, [&opened, &handle] {
+        auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        if (menu) {
+            opened = true;
+            handle(menu);
+            menu->close();
+        }
+    });
+    const QPoint pos = position.value_or(list->visualRect(list->logModel()->index(row, GitLogListModel::AuthorColumn)).center());
+    QContextMenuEvent event(QContextMenuEvent::Mouse, pos, list->viewport()->mapToGlobal(pos));
+    QApplication::sendEvent(list->viewport(), &event);
+    return opened;
+}
+
+/**
+ * @param menu A menu.
+ * @returns The entries' texts, with "-" for a separator.
+ */
+QStringList entryTexts(const QMenu *menu)
+{
+    QStringList texts;
+    for (const QAction *action : menu->actions()) {
+        texts.append(action->isSeparator() ? QStringLiteral("-") : action->text());
+    }
+    return texts;
+}
+
+/**
+ * @param menu A menu.
+ * @param text An entry's text.
+ * @returns The entry, or nullptr.
+ */
+QAction *entry(const QMenu *menu, const QString& text)
+{
+    for (QAction *action : menu->actions()) {
+        if (action->text() == text) {
+            return action;
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * @param list The list.
+ * @param row A row.
+ * @param shortName A label's text.
+ * @returns A point on that label in the viewport, or nothing if the row has no such label.
+ */
+std::optional<QPoint> labelPoint(const GitLogList *list, int row, const QString& shortName)
+{
+    const QRect cell = list->visualRect(list->logModel()->index(row, GitLogListModel::MessageColumn));
+    for (int x = cell.left(); x <= cell.right(); ++x) {
+        const QPoint point(x, cell.center().y());
+        if (const std::optional<GitRef> ref = list->refLabelAt(row, point); ref && ref->name == shortName) {
+            return point;
+        }
+    }
+    return std::nullopt;
+}
+
+/**
+ * @param list The list.
+ * @param row A row.
+ * @returns The names of the commit's refs.
+ */
+QStringList refNames(const GitLogList *list, int row)
+{
+    QStringList names;
+    for (const GitRef& ref : list->logModel()->rev(row).refs) {
+        names.append(ref.fullName());
+    }
+    return names;
+}
+
+/**
+ * @param repo A repository.
+ * @param ref A ref.
+ * @returns Whether it exists.
+ */
+bool refExists(const TestRepo& repo, const QString& ref)
+{
+    return repo.git().run({QStringLiteral("for-each-ref"), ref}, RunMode::ReadOnly).contains(ref.toUtf8());
+}
+
+/**
+ * Lays the dialog out so its rows and labels have their places.
+ * @param dlg The dialog.
+ * @returns Whether it is on screen.
+ */
+bool showDialog(LogDlg& dlg)
+{
+    dlg.resize(1000, 600);
+    dlg.show();
+    return QTest::qWaitForWindowExposed(&dlg);
+}
+
+/**
+ * A repository with a bare "origin" that has a branch feature on the second of two commits, also local.
+ */
+class RemoteSetup
+{
+public:
+    RemoteSetup()
+    {
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("Second"));
+        std::ignore = Git(upstream.path()).run({QStringLiteral("init"), QStringLiteral("--quiet"), QStringLiteral("--bare")});
+        repo.run({QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), upstream.path()});
+        repo.run({QStringLiteral("branch"), QStringLiteral("feature")});
+        repo.run({QStringLiteral("push"), QStringLiteral("--quiet"), QStringLiteral("origin"), QStringLiteral("feature")});
+    }
+
+    [[nodiscard]] bool upstreamHasFeature() const
+    {
+        return Git(upstream.path()).run({QStringLiteral("for-each-ref"), QStringLiteral("refs/heads/feature")}, RunMode::ReadOnly).contains("feature");
+    }
+
+    QTemporaryDir upstream;
+    TestRepo repo;
+};
+
+/**
+ * @returns The title of the Delete submenu.
+ */
+QString deleteSubmenu()
+{
+    return QStringLiteral("&Delete branch/tag");
+}
+
+/**
+ * A repository whose one commit has the current branch, two more branches and a tag.
+ */
+class SeveralRefs
+{
+public:
+    SeveralRefs()
+    {
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        repo.run({QStringLiteral("branch"), QStringLiteral("zz")});
+        repo.run({QStringLiteral("branch"), QStringLiteral("aa")});
+        repo.run({QStringLiteral("tag"), QStringLiteral("t1")});
+    }
+
+    TestRepo repo;
+    QString first = QStringLiteral("refs/heads/aa");
+    QString second = QStringLiteral("refs/heads/zz");
+    QString tag = QStringLiteral("refs/tags/t1");
+};
+
 class LogDlgTest : public QObject
 {
     Q_OBJECT
@@ -1078,6 +1306,469 @@ private Q_SLOTS:
         const LogDlg dlg({repo.filePath(QStringLiteral("odd*.txt"))});
         QVERIFY(waitForLog(dlg));
         QCOMPARE(subjects(*dlg.logList()->logModel()), QStringList{QStringLiteral("Odd")});
+    }
+
+    void menuOffersTheEntriesTortoiseGitShows()
+    {
+        const TestRepo repo;
+        for (int i = 0; i < 3; ++i) {
+            repo.write(QStringLiteral("f.txt"), QByteArray::number(i));
+            repo.commitAll(QStringLiteral("Commit %1").arg(i));
+        }
+        repo.run({QStringLiteral("tag"), QStringLiteral("v1"), QStringLiteral("HEAD~1")});
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+        const QString createTag = QStringLiteral("Create &Tag at this version...");
+        const QString push = QStringLiteral("Pus&h...");
+        const QString sep = QStringLiteral("-");
+
+        QStringList texts;
+        const auto collect = [&texts](QMenu *menu) {
+            texts = entryTexts(menu);
+        };
+        // The current branch is never offered, and is what makes HEAD pushable
+        QVERIFY(withMenuOn(list, 0, collect));
+        QCOMPARE(texts, (QStringList{createTag, sep, push, sep}));
+        QVERIFY(withMenuOn(list, 1, collect));
+        QCOMPARE(texts, (QStringList{createTag, sep, push, QStringLiteral("&Delete refs/tags/v1"), sep}));
+        // No refs: nothing to push or delete
+        QVERIFY(withMenuOn(list, 2, collect));
+        QCOMPARE(texts, (QStringList{createTag, sep}));
+
+        // None of the entries are for several commits
+        list->setCurrentIndex(list->logModel()->index(0, 0));
+        list->selectAll();
+        bool opened = false;
+        QTimer::singleShot(0, list, [&opened] {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (menu) {
+                opened = true;
+                menu->close();
+            }
+        });
+        QContextMenuEvent event(QContextMenuEvent::Mouse, QPoint(5, 5), list->viewport()->mapToGlobal(QPoint(5, 5)));
+        QApplication::sendEvent(list->viewport(), &event);
+        QVERIFY(!opened);
+    }
+
+    void rebaseMenuIsKeptApart()
+    {
+        const TestRepo repo;
+        makeHistory(repo);
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+        list->setRebaseMenuEnabled(true);
+        QStringList texts;
+        QVERIFY(withMenuOn(list, 1, [&texts](QMenu *menu) {
+            texts = entryTexts(menu);
+        }));
+        QCOMPARE(texts, (QStringList{QStringLiteral("Pick"), QStringLiteral("Squash (with commit below)"), QStringLiteral("Edit"), QStringLiteral("Skip")}));
+        // A list that offers neither, like the rebase dialog's while it runs
+        list->setRebaseMenuEnabled(false);
+        list->setLogMenuEnabled(false);
+        QVERIFY(!withMenuOn(list, 1, [](QMenu *) { }));
+    }
+
+    void stashEntriesCanOnlyBeDeleted()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.run({QStringLiteral("stash"), QStringLiteral("--quiet")});
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        GitLogList *list = dlg.logList();
+        list->setRange(QStringLiteral("refs/stash"));
+        list->reload();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(showDialog(dlg));
+        const GitLogListModel *model = list->logModel();
+        QStringList texts;
+        const auto collect = [&texts](QMenu *menu) {
+            texts = entryTexts(menu);
+        };
+        QVERIFY(withMenuOn(list, 0, collect));
+        QCOMPARE(texts, (QStringList{QStringLiteral("-"), QStringLiteral("&Delete refs/stash"), QStringLiteral("-")}));
+        // The commit holding the stash's index is on the stash too, when listed right below it
+        QCOMPARE(model->rev(1).hash, model->rev(0).parents.at(1));
+        QVERIFY(!withMenuOn(list, 1, [](QMenu *) { }));
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void deletesTagsAndUpdatesTheLabels_data()
+    {
+        QTest::addColumn<QStringList>("tagArguments");
+        QTest::newRow("lightweight") << QStringList{QStringLiteral("tag"), QStringLiteral("v1")};
+        QTest::newRow("annotated")
+            << QStringList{QStringLiteral("tag"), QStringLiteral("-a"), QStringLiteral("-m"), QStringLiteral("Note"), QStringLiteral("v1")};
+    }
+
+    void deletesTagsAndUpdatesTheLabels()
+    {
+        QFETCH(const QStringList, tagArguments);
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("Second"));
+        repo.run(QStringList(tagArguments) << QStringLiteral("HEAD~1"));
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+        QCOMPARE(refNames(list, 1), QStringList{QStringLiteral("refs/tags/v1")});
+
+        // Aborting leaves it
+        {
+            const BoxAnswerer abort({QDialogButtonBox::No});
+            QVERIFY(withMenuOn(list, 1, [](QMenu *menu) {
+                entry(menu, QStringLiteral("&Delete refs/tags/v1"))->trigger();
+            }));
+            QCOMPARE(abort.texts(), QStringList{QStringLiteral("Do you really want to delete \"refs/tags/v1\"?")});
+        }
+        QVERIFY(refExists(repo, QStringLiteral("refs/tags/v1")));
+        QCOMPARE(refNames(list, 1), QStringList{QStringLiteral("refs/tags/v1")});
+
+        const BoxAnswerer answer({QDialogButtonBox::Yes});
+        QVERIFY(withMenuOn(list, 1, [](QMenu *menu) {
+            entry(menu, QStringLiteral("&Delete refs/tags/v1"))->trigger();
+        }));
+        QVERIFY(!refExists(repo, QStringLiteral("refs/tags/v1")));
+        // At once, without a reload
+        QVERIFY(!list->isBusy());
+        QVERIFY(refNames(list, 1).isEmpty());
+        QCOMPARE(refNames(list, 0), QStringList{QStringLiteral("refs/heads/main")});
+    }
+
+    void severalRefsGoInASubmenu()
+    {
+        const SeveralRefs setup;
+        LogDlg dlg({setup.repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        QStringList texts;
+        QVERIFY(withMenuOn(dlg.logList(), 0, [&texts](QMenu *menu) {
+            texts = entryTexts(entry(menu, deleteSubmenu())->menu());
+        }));
+        // TortoiseGit's sorted order, and the current branch left out
+        QCOMPARE(texts, (QStringList{setup.first, setup.second, setup.tag, QStringLiteral("All")}));
+    }
+
+    void allStopsAtTheFirstRefusal()
+    {
+        const SeveralRefs setup;
+        LogDlg dlg({setup.repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        const BoxAnswerer stops({QDialogButtonBox::Yes, QDialogButtonBox::No});
+        QVERIFY(withMenuOn(dlg.logList(), 0, [](QMenu *menu) {
+            entry(entry(menu, deleteSubmenu())->menu(), QStringLiteral("All"))->trigger();
+        }));
+        QCOMPARE(stops.texts().size(), 2);
+        QVERIFY(!refExists(setup.repo, setup.first));
+        QVERIFY(refExists(setup.repo, setup.second));
+        QVERIFY(refExists(setup.repo, setup.tag));
+        QCOMPARE(refNames(dlg.logList(), 0).size(), 3);
+    }
+
+    void aSubmenuEntryDeletesThatRefAlone()
+    {
+        const SeveralRefs setup;
+        LogDlg dlg({setup.repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        const BoxAnswerer answer({QDialogButtonBox::Yes});
+        QVERIFY(withMenuOn(dlg.logList(), 0, [&setup](QMenu *menu) {
+            entry(entry(menu, deleteSubmenu())->menu(), setup.second)->trigger();
+        }));
+        QVERIFY(refExists(setup.repo, setup.first));
+        QVERIFY(!refExists(setup.repo, setup.second));
+        QVERIFY(refExists(setup.repo, setup.tag));
+    }
+
+    void warnsOfAnUnmergedBranchAndReportsGitsError()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("-b"), QStringLiteral("side")});
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("Side"));
+        repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        // Git refuses to delete a branch checked out in another worktree
+        const QTemporaryDir other;
+        repo.run({QStringLiteral("worktree"), QStringLiteral("add"), QStringLiteral("--quiet"), other.filePath(QStringLiteral("wt")), QStringLiteral("side")});
+
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        GitLogList *list = dlg.logList();
+        list->setRange(QStringLiteral("side"));
+        list->reload();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(showDialog(dlg));
+
+        const BoxAnswerer answer({QDialogButtonBox::Yes, QDialogButtonBox::Ok});
+        QVERIFY(withMenuOn(list, 0, [](QMenu *menu) {
+            entry(menu, QStringLiteral("&Delete refs/heads/side"))->trigger();
+        }));
+        QCOMPARE(answer.texts().size(), 2);
+        QVERIFY(answer.texts().at(0).contains(QStringLiteral("This branch is not fully merged into HEAD.")));
+        QVERIFY(answer.texts().at(1).contains(QStringLiteral("Could not delete reference.")));
+        QVERIFY(answer.texts().at(1).contains(QStringLiteral("worktree")));
+        QVERIFY(refExists(repo, QStringLiteral("refs/heads/side")));
+    }
+
+    void remoteBranchesAskWhereToDelete()
+    {
+        const RemoteSetup setup;
+        const TestRepo& repo = setup.repo;
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+        const QString ref = QStringLiteral("refs/remotes/origin/feature");
+        const auto deleteRemoteRef = [&] {
+            return withMenuOn(list, 0, [&ref](QMenu *menu) {
+                entry(entry(menu, QStringLiteral("&Delete branch/tag"))->menu(), ref)->trigger();
+            });
+        };
+
+        {
+            const BoxAnswerer abort({QDialogButtonBox::Cancel});
+            QVERIFY(deleteRemoteRef());
+            QVERIFY(abort.texts().constFirst().contains(QStringLiteral("remote-tracking branch")));
+        }
+        QVERIFY(refExists(repo, ref));
+
+        // Only the local remote-tracking branch
+        {
+            const BoxAnswerer localOnly({QDialogButtonBox::No});
+            QVERIFY(deleteRemoteRef());
+        }
+        QVERIFY(!refExists(repo, ref));
+        QVERIFY(setup.upstreamHasFeature());
+        QVERIFY(!refNames(list, 0).contains(ref));
+
+        // On the remote as well
+        repo.run({QStringLiteral("fetch"), QStringLiteral("--quiet"), QStringLiteral("origin")});
+        list->reload();
+        QVERIFY(waitForReload(dlg));
+        const BoxAnswerer both({QDialogButtonBox::Yes});
+        QTimer closer;
+        QObject::connect(&closer, &QTimer::timeout, &closer, [] {
+            auto *progress = qobject_cast<ProgressDlg *>(QApplication::activeModalWidget());
+            if (progress && progress->isDone()) {
+                progress->accept();
+            }
+        });
+        closer.start(10);
+        QVERIFY(deleteRemoteRef());
+        QVERIFY(!setup.upstreamHasFeature());
+        QVERIFY(!refExists(repo, ref));
+    }
+
+    void stashAsksAllOrOne()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        for (const char *const content : {"2", "3", "4"}) {
+            repo.write(QStringLiteral("f.txt"), content);
+            repo.run({QStringLiteral("stash"), QStringLiteral("--quiet")});
+        }
+        const auto stashCount = [&repo] {
+            return repo.git().run({QStringLiteral("stash"), QStringLiteral("list")}, RunMode::ReadOnly).count('\n');
+        };
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        GitLogList *list = dlg.logList();
+        list->setRange(QStringLiteral("refs/stash"));
+        list->reload();
+        QVERIFY(waitForReload(dlg));
+        QVERIFY(showDialog(dlg));
+        const auto deleteStash = [list] {
+            return withMenuOn(list, 0, [](QMenu *menu) {
+                entry(menu, QStringLiteral("&Delete refs/stash"))->trigger();
+            });
+        };
+
+        {
+            const BoxAnswerer abort({QDialogButtonBox::Cancel});
+            QVERIFY(deleteStash());
+            QCOMPARE(abort.texts(), QStringList{QStringLiteral("Do you really want to delete ALL 3 stash?")});
+        }
+        QCOMPARE(stashCount(), 3);
+        {
+            const BoxAnswerer dropOne({QDialogButtonBox::No});
+            QVERIFY(deleteStash());
+        }
+        QCOMPARE(stashCount(), 2);
+        {
+            const BoxAnswerer all({QDialogButtonBox::Yes});
+            list->reload();
+            QVERIFY(waitForReload(dlg));
+            QVERIFY(deleteStash());
+        }
+        QCOMPARE(stashCount(), 0);
+    }
+
+    void rightClickingALabelLimitsTheEntriesToIt()
+    {
+        const RemoteSetup setup;
+        const TestRepo& repo = setup.repo;
+        repo.run({QStringLiteral("tag"), QStringLiteral("v1")});
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+
+        const std::optional<QPoint> tagLabel = labelPoint(list, 0, QStringLiteral("v1"));
+        QVERIFY(tagLabel);
+        QStringList texts;
+        const auto collect = [&texts](QMenu *menu) {
+            texts = entryTexts(menu);
+        };
+        QVERIFY(withMenuOn(list, 0, collect, tagLabel));
+        QVERIFY(texts.contains(QStringLiteral("Pus&h \"v1\"...")));
+        QVERIFY(texts.contains(QStringLiteral("&Delete refs/tags/v1")));
+        QVERIFY(!texts.contains(QStringLiteral("&Delete branch/tag")));
+
+        // A remote branch's label limits Delete, but Push keeps its plain text
+        QVERIFY(withMenuOn(list, 0, collect, labelPoint(list, 0, QStringLiteral("origin/feature"))));
+        QVERIFY(texts.contains(QStringLiteral("Pus&h...")));
+        QVERIFY(texts.contains(QStringLiteral("&Delete refs/remotes/origin/feature")));
+
+        // The current branch's label leaves nothing to delete
+        QVERIFY(withMenuOn(list, 0, collect, labelPoint(list, 0, QStringLiteral("main"))));
+        QVERIFY(texts.contains(QStringLiteral("Pus&h \"main\"...")));
+        QVERIFY(std::ranges::none_of(texts, [](const QString& text) {
+            return text.startsWith(QStringLiteral("&Delete"));
+        }));
+
+        // What is drawn is what is hit: the first label ends on its border, and the row's background follows
+        const QImage image = list->viewport()->grab().toImage();
+        const qreal ratio = image.devicePixelRatio();
+        const QRect row = list->visualRect(list->logModel()->index(0, GitLogListModel::MessageColumn));
+        const int middle = row.center().y();
+        const auto pixelAt = [&image, ratio, middle](int x) {
+            return image.pixel(static_cast<int>(x * ratio), static_cast<int>(middle * ratio));
+        };
+        int lastHit = row.left();
+        QVERIFY(list->refLabelAt(0, QPoint(lastHit, middle)));
+        while (list->refLabelAt(0, QPoint(lastHit + 1, middle))) {
+            ++lastHit;
+        }
+        const QRgb background = pixelAt(row.right() - 1);
+        QVERIFY(pixelAt(lastHit) != background);
+        QCOMPARE(pixelAt(lastHit + 1), background);
+
+        // Away from the labels, and past them
+        QVERIFY(!list->refLabelAt(0, QPoint(row.right() - 1, row.center().y())));
+        QVERIFY(!list->refLabelAt(0, QPoint(row.left(), row.bottom() + 5)));
+    }
+
+    void aDetachedHeadsLabelIsNoRef()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("--detach")});
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        const GitLogList *list = dlg.logList();
+        const QRect row = list->visualRect(list->logModel()->index(0, GitLogListModel::MessageColumn));
+        QCOMPARE(list->logModel()->rev(0).refs.constFirst().type, GitRef::Type::Head);
+        QVERIFY(!list->refLabelAt(0, QPoint(row.left() + 8, row.center().y())));
+        QCOMPARE(labelPoint(list, 0, QStringLiteral("HEAD")), std::nullopt);
+    }
+
+    void createsATagAtTheCommit()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("Second"));
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+        const QString hash = list->logModel()->rev(1).hash;
+
+        QString startsAt;
+        QTimer filler;
+        QObject::connect(&filler, &QTimer::timeout, &filler, [&startsAt, &filler] {
+            auto *tagDlg = qobject_cast<CreateBranchTagDlg *>(QApplication::activeModalWidget());
+            if (!tagDlg || tagDlg->chooseVersion()->isLoading()) {
+                return;
+            }
+            filler.stop();
+            startsAt = tagDlg->chooseVersion()->versionName();
+            for (QLineEdit *edit : tagDlg->findChildren<QLineEdit *>()) {
+                if (edit->isEnabled() && edit->text().isEmpty() && !edit->parent()->inherits("QComboBox")) {
+                    edit->setText(QStringLiteral("made-here"));
+                    break;
+                }
+            }
+            tagDlg->accept();
+        });
+        filler.start(10);
+        QVERIFY(withMenuOn(list, 1, [](QMenu *menu) {
+            entry(menu, QStringLiteral("Create &Tag at this version..."))->trigger();
+        }));
+        QCOMPARE(startsAt, hash);
+        QCOMPARE(QString::fromLatin1(repo.git().run({QStringLiteral("rev-parse"), QStringLiteral("made-here")}, RunMode::ReadOnly)).trimmed(), hash);
+        QVERIFY(!list->isBusy());
+        QCOMPARE(refNames(list, 1), QStringList{QStringLiteral("refs/tags/made-here")});
+        // The other labels stay as git log's decorations gave them
+        QCOMPARE(refNames(list, 0), QStringList{QStringLiteral("refs/heads/main")});
+        QVERIFY(list->logModel()->rev(0).refs.constFirst().isCurrent);
+    }
+
+    void pushPreselectsTheGuessedRef()
+    {
+        const RemoteSetup setup;
+        const TestRepo& repo = setup.repo;
+        repo.run({QStringLiteral("tag"), QStringLiteral("v1"), QStringLiteral("HEAD~1")});
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+
+        const auto preselected = [list](int row, const std::optional<QPoint>& position, const QString& text) {
+            QString local;
+            QTimer closer;
+            QObject::connect(&closer, &QTimer::timeout, &closer, [&local, &closer] {
+                if (auto *pushDlg = qobject_cast<PushDlg *>(QApplication::activeModalWidget())) {
+                    closer.stop();
+                    local = pushDlg->options().localBranch;
+                    pushDlg->reject();
+                }
+            });
+            closer.start(10);
+            const bool opened = withMenuOn(
+                list,
+                row,
+                [&text](QMenu *menu) {
+                    entry(menu, text)->trigger();
+                },
+                position);
+            return opened ? local : QString();
+        };
+
+        // The first local branch, then a tag
+        QCOMPARE(preselected(0, std::nullopt, QStringLiteral("Pus&h...")), QStringLiteral("feature"));
+        QCOMPARE(preselected(1, std::nullopt, QStringLiteral("Pus&h...")), QStringLiteral("refs/tags/v1"));
+        // The ref under the mouse, unless it is a remote branch
+        const QString mainText = QStringLiteral("Pus&h \"main\"...");
+        QCOMPARE(preselected(0, labelPoint(list, 0, QStringLiteral("main")), mainText), QStringLiteral("main"));
+        QCOMPARE(preselected(0, labelPoint(list, 0, QStringLiteral("origin/feature")), QStringLiteral("Pus&h...")), QStringLiteral("feature"));
     }
 
     void selectModeReturnsTheCommit()

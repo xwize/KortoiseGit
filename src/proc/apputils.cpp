@@ -7,6 +7,7 @@
 
 #include "apputils.hpp"
 
+#include "browserefsdlg.hpp"
 #include "commands/pushcommand.hpp"
 #include "createbranchtagdlg.hpp"
 #include "git/git.hpp"
@@ -42,6 +43,109 @@ static void registerIconResources()
 {
     Q_INIT_RESOURCE(icons);
 }
+
+namespace
+{
+
+using namespace kgt;
+
+/**
+ * Deletes a ref, showing git's error if it can't (the failure branches of CAppUtils::DeleteRef).
+ * @param git Runs git.
+ * @param ref The full ref name.
+ * @param parent Parent of the message.
+ * @returns Whether it was deleted.
+ */
+bool deleteRefReportingFailure(const Git& git, const QString& ref, QWidget *parent)
+{
+    try {
+        git.deleteRef(ref);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        KMessageBox::error(parent, i18n("Could not delete reference.") + QStringLiteral("\n") + e.error().message, QString(), KMessageBox::Options());
+        return false;
+    }
+    return true;
+}
+
+/**
+ * The refs/remotes/ part of CAppUtils::DeleteRef: on the remote as well, or only the local remote-tracking branch.
+ * @param git Runs git.
+ * @param ref The full ref name.
+ * @param parent Parent of the dialogs.
+ * @returns False if the user aborted or the local delete failed.
+ */
+bool deleteRemoteTrackingBranch(const Git& git, const QString& ref, QWidget *parent)
+{
+    const auto answer = KMessageBox::questionTwoActionsCancel(
+        parent,
+        i18n("The branch \"%1\" is a remote-tracking branch which locally represents a remote branch.\n\nDo you really want to delete it?", ref),
+        QString(),
+        KGuiItem(i18n("&Delete branch on remote && local remote-tracking branch")),
+        KGuiItem(i18n("Delete &local remote-tracking branch")),
+        KGuiItem(i18n("A&bort")),
+        QString(),
+        KMessageBox::Options());
+    if (answer == KMessageBox::SecondaryAction) {
+        return deleteRefReportingFailure(git, ref, parent);
+    }
+    if (answer != KMessageBox::PrimaryAction) {
+        return false;
+    }
+    const QString shortName = ref.mid(QLatin1String("refs/remotes/").size());
+    const qsizetype slash = shortName.indexOf(QLatin1Char('/'));
+    // TortoiseGit shows "Deleting remote refs..."; ProgressDlg shows git's output too, a failure included
+    ProgressDlg progress(git.workingDirectory(), parent);
+    progress.addGitCmd(BrowseRefsDlg::deleteRemoteRefsArguments(shortName.left(slash), {shortName.mid(slash + 1)}));
+    progress.exec();
+    return true;
+}
+
+/**
+ * The refs/stash part of CAppUtils::DeleteRef: every stash, or only the newest.
+ * @param git Runs git.
+ * @param ref The full ref name.
+ * @param parent Parent of the dialogs.
+ * @returns False if the user aborted; a failing git command only shows its error, as in TortoiseGit.
+ */
+bool deleteStash(const Git& git, const QString& ref, QWidget *parent)
+{
+    qsizetype count = 0;
+    try {
+        count = git.run({QStringLiteral("reflog"), QStringLiteral("show"), QStringLiteral("--format=%H"), ref}, RunMode::ReadOnly).count('\n');
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+    }
+    const auto answer = KMessageBox::questionTwoActionsCancel(parent,
+                                                              i18n("Do you really want to delete ALL %1 stash?", count),
+                                                              QString(),
+                                                              KGuiItem(i18n("&Delete")),
+                                                              KGuiItem(i18n("Drop &one stash")),
+                                                              KGuiItem(i18n("A&bort")),
+                                                              QString(),
+                                                              KMessageBox::Options());
+    if (answer != KMessageBox::PrimaryAction && answer != KMessageBox::SecondaryAction) {
+        return false;
+    }
+    const QStringList arguments = answer == KMessageBox::PrimaryAction
+        ? QStringList{QStringLiteral("stash"), QStringLiteral("clear")}
+        : QStringList{QStringLiteral("stash"), QStringLiteral("drop"), QStringLiteral("refs/stash@{0}")};
+    try {
+        std::ignore = git.run(arguments);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        KMessageBox::error(parent, e.error().message, QString(), KMessageBox::Options());
+    }
+    return true;
+}
+
+} // namespace
 
 namespace kgt
 {
@@ -384,6 +488,25 @@ bool AppUtils::push(const QString& workingTree, const QString& selectLocalBranch
     progress.addGitCmd(PushCommand::pushArguments(dlg.options()));
     progress.exec();
     return progress.gitStatus() == 0;
+}
+
+bool AppUtils::deleteRef(const Git& git, const QString& ref, QWidget *parent)
+{
+    if (ref.startsWith(QLatin1String("refs/remotes/"))) {
+        return deleteRemoteTrackingBranch(git, ref, parent);
+    }
+    if (ref.startsWith(QLatin1String("refs/stash"))) {
+        return deleteStash(git, ref, parent);
+    }
+
+    QString message = i18n("Do you really want to delete \"%1\"?", ref);
+    // Check if branch is fully merged in HEAD
+    if (ref.startsWith(QLatin1String("refs/heads/")) && !git.isFastForward(ref, QStringLiteral("HEAD"))) {
+        message += QStringLiteral("\n\n") + i18n("This branch is not fully merged into HEAD.");
+    }
+    const auto answer =
+        KMessageBox::questionTwoActions(parent, message, QString(), KGuiItem(i18n("&Delete")), KGuiItem(i18n("A&bort")), QString(), KMessageBox::Options());
+    return answer == KMessageBox::PrimaryAction && deleteRefReportingFailure(git, ref, parent);
 }
 
 bool AppUtils::updateBranchDescription(const Git& git, const QString& branch, QString description)

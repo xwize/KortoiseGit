@@ -24,7 +24,10 @@
 #include <QTreeView>
 
 #include <memory>
+#include <optional>
 #include <utility>
+
+class QMenu;
 
 namespace kgt
 {
@@ -135,6 +138,21 @@ public:
     [[nodiscard]] bool isRebaseMenuEnabled() const;
 
     /**
+     * Offers the log's own entries in the context menu (the rest of CGitLogListBase::OnContextMenu), as the log
+     * dialog's m_ContextMenuMask does and the rebase dialog's doesn't.
+     * @param enabled Whether they are offered.
+     */
+    void setLogMenuEnabled(bool enabled);
+
+    /**
+     * Ported from CGitLogListBase::IsMouseOnRefLabel.
+     * @param row A row of the model.
+     * @param pos A position in the viewport.
+     * @returns The ref whose label is drawn there on that row, if any. A detached HEAD's label is no ref.
+     */
+    [[nodiscard]] std::optional<GitRef> refLabelAt(int row, const QPoint& pos) const;
+
+    /**
      * Ported from CGitLogList::SetSelectedRebaseAction: gives the selected commits a rebase action, leaving out
      * those already done or being rebased, and refusing Squash for the last (oldest) commit and merge commits.
      * @param action RebasePick, RebaseSquash, RebaseEdit or RebaseSkip.
@@ -217,6 +235,26 @@ protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
 
 private:
+    /**
+     * What CGitLogListBase::OnContextMenu works out about the commit the menu is for, when one is selected.
+     */
+    struct LogMenuTarget {
+        QString hash; // m_CommitHash
+        QStringList refs; // The commit's m_HashMap entry: full names, sorted, without a detached HEAD
+        std::optional<GitRef> label; // The ref whose label was right-clicked (IsMouseOnRefLabelFromPopupMenu)
+        bool isStash = false; // IsOnStash
+    };
+
+    void showRebaseMenu(QContextMenuEvent *event);
+    void showLogMenu(QContextMenuEvent *event);
+    [[nodiscard]] bool isOnStash(int row) const;
+    void addSingleCommitEntries(QMenu& menu, const LogMenuTarget& target);
+    [[nodiscard]] bool addPushEntry(QMenu& menu, const LogMenuTarget& target);
+    [[nodiscard]] bool addDeleteEntries(QMenu& menu, const LogMenuTarget& target);
+    void createTag(const LogMenuTarget& target);
+    void push(const LogMenuTarget& target);
+    void deleteRefs(const QStringList& refs);
+    void reloadHashMap();
     [[nodiscard]] bool maySetRebaseAction(int row, unsigned int action) const;
     [[nodiscard]] QList<int> selectedRows() const;
     void startLog();
@@ -248,6 +286,7 @@ private:
     unsigned int m_showFilter = FilterShowAll; // CGitLogListBase::m_ShowFilter
     LogDlgFilter m_logFilter; // CGitLogListBase::m_LogFilter
     bool m_rebaseMenu = false; // Whether the rebase actions are offered
+    bool m_logMenu = false; // Whether the log's own entries are offered
     bool m_isLoading = false; // Whether a reload() is running
     std::unique_ptr<GitCall> m_logCall;
     std::unique_ptr<GitCall> m_tagInfoCall; // The for-each-ref that runs before git log when the filter needs it

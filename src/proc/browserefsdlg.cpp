@@ -751,7 +751,7 @@ bool BrowseRefsDlg::confirmDeleteRef(const QStringList& refNames)
         const QString branchToDelete = first.mid(isRemoteBranch ? remotesPrefix.size() : headsPrefix.size());
         message = i18n("Do you really want to delete \"%1\"?", branchToDelete);
         // Check if the branch is fully merged into HEAD
-        if (!isFastForward(first, QStringLiteral("HEAD"))) {
+        if (!m_git.isFastForward(first, QStringLiteral("HEAD"))) {
             message += QStringLiteral("\n\n") + i18n("This branch is not fully merged into HEAD.");
             warning = true;
         }
@@ -798,17 +798,11 @@ bool BrowseRefsDlg::doDeleteRef(const QString& completeRefName)
         const std::optional<RemoteBranch> split = splitRemoteBranchName(completeRefName, m_remotes);
         return split && deleteRemoteRefs(split->remote, {split->branch});
     }
-    // CGit::DeleteRef
-    QStringList arguments;
-    if (completeRefName.startsWith(headsPrefix)) {
-        arguments = {QStringLiteral("branch"), QStringLiteral("-D"), QStringLiteral("--"), completeRefName.mid(headsPrefix.size())};
-    } else if (completeRefName.startsWith(tagsPrefix)) {
-        arguments = {QStringLiteral("tag"), QStringLiteral("-d"), QStringLiteral("--"), completeRefName.mid(tagsPrefix.size())};
-    } else {
+    if (!completeRefName.startsWith(headsPrefix) && !completeRefName.startsWith(tagsPrefix)) {
         return true;
     }
     try {
-        std::ignore = m_git.run(arguments);
+        m_git.deleteRef(completeRefName);
     } catch (const RuntimeError& e) {
         if (e.error().category != ErrorCategory::Git) {
             throw;
@@ -853,20 +847,6 @@ std::optional<RemoteBranch> BrowseRefsDlg::splitRemoteBranchName(QString ref, co
         }
     }
     return std::nullopt;
-}
-
-bool BrowseRefsDlg::isFastForward(const QString& from, const QString& target) const
-{
-    // CGit::IsFastForward: from is an ancestor of to. Any failure counts as not merged, as in TortoiseGit
-    try {
-        std::ignore = m_git.run({QStringLiteral("merge-base"), QStringLiteral("--is-ancestor"), from, target}, RunMode::ReadOnly);
-        return true;
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        return false;
-    }
 }
 
 QString BrowseRefsDlg::fullRefName(const QString& partialRefName) const

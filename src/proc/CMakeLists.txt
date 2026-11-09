@@ -83,6 +83,7 @@ target_sources(kgtproc PRIVATE
     gitdiff.hpp
     gitloglist.cpp
     gitloglist.hpp
+    gitloglist_action.cpp
     gitloglist_filter.cpp
     gitloglistmodel.cpp
     gitloglistmodel.hpp
