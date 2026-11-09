@@ -655,6 +655,7 @@ void GitLogList::reload()
     m_filesCall.reset();
     m_filesQueue.clear();
     m_filesRow = -1;
+    m_pendingCompare.reset();
     m_pending.clear();
     m_errorMessage.clear();
     m_childCount.clear();
@@ -703,6 +704,7 @@ void GitLogList::showText(const QString& text)
     m_filesQueue.clear();
     m_filesRow = -1;
     m_pending.clear();
+    m_pendingCompare.reset();
     m_model->clear();
     m_errorMessage = text;
     viewport()->update();
@@ -1027,6 +1029,7 @@ void GitLogList::finishFiles(bool succeeded)
     Q_EMIT filesLoaded(row);
     finishCopyIfReady();
     startNextFiles();
+    onCompareFilesLoaded(row);
 }
 
 bool GitLogList::takeRecords()

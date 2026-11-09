@@ -56,6 +56,19 @@ QStringList GitDiff::diffArguments(const QString& path, const QString& path2, co
     return arguments;
 }
 
+QStringList GitDiff::dirArguments(const QStringList& paths, const QString& rev1, const QString& rev2)
+{
+    Q_ASSERT(!rev2.isEmpty());
+    QStringList arguments = difftool() << QStringLiteral("--dir-diff") << rev2;
+    if (!rev1.isEmpty()) {
+        arguments.append(rev1);
+    }
+    if (!paths.isEmpty()) {
+        arguments << QStringLiteral("--") << paths;
+    }
+    return arguments;
+}
+
 QStringList GitDiff::diffNullArguments(const QString& path)
 {
     return extDiffArguments(QStringLiteral("/dev/null"), path);

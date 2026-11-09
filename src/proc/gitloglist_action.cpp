@@ -17,6 +17,7 @@
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 #include "git/gitcall.hpp"
+#include "gitdiff.hpp"
 #include "gitstatuslistmodel.hpp"
 #include "utils/runtimeerror.hpp"
 
@@ -24,6 +25,8 @@
 #include <KMessageBox>
 
 #include <QContextMenuEvent>
+#include <QDir>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QMenu>
@@ -31,12 +34,19 @@
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <tuple>
 #include <utility>
 
 namespace
 {
 
 using namespace kgt;
+
+// CGit::GetShortHASHLength
+constexpr qsizetype shortHashLength = 8;
+
+// How much of a parent's subject its menu entry shows
+constexpr qsizetype parentSubjectLength = 20;
 
 /**
  * @param rev A commit.
@@ -75,6 +85,25 @@ QString firstWithPrefix(const QStringList& refs, const QString& prefix)
 QString menuText(QString text)
 {
     return text.replace(QLatin1Char('&'), QStringLiteral("&&"));
+}
+
+/**
+ * Ported from CTGitPathList::LookForGitPath and CTGitPath::GetGitOldPathString. Files that couldn't be fetched
+ * count as no rename, as an empty GetFiles does.
+ * @param rev A commit.
+ * @param path A file's name after the commit.
+ * @returns The name it had before the commit.
+ */
+QString oldPathIn(const GitRevLoglist& rev, const QString& path)
+{
+    for (const GitRevFiles& files : rev.files) {
+        for (const GitStatusEntry& entry : files.status) {
+            if (entry.path == path) {
+                return entry.origPath.isEmpty() ? path : entry.origPath;
+            }
+        }
+    }
+    return path;
 }
 
 /**
@@ -194,7 +223,14 @@ void GitLogList::showLogMenu(QContextMenuEvent *event)
         const GitRevLoglist& rev = m_model->rev(row);
         const QStringList refs = sortedRefNames(rev);
         const std::optional<GitRef> label = fromKeyboard ? std::nullopt : refLabelAt(row, event->pos());
-        target = LogMenuTarget{.hash = rev.hash, .refs = refs, .label = label, .isStash = isOnStash(row)};
+        target = LogMenuTarget{
+            .hash = rev.hash,
+            .refs = refs,
+            .label = label,
+            .isStash = isOnStash(row),
+            .row = row,
+            .parents = parentHashes(rev),
+        };
         addSingleCommitEntries(menu, *target);
     }
     addClipboardEntries(menu, target);
@@ -222,6 +258,8 @@ bool GitLogList::isOnStash(int row) const
 
 void GitLogList::addSingleCommitEntries(QMenu& menu, const LogMenuTarget& target)
 {
+    addCompareEntries(menu, target);
+
     // m_hasWC: CLogDlg sets it for anything but a bare repository
     if (!target.isStash && !GitAdminDir::isBareRepo(m_workingTree)) {
         const QString text = i18n("R&eset \"%1\" to this...", menuText(Git(m_workingTree).currentBranch()));
@@ -247,6 +285,174 @@ void GitLogList::addSingleCommitEntries(QMenu& menu, const LogMenuTarget& target
     if (hasPush || hasDelete) {
         menu.addSeparator();
     }
+}
+
+void GitLogList::addCompareEntries(QMenu& menu, const LogMenuTarget& target)
+{
+    const QIcon icon = QIcon::fromTheme(QStringLiteral("vcs-diff"));
+    const int row = target.row;
+    bool requiresSeparator = false;
+    if (!GitAdminDir::isBareRepo(m_workingTree)) { // m_hasWC
+        menu.addAction(icon, i18n("Compare with &working tree"), this, [this, row] {
+            compareWithWorkingTree(row);
+        });
+        requiresSeparator = true;
+    }
+
+    const QString previous = i18n("&Compare with previous revision");
+    if (target.parents.size() == 1) {
+        menu.addAction(icon, previous, this, [this, row] {
+            compareWithPrevious(row, 0);
+        });
+        requiresSeparator = true;
+    } else if (target.parents.size() > 1) {
+        QMenu *submenu = menu.addMenu(icon, previous);
+        for (qsizetype i = 0; i < target.parents.size(); ++i) {
+            submenu->addAction(parentInfo(i + 1, target.parents.at(i)), this, [this, row, i] {
+                compareWithPrevious(row, i);
+            });
+        }
+        requiresSeparator = true;
+    }
+
+    if (requiresSeparator) {
+        menu.addSeparator();
+    }
+}
+
+QStringList GitLogList::parentHashes(const GitRevLoglist& rev)
+{
+    // CGitLogListBase::GetParentHashes: git log's --parents leaves out the parents a path limit doesn't list
+    if (!rev.parents.isEmpty()) {
+        return rev.parents;
+    }
+    try {
+        const QStringList arguments{QStringLiteral("rev-parse"), rev.hash + QStringLiteral("^@")};
+        const QByteArray output = Git(m_workingTree).run(arguments, RunMode::ReadOnly);
+        return QString::fromLatin1(output).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        KMessageBox::error(this, e.error().message, QString(), KMessageBox::Options());
+    }
+    return {};
+}
+
+QString GitLogList::parentInfo(qsizetype number, const QString& hash) const
+{
+    // parentInfo of CGitLogListBase::OnContextMenu: the subject is left out if the commit can't be read
+    const QString label = i18n("Parent %1", number);
+    const QString shortHash = hash.left(shortHashLength);
+    try {
+        const QStringList arguments{
+            QStringLiteral("log"),
+            QStringLiteral("-1"),
+            QStringLiteral("--no-show-signature"),
+            QStringLiteral("--encoding=UTF-8"),
+            QStringLiteral("--format=%s"),
+            hash,
+        };
+        QString subject = QString::fromUtf8(Git(m_workingTree).run(arguments, RunMode::ReadOnly)).trimmed();
+        if (subject.size() > parentSubjectLength) {
+            subject.truncate(parentSubjectLength);
+            subject += QStringLiteral("...");
+        }
+        const QString quoted = QLatin1Char('"') + menuText(subject) + QLatin1Char('"');
+        return label + QStringLiteral(": ") + quoted + QStringLiteral(" (") + shortHash + QLatin1Char(')');
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+    }
+    return label + QStringLiteral(" (") + shortHash + QLatin1Char(')');
+}
+
+void GitLogList::compareWithWorkingTree(int row)
+{
+    // ID_COMPARE
+    startCompare(row, QString(), m_model->rev(row).hash);
+}
+
+void GitLogList::compareWithPrevious(int row, qsizetype parentNo)
+{
+    // ID_COMPAREWITHPREVIOUS
+    const QStringList parents = parentHashes(m_model->rev(row));
+    if (parents.isEmpty()) {
+        KMessageBox::information(this, i18n("No previous version."));
+        return;
+    }
+    Q_ASSERT(parentNo >= 0 && parentNo < parents.size());
+    startCompare(row, m_model->rev(row).hash, parents.at(parentNo));
+}
+
+void GitLogList::startCompare(int row, const QString& rev1, const QString& rev2)
+{
+    // CGitDiff::DiffCommit. A newer Compare entry replaces one still waiting
+    m_pendingCompare.reset();
+    const auto isDirectory = [this](const QString& path) {
+        return QFileInfo(QDir(m_workingTree).filePath(path)).isDir();
+    };
+    const bool isFile = m_pathFilter.size() == 1 && !isDirectory(m_pathFilter.constFirst());
+    if (!isFile) {
+        /**
+         * CGitDiff::DiffCommit shows the changed files in a CFileDiffDlg, with rev2 as the base (SetDiff), and that
+         * dialog isn't ported yet. Plain git difftool would open one window per file, so --dir-diff shows them all
+         * in one.
+         */
+        const QStringList arguments = GitDiff::dirArguments(m_pathFilter, rev1, rev2);
+        std::ignore = GitDiff::start(this, {.workingDirectory = m_workingTree, .arguments = arguments});
+        return;
+    }
+    if (!m_walkOptions.follow) {
+        const QString& path = m_pathFilter.constFirst();
+        const QStringList arguments = GitDiff::diffArguments(path, path, rev1, rev2);
+        std::ignore = GitDiff::start(this, {.workingDirectory = m_workingTree, .arguments = arguments});
+        return;
+    }
+
+    // ID_COMPARE walks the commits above the selected one; ID_COMPAREWITHPREVIOUS also needs the selected one
+    const int lastRow = rev1.isEmpty() ? row - 1 : row;
+    QSet<int> waitingFor;
+    for (int i = 0; i <= lastRow; ++i) {
+        if (m_model->rev(i).filesState == GitRevLoglist::FilesState::NotLoaded) {
+            waitingFor.insert(i);
+        }
+    }
+    const PendingCompare compare{.row = row, .rev1 = rev1, .rev2 = rev2, .waitingFor = waitingFor};
+    if (waitingFor.isEmpty()) {
+        finishCompare(compare);
+        return;
+    }
+    m_pendingCompare = compare;
+    // TortoiseGit reads them on the spot (GetFiles); the commits' files load in the background here
+    for (const int waiting : std::as_const(waitingFor)) {
+        requestFiles(waiting);
+    }
+}
+
+void GitLogList::onCompareFilesLoaded(int row)
+{
+    if (!m_pendingCompare || !m_pendingCompare->waitingFor.remove(row) || !m_pendingCompare->waitingFor.isEmpty()) {
+        return;
+    }
+    const PendingCompare compare = *m_pendingCompare;
+    m_pendingCompare.reset();
+    finishCompare(compare);
+}
+
+void GitLogList::finishCompare(const PendingCompare& compare)
+{
+    const QString& logPath = m_pathFilter.constFirst();
+    QString path = logPath;
+    for (int i = 0; i < compare.row; ++i) {
+        path = oldPathIn(m_model->rev(i), path);
+    }
+    const bool withWorkingTree = compare.rev1.isEmpty();
+    const QString right = withWorkingTree ? logPath : path;
+    const QString left = withWorkingTree ? path : oldPathIn(m_model->rev(compare.row), path);
+    const QStringList arguments = GitDiff::diffArguments(right, left, compare.rev1, compare.rev2);
+    std::ignore = GitDiff::start(this, {.workingDirectory = m_workingTree, .arguments = arguments});
 }
 
 bool GitLogList::addPushEntry(QMenu& menu, const LogMenuTarget& target)

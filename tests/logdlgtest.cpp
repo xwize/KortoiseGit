@@ -414,6 +414,54 @@ bool withMenuOn(GitLogList *list, int row, const MenuHandler& handle, std::optio
 }
 
 /**
+ * Makes git difftool in a repository append a line to a file instead of opening a window: the last lines of both
+ * sides, and for a directory diff of dir/a.txt, what the right-hand side's top level holds.
+ */
+class DiffRecorder
+{
+public:
+    /**
+     * @param repo The repository.
+     */
+    explicit DiffRecorder(const TestRepo& repo)
+        : m_output(repo.filePath(QStringLiteral(".git/recorded-diffs")))
+    {
+        const QString command = QStringLiteral(
+                                    "{ if [ -d \"$LOCAL\" ]; "
+                                    "then tail -qn 1 \"$LOCAL/dir/a.txt\" \"$REMOTE/dir/a.txt\"; ls \"$REMOTE\"; "
+                                    "else tail -qn 1 \"$LOCAL\" \"$REMOTE\"; fi; } | paste -sd ' ' >> '%1'")
+                                    .arg(m_output);
+        repo.run({QStringLiteral("config"), QStringLiteral("diff.tool"), QStringLiteral("record")});
+        repo.run({QStringLiteral("config"), QStringLiteral("difftool.record.cmd"), command});
+    }
+
+    /**
+     * Waits for one diff to be recorded, and empties the record for the next.
+     * @param expected What it should record.
+     * @returns Whether it did.
+     */
+    [[nodiscard]] bool saw(const QString& expected) const
+    {
+        QString actual;
+        const bool matched = QTest::qWaitFor(
+            [&] {
+                QFile file(m_output);
+                actual = file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()).trimmed() : QString();
+                return actual == expected;
+            },
+            timeout);
+        if (!matched) {
+            qWarning() << "Recorded" << actual << "instead of" << expected;
+        }
+        QFile::remove(m_output);
+        return matched;
+    }
+
+private:
+    QString m_output;
+};
+
+/**
  * @param menu A menu.
  * @returns The entries' texts, with "-" for a separator.
  */
@@ -1268,6 +1316,8 @@ private Q_SLOTS:
         QVERIFY(waitForLog(dlg));
         QVERIFY(showDialog(dlg));
         GitLogList *list = dlg.logList();
+        const QString compare = QStringLiteral("Compare with &working tree");
+        const QString previous = QStringLiteral("&Compare with previous revision");
         const QString reset = QStringLiteral("R&eset \"main\" to this...");
         const QString createTag = QStringLiteral("Create &Tag at this version...");
         const QString push = QStringLiteral("Pus&h...");
@@ -1280,13 +1330,13 @@ private Q_SLOTS:
         };
         // The current branch is never offered, and is what makes HEAD pushable
         QVERIFY(withMenuOn(list, 0, collect));
-        QCOMPARE(texts, (QStringList{reset, createTag, sep, push, sep, copy}));
+        QCOMPARE(texts, (QStringList{compare, previous, sep, reset, createTag, sep, push, sep, copy}));
         QVERIFY(withMenuOn(list, 1, collect));
         const QString deleteTag = QStringLiteral("&Delete refs/tags/v1");
-        QCOMPARE(texts, (QStringList{reset, createTag, sep, push, deleteTag, sep, copy}));
-        // No refs: nothing to push or delete
+        QCOMPARE(texts, (QStringList{compare, previous, sep, reset, createTag, sep, push, deleteTag, sep, copy}));
+        // No refs: nothing to push or delete. A root commit has nothing to compare with
         QVERIFY(withMenuOn(list, 2, collect));
-        QCOMPARE(texts, (QStringList{reset, createTag, sep, copy}));
+        QCOMPARE(texts, (QStringList{compare, sep, reset, createTag, sep, copy}));
 
         // Only Copy to clipboard is for several commits
         list->setCurrentIndex(list->logModel()->index(0, 0));
@@ -1300,6 +1350,104 @@ private Q_SLOTS:
         QContextMenuEvent event(QContextMenuEvent::Mouse, QPoint(5, 5), list->viewport()->mapToGlobal(QPoint(5, 5)));
         QApplication::sendEvent(list->viewport(), &event);
         QCOMPARE(texts, (QStringList{copy}));
+    }
+
+    void aMergeComparesWithTheChosenParent()
+    {
+        const TestRepo repo;
+        const QString file = QStringLiteral("f.txt");
+        repo.write(file, "base\n");
+        repo.commitAll(QStringLiteral("Base"));
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("side")});
+        repo.write(file, "side\n");
+        repo.commitAll(QStringLiteral("A & long subject from the side branch"));
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        repo.write(file, "main\n");
+        repo.commitAll(QStringLiteral("Main"));
+        const QString noEdit = QStringLiteral("--no-edit");
+        const QString ours = QStringLiteral("--strategy=ours");
+        repo.run({QStringLiteral("merge"), QStringLiteral("--quiet"), ours, noEdit, QStringLiteral("side")});
+        repo.write(file, "merged\n");
+        repo.run({QStringLiteral("add"), file});
+        repo.run({QStringLiteral("commit"), QStringLiteral("--quiet"), QStringLiteral("--amend"), noEdit});
+        const DiffRecorder recorder(repo);
+        const auto hashOf = [&repo](const QString& rev) {
+            return QString::fromLatin1(repo.git().run({QStringLiteral("rev-parse"), rev}).trimmed());
+        };
+
+        LogDlg dlg({repo.filePath(file)});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        const QString first = QStringLiteral("Parent 1: \"Main\" (%1)").arg(hashOf(QStringLiteral("HEAD^1")).left(8));
+        const QString sideHash = hashOf(QStringLiteral("side")).left(8);
+        const QString second = QStringLiteral("Parent 2: \"A && long subject fro...\" (%1)").arg(sideHash);
+        QStringList texts;
+        const auto chooseSecond = [&texts, &second](QMenu *menu) {
+            const QMenu *submenu = entry(menu, QStringLiteral("&Compare with previous revision"))->menu();
+            texts = entryTexts(submenu);
+            entry(submenu, second)->trigger();
+        };
+        QVERIFY(withMenuOn(dlg.logList(), 0, chooseSecond));
+        QCOMPARE(texts, (QStringList{first, second}));
+        QVERIFY(recorder.saw(QStringLiteral("side merged")));
+    }
+
+    void comparesAFolderInOneDirDiff()
+    {
+        const TestRepo repo;
+        const QString file = QStringLiteral("dir/a.txt");
+        const QString outside = QStringLiteral("outside.txt");
+        repo.write(file, "one\n");
+        repo.write(outside, "one\n");
+        repo.commitAll(QStringLiteral("First"));
+        repo.write(file, "two\n");
+        repo.write(outside, "two\n");
+        repo.commitAll(QStringLiteral("Second"));
+        repo.write(file, "working\n");
+        repo.write(outside, "working\n");
+        const DiffRecorder recorder(repo);
+
+        const LogDlg folder({repo.filePath(QStringLiteral("dir"))});
+        QVERIFY(waitForLog(folder));
+        folder.logList()->compareWithWorkingTree(0);
+        QVERIFY(recorder.saw(QStringLiteral("two working dir")));
+        folder.logList()->compareWithPrevious(0, 0);
+        QVERIFY(recorder.saw(QStringLiteral("one two dir")));
+
+        const LogDlg whole({repo.path()});
+        QVERIFY(waitForLog(whole));
+        whole.logList()->compareWithPrevious(0, 0);
+        QVERIFY(recorder.saw(QStringLiteral("one two dir outside.txt")));
+    }
+
+    void comparesAFileAcrossItsRenames()
+    {
+        const TestRepo repo;
+        const QByteArray common = "the same line\nthe same line\nthe same line\nthe same line\nthe same line\n";
+        repo.write(QStringLiteral("old.txt"), common + "one\n");
+        repo.commitAll(QStringLiteral("Add"));
+        repo.run({QStringLiteral("mv"), QStringLiteral("old.txt"), QStringLiteral("new.txt")});
+        repo.write(QStringLiteral("new.txt"), common + "two\n");
+        repo.commitAll(QStringLiteral("Rename"));
+        repo.write(QStringLiteral("new.txt"), common + "three\n");
+        repo.commitAll(QStringLiteral("Edit"));
+        repo.write(QStringLiteral("new.txt"), common + "working\n");
+        const DiffRecorder recorder(repo);
+
+        const LogDlg dlg({repo.filePath(QStringLiteral("new.txt"))});
+        QVERIFY(waitForLog(dlg));
+        findAction(dlg.walkBehaviorMenu(), QStringLiteral("Follow renames"))->trigger();
+        QVERIFY(waitForReload(dlg));
+        GitLogList *list = dlg.logList();
+        QCOMPARE(list->logModel()->rowCount(), 3);
+
+        // Row 2 predates the rename: the files above it are fetched first, in the background
+        list->compareWithWorkingTree(2);
+        QVERIFY(recorder.saw(QStringLiteral("one working")));
+        list->compareWithPrevious(1, 0); // The rename itself: the name differs on each side
+        QVERIFY(recorder.saw(QStringLiteral("one two")));
+        list->compareWithPrevious(0, 0);
+        QVERIFY(recorder.saw(QStringLiteral("two three")));
     }
 
     void resetNeedsAWorkingTree()
@@ -1416,14 +1564,16 @@ private Q_SLOTS:
         const auto collect = [&texts](QMenu *menu) {
             texts = entryTexts(menu);
         };
-        QVERIFY(withMenuOn(list, 0, collect));
+        const QString compare = QStringLiteral("Compare with &working tree");
+        const QString previous = QStringLiteral("&Compare with previous revision");
         const QString sep = QStringLiteral("-");
+        QVERIFY(withMenuOn(list, 0, collect));
         const QString copy = QStringLiteral("Copy to clipboard");
-        QCOMPARE(texts, (QStringList{sep, QStringLiteral("&Delete refs/stash"), sep, copy}));
+        QCOMPARE(texts, (QStringList{compare, previous, sep, sep, QStringLiteral("&Delete refs/stash"), sep, copy}));
         // The commit holding the stash's index is on the stash too, when listed right below it
         QCOMPARE(model->rev(1).hash, model->rev(0).parents.at(1));
         QVERIFY(withMenuOn(list, 1, collect));
-        QCOMPARE(texts, (QStringList{sep, copy}));
+        QCOMPARE(texts, (QStringList{compare, previous, sep, sep, copy}));
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix

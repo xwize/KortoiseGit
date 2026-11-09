@@ -19,6 +19,7 @@
 #include <QByteArray>
 #include <QDateTime>
 #include <QHash>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QTreeView>
@@ -218,6 +219,22 @@ public:
     [[nodiscard]] int selectedRow() const;
 
     /**
+     * Ported from ID_COMPARE of CGitLogListBase::ContextMenuAction: starts a diff tool on a commit against the
+     * working tree. When renames are followed it may first wait, in the background, for the files of the commits
+     * above.
+     * @param row The commit's row.
+     */
+    void compareWithWorkingTree(int row);
+
+    /**
+     * Ported from ID_COMPAREWITHPREVIOUS of CGitLogListBase::ContextMenuAction: starts a diff tool on one of a
+     * commit's parents against the commit, waiting like compareWithWorkingTree().
+     * @param row The commit's row.
+     * @param parentNo Which parent, counting from 0.
+     */
+    void compareWithPrevious(int row, qsizetype parentNo);
+
+    /**
      * Ported from the text CGitLogListBase::CopySelectionToClipBoard builds, with newlines for its CRLF.
      * @param format What to write for each commit.
      * @param revs The commits, in list order. Full needs their files loaded.
@@ -276,6 +293,18 @@ private:
         QStringList refs; // The commit's m_HashMap entry: full names, sorted, without a detached HEAD
         std::optional<GitRef> label; // The ref whose label was right-clicked (IsMouseOnRefLabelFromPopupMenu)
         bool isStash = false; // IsOnStash
+        int row = -1; // The commit's row
+        QStringList parents; // GetParentHashes
+    };
+
+    /**
+     * A Compare entry following renames, waiting for the changed files of the commits it has to walk.
+     */
+    struct PendingCompare {
+        int row = -1; // The commit's row
+        QString rev1; // The right-hand revision; empty for the working tree
+        QString rev2; // The left-hand revision
+        QSet<int> waitingFor; // The rows whose files haven't arrived yet
     };
 
     /**
@@ -291,6 +320,12 @@ private:
     void showLogMenu(QContextMenuEvent *event);
     [[nodiscard]] bool isOnStash(int row) const;
     void addSingleCommitEntries(QMenu& menu, const LogMenuTarget& target);
+    void addCompareEntries(QMenu& menu, const LogMenuTarget& target);
+    [[nodiscard]] QStringList parentHashes(const GitRevLoglist& rev);
+    [[nodiscard]] QString parentInfo(qsizetype number, const QString& hash) const;
+    void startCompare(int row, const QString& rev1, const QString& rev2);
+    void finishCompare(const PendingCompare& compare);
+    void onCompareFilesLoaded(int row);
     [[nodiscard]] bool addPushEntry(QMenu& menu, const LogMenuTarget& target);
     [[nodiscard]] bool addDeleteEntries(QMenu& menu, const LogMenuTarget& target);
     void addClipboardEntries(QMenu& menu, const std::optional<LogMenuTarget>& target);
@@ -353,6 +388,7 @@ private:
     std::unique_ptr<GitCall> m_filesCall; // The diff-tree running for m_filesRow
     int m_filesRow = -1; // The row whose files are being fetched, or -1
     QList<GitRevFiles> m_filesDone; // Its diffs fetched so far, one per parent
+    std::optional<PendingCompare> m_pendingCompare; // The latest Compare entry still waiting for files
     std::optional<PendingCopy> m_copy; // The copy waiting for files or tag info, if any
     std::unique_ptr<GitCall> m_copyTagInfoCall; // The for-each-ref m_copy is waiting for
 };
