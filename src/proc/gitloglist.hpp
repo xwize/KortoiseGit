@@ -53,6 +53,22 @@ public:
         FilterShowAll = FilterShowAnyCommit | FilterShowRefs | FilterShowMergePoints, // FILTERSHOW_ALL
     };
 
+    using TagInfo = QHash<QString, QString>; // The annotated tags' text by full ref name
+
+    /**
+     * What CopySelectionToClipBoard writes for each commit (TortoiseGit's ID_COPYCLIPBOARD*).
+     */
+    enum class CopyFormat {
+        Full, // ID_COPYCLIPBOARDFULL
+        FullNoPaths, // ID_COPYCLIPBOARDFULLNOPATHS
+        Hash, // ID_COPYCLIPBOARDHASH
+        AuthorsFull, // ID_COPYCLIPBOARDAUTHORSFULL
+        AuthorsName, // ID_COPYCLIPBOARDAUTHORSNAME
+        AuthorsEmail, // ID_COPYCLIPBOARDAUTHORSEMAIL
+        Subjects, // ID_COPYCLIPBOARDSUBJECTS
+        Messages, // ID_COPYCLIPBOARDMESSAGES
+    };
+
     /**
      * @param parent The parent widget.
      */
@@ -201,6 +217,23 @@ public:
      */
     [[nodiscard]] int selectedRow() const;
 
+    /**
+     * Ported from the text CGitLogListBase::CopySelectionToClipBoard builds, with newlines for its CRLF.
+     * @param format What to write for each commit.
+     * @param revs The commits, in list order. Full needs their files loaded.
+     * @param tags The annotated tags' text, for the two Full formats.
+     * @returns The clipboard text.
+     */
+    [[nodiscard]] static QString copyText(CopyFormat format, const QList<GitRevLoglist>& revs, const TagInfo& tags);
+
+    /**
+     * Ported from ID_COPYCLIPBOARDBRANCHTAG in CGitLogListBase::ContextMenuAction.
+     * @param refs The commit's full ref names, sorted.
+     * @param label The ref whose label was right-clicked, if any.
+     * @returns The label's short name, or else every full ref name, one per line.
+     */
+    [[nodiscard]] static QString refNamesText(const QStringList& refs, const std::optional<GitRef>& label);
+
 Q_SIGNALS:
     /**
      * A reload() has finished: every commit is listed.
@@ -245,12 +278,26 @@ private:
         bool isStash = false; // IsOnStash
     };
 
+    /**
+     * A copy waiting for the data TortoiseGit reads synchronously: the commits' files and the tag info.
+     */
+    struct PendingCopy {
+        CopyFormat format = CopyFormat::Full; // What to write
+        QList<int> rows; // The selected rows when it was asked for, top first
+        TagInfo tagInfo; // Read for the two Full formats
+    };
+
     void showRebaseMenu(QContextMenuEvent *event);
     void showLogMenu(QContextMenuEvent *event);
     [[nodiscard]] bool isOnStash(int row) const;
     void addSingleCommitEntries(QMenu& menu, const LogMenuTarget& target);
     [[nodiscard]] bool addPushEntry(QMenu& menu, const LogMenuTarget& target);
     [[nodiscard]] bool addDeleteEntries(QMenu& menu, const LogMenuTarget& target);
+    void addClipboardEntries(QMenu& menu, const std::optional<LogMenuTarget>& target);
+    void copySelectionToClipboard(CopyFormat format);
+    void onCopyTagInfoFinished();
+    void finishCopyIfReady();
+    void cancelCopy();
     void createTag(const LogMenuTarget& target);
     void push(const LogMenuTarget& target);
     void deleteRefs(const QStringList& refs);
@@ -305,6 +352,8 @@ private:
     std::unique_ptr<GitCall> m_filesCall; // The diff-tree running for m_filesRow
     int m_filesRow = -1; // The row whose files are being fetched, or -1
     QList<GitRevFiles> m_filesDone; // Its diffs fetched so far, one per parent
+    std::optional<PendingCopy> m_copy; // The copy waiting for files or tag info, if any
+    std::unique_ptr<GitCall> m_copyTagInfoCall; // The for-each-ref m_copy is waiting for
 };
 
 } // namespace kgt

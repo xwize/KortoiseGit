@@ -13,6 +13,7 @@
 
 #include <QApplication>
 #include <QBrush>
+#include <QClipboard>
 #include <QContextMenuEvent>
 #include <QDateEdit>
 #include <QDialogButtonBox>
@@ -1470,6 +1471,139 @@ private Q_SLOTS:
         QCOMPARE(preselected(0, labelPoint(list, 0, QStringLiteral("main")), mainText), QStringLiteral("main"));
         const std::optional<QPoint> remoteLabel = labelPoint(list, 0, QStringLiteral("origin/feature"));
         QCOMPARE(preselected(0, remoteLabel, QStringLiteral("Pus&h...")), QStringLiteral("feature"));
+    }
+
+    void clipboardTextFormats()
+    {
+        using Format = GitLogList::CopyFormat;
+        GitRevLoglist first;
+        first.hash = QStringLiteral("aaa");
+        first.authorName = QStringLiteral("Ann");
+        first.authorEmail = QStringLiteral("ann@example.com");
+        first.subject = QStringLiteral("One");
+        first.body = QStringLiteral("Body line");
+        GitRevLoglist second;
+        second.hash = QStringLiteral("bbb");
+        second.authorName = QStringLiteral("Bob");
+        second.authorEmail = QStringLiteral("bob@example.com");
+        second.subject = QStringLiteral("Two");
+        const QList<GitRevLoglist> revs{first, second};
+        const auto text = [&revs](Format format) {
+            return GitLogList::copyText(format, revs, {});
+        };
+        QCOMPARE(text(Format::Hash), QStringLiteral("aaa\nbbb"));
+        QCOMPARE(text(Format::AuthorsFull), QStringLiteral("Ann <ann@example.com>\nBob <bob@example.com>"));
+        QCOMPARE(text(Format::AuthorsName), QStringLiteral("Ann\nBob"));
+        QCOMPARE(text(Format::AuthorsEmail), QStringLiteral("ann@example.com\nbob@example.com"));
+        QCOMPARE(text(Format::Subjects), QStringLiteral("* One\n\n* Two\n\n"));
+        // GetSubjectBody ends a message without a body with a newline
+        QCOMPARE(text(Format::Messages), QStringLiteral("* One\n\nBody line\n\n* Two\n\n\n"));
+    }
+
+    void clipboardTextFullData()
+    {
+        using Format = GitLogList::CopyFormat;
+        using Action = TGitPath::Action;
+        GitRevLoglist rev;
+        rev.hash = QStringLiteral("abc");
+        rev.authorName = QStringLiteral("Ann");
+        rev.authorEmail = QStringLiteral("ann@example.com");
+        rev.authorDate = QDateTime::fromSecsSinceEpoch(1000000000);
+        rev.subject = QStringLiteral("Subject");
+        rev.body = QStringLiteral("Body");
+        rev.notes = QStringLiteral("A note");
+        const GitRef annotated{.type = GitRef::Type::Tag, .name = QStringLiteral("v1")};
+        const GitRef lightweight{.type = GitRef::Type::Tag, .name = QStringLiteral("light")};
+        rev.refs = {annotated, lightweight};
+        GitStatusEntry renamed;
+        renamed.path = QStringLiteral("new.txt");
+        renamed.origPath = QStringLiteral("old.txt");
+        renamed.actions = Action::Replaced;
+        GitStatusEntry modified;
+        modified.path = QStringLiteral("f.txt");
+        modified.actions = Action::Modified;
+        const GitRevFiles firstParent{.status = {renamed}, .numStat = {}};
+        const GitRevFiles secondParent{.status = {modified}, .numStat = {}};
+        rev.files = {firstParent, secondParent};
+
+        const QString release = QStringLiteral("tag v1\n\nRelease\n");
+        const GitLogList::TagInfo tagInfo{{QStringLiteral("refs/tags/v1"), release}};
+        const QString date = GitLogListModel::formatDate(rev.authorDate);
+        QString head = QStringLiteral("Revision: abc\nAuthor: Ann <ann@example.com>\nDate: %1\n").arg(date);
+        head += QStringLiteral("Message:\nSubject\n\nBody\n");
+        const QString sections = QStringLiteral("----\nNotes:\nA note\n----\nTag Info:\ntag v1\n\nRelease\n");
+        const QString paths = QStringLiteral("----\nRename: new.txt (from old.txt)\nModified: f.txt\n");
+        QCOMPARE(GitLogList::copyText(Format::Full, {rev}, tagInfo), head + sections + paths + QLatin1Char('\n'));
+        QCOMPARE(GitLogList::copyText(Format::FullNoPaths, {rev}, tagInfo), head + sections + QLatin1Char('\n'));
+
+        // Without notes, tags, a body or files: GetSubjectBody's newline, and the paths' "----" alone
+        GitRevLoglist bare;
+        bare.hash = QStringLiteral("abc");
+        bare.subject = QStringLiteral("Subject");
+        const QString bareDate = GitLogListModel::formatDate(bare.authorDate);
+        const QString bareHead = QStringLiteral("Revision: abc\nAuthor:  <>\nDate: %1\n").arg(bareDate);
+        const QString bareRest = QStringLiteral("Message:\nSubject\n\n----\n\n");
+        QCOMPARE(GitLogList::copyText(Format::Full, {bare}, {}), bareHead + bareRest);
+    }
+
+    void clipboardRefNames()
+    {
+        const QStringList refs{QStringLiteral("refs/heads/main"), QStringLiteral("refs/tags/v1")};
+        QCOMPARE(GitLogList::refNamesText(refs, std::nullopt), QStringLiteral("refs/heads/main\nrefs/tags/v1\n"));
+        const auto labelled = [&refs](GitRef::Type type, const QString& name) {
+            return GitLogList::refNamesText(refs, GitRef{.type = type, .name = name});
+        };
+        QCOMPARE(labelled(GitRef::Type::Tag, QStringLiteral("v1")), QStringLiteral("v1"));
+        QCOMPARE(labelled(GitRef::Type::LocalBranch, QStringLiteral("main")), QStringLiteral("main"));
+        const QString remote = QStringLiteral("origin/main");
+        QCOMPARE(labelled(GitRef::Type::RemoteBranch, remote), QStringLiteral("remotes/origin/main"));
+    }
+
+    void copyFullDataLoadsFilesAndTagInfo()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), QByteArray("content that git can follow\n").repeated(20));
+        repo.commitAll(QStringLiteral("Add"));
+        repo.run({QStringLiteral("mv"), QStringLiteral("a.txt"), QStringLiteral("b.txt")});
+        repo.commitAll(QStringLiteral("Rename\n\nBody text"));
+        const QString message = QStringLiteral("-m");
+        const QString annotate = QStringLiteral("-a");
+        repo.run({QStringLiteral("tag"), annotate, message, QStringLiteral("Release"), QStringLiteral("v1")});
+        repo.run({QStringLiteral("notes"), QStringLiteral("add"), message, QStringLiteral("A note")});
+
+        const LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        GitLogList *list = dlg.logList();
+        const GitLogListModel *model = list->logModel();
+        QCOMPARE(model->rowCount(), 2);
+        const QModelIndex top = model->index(0, GitLogListModel::MessageColumn);
+        const QModelIndex bottom = model->index(1, GitLogListModel::MessageColumn);
+        const QItemSelection both(top, bottom);
+        list->selectionModel()->select(both, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        QVERIFY(model->rev(0).filesState == GitRevLoglist::FilesState::NotLoaded);
+        QVERIFY(model->rev(1).filesState == GitRevLoglist::FilesState::NotLoaded);
+
+        QGuiApplication::clipboard()->clear();
+        QTest::keyClick(list, Qt::Key_C, Qt::ControlModifier);
+        QVERIFY(QTest::qWaitFor(
+            [] {
+                return !QGuiApplication::clipboard()->text().isEmpty();
+            },
+            timeout));
+
+        const QByteArray tagOutput = repo.git().run(GitRevLoglist::tagInfoArguments());
+        const QString tagInfo = GitRevLoglist::parseTagInfo(tagOutput).value(QStringLiteral("refs/tags/v1"));
+        const auto commitHead = [model](int row) {
+            const GitRevLoglist& rev = model->rev(row);
+            const QString date = GitLogListModel::formatDate(rev.authorDate);
+            const QString author = QStringLiteral("Author: Test <test@example.com>\n");
+            return QStringLiteral("Revision: %1\n%2Date: %3\nMessage:\n").arg(rev.hash, author, date);
+        };
+        QString expected = commitHead(0) + QStringLiteral("Rename\n\nBody text\n----\nNotes:\nA note\n");
+        expected += QStringLiteral("----\nTag Info:\n") + tagInfo;
+        expected += QStringLiteral("----\nRename: b.txt (from a.txt)\n\n");
+        expected += commitHead(1) + QStringLiteral("Add\n\n----\nAdded: a.txt\n\n");
+        QCOMPARE(QGuiApplication::clipboard()->text(), expected);
     }
 
     void selectModeReturnsTheCommit()

@@ -195,6 +195,13 @@ QIcon AppUtils::appIcon()
     return QIcon::fromTheme(QStringLiteral("kortoisegit"), bundled);
 }
 
+void AppUtils::copyToClipboard(const QString& text)
+{
+    if (QClipboard *clipboard = QGuiApplication::clipboard()) {
+        clipboard->setText(text);
+    }
+}
+
 QString AppUtils::getClipboardLink(const QString& skipGitPrefix, int paramsCount)
 {
     const QClipboard *clipboard = QGuiApplication::clipboard();
