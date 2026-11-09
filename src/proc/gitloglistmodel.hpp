@@ -178,6 +178,13 @@ public:
     void swapWithNext(int row);
 
     /**
+     * Ported from CLoglistUtils::FormatDateAndTime, with the system's short date and time format.
+     * @param date A commit's date.
+     * @returns It as the Date column shows it.
+     */
+    [[nodiscard]] static QString formatDate(const QDateTime& date);
+
+    /**
      * Ported from CGitLogListBase::GetRebaseActionName.
      * @param action GitRevLoglist::RebaseAction bits.
      * @returns The mode's name: "Edit", "Squash", "Pick", "Skip" or "Unknown".
