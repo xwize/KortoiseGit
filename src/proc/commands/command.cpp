@@ -26,6 +26,7 @@
 #include "commands/rebasecommand.hpp"
 #include "commands/refbrowsecommand.hpp"
 #include "commands/revertcommand.hpp"
+#include "commands/stashcommand.hpp"
 #include "commands/switchcommand.hpp"
 #include "commands/tagcommand.hpp"
 
@@ -73,6 +74,7 @@ constexpr std::array commands{
     CommandEntry{.name = u"refbrowse", .create = &create<kgt::RefBrowseCommand>},
     CommandEntry{.name = u"repocreate", .create = &create<kgt::CreateRepositoryCommand>},
     CommandEntry{.name = u"revert", .create = &create<kgt::RevertCommand>},
+    CommandEntry{.name = u"stashsave", .create = &create<kgt::StashSaveCommand>},
     CommandEntry{.name = u"switch", .create = &create<kgt::SwitchCommand>},
     CommandEntry{.name = u"tag", .create = &create<kgt::TagCommand>},
 };

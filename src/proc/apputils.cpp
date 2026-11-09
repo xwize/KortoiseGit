@@ -19,6 +19,7 @@
 #include "progressdlg.hpp"
 #include "pushdlg.hpp"
 #include "resetdlg.hpp"
+#include "stashsave.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KConfigGroup>
@@ -347,6 +348,32 @@ bool AppUtils::mergeAbort(const QString& workingTree, QWidget *parent)
         return false;
     }
     return reset(workingTree, dlg.resetType(), QStringLiteral("HEAD"), parent);
+}
+
+QStringList AppUtils::stashSaveArguments(const StashSaveOptions& options)
+{
+    QStringList arguments{QStringLiteral("stash"), QStringLiteral("push")};
+    if (options.includeUntracked) {
+        arguments.append(QStringLiteral("--include-untracked"));
+    } else if (options.all) {
+        arguments.append(QStringLiteral("--all"));
+    }
+    if (!options.message.isEmpty()) {
+        arguments << QStringLiteral("-m") << options.message;
+    }
+    return arguments;
+}
+
+bool AppUtils::stashSave(const Git& git, const QString& message, QWidget *parent)
+{
+    StashSaveDlg dlg(git.workingDirectory(), parent);
+    dlg.setMessage(message);
+    if (dlg.exec() != QDialog::Accepted) {
+        return false;
+    }
+    ProgressDlg progress(git.workingDirectory(), parent);
+    progress.addGitCmd(stashSaveArguments(dlg.options()));
+    return progress.exec() == QDialog::Accepted && progress.gitStatus() == 0;
 }
 
 bool AppUtils::switchTo(const QString& workingTree, const QString& initialRefName, QWidget *parent)

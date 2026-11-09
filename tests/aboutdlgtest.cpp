@@ -64,7 +64,7 @@ private Q_SLOTS:
         const AboutDlg dlg;
         QCOMPARE(dlg.windowTitle(), QStringLiteral("About KortoiseGit"));
 
-        const QLabel *basedOn = labelWith(dlg, QStringLiteral("based on TortoiseGit"));
+        const QLabel *basedOn = labelWith(dlg, QStringLiteral("Based on TortoiseGit"));
         QVERIFY(basedOn != nullptr);
         QVERIFY(basedOn->text().contains(QStringLiteral("https://tortoisegit.org/")));
         QVERIFY(basedOn->text().contains(QStringLiteral("not affiliated")));
@@ -109,7 +109,9 @@ private Q_SLOTS:
         const AboutDlg dlg;
         qputenv("PATH", path);
         const QStringList lines = versionText(dlg).split(QLatin1Char('\n'));
-        QVERIFY2(lines.at(1).startsWith(QStringLiteral("git not found (")) && lines.at(1).endsWith(QLatin1Char(')')), qPrintable(lines.at(1)));
+        const QString& gitLine = lines.at(1);
+        QVERIFY2(gitLine.startsWith(QStringLiteral("Git not found (")), qPrintable(gitLine));
+        QVERIFY2(gitLine.endsWith(QLatin1Char(')')), qPrintable(gitLine));
     }
 
     void versionTextCanBeSelectedButNotEdited()

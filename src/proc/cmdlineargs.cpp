@@ -39,6 +39,8 @@ constexpr auto path2Option = "path2"_L1;
 // TortoiseGit's /startrev and /endrev: DiffCommand compares these two revisions
 constexpr auto startRevOption = "startrev"_L1;
 constexpr auto endRevOption = "endrev"_L1;
+// TortoiseGit's /msg: StashSaveCommand starts the dialog with this message
+constexpr auto msgOption = "msg"_L1;
 
 /**
  * Ported from the /pathfile handling in CTortoiseProcApp::InitInstance.
@@ -87,6 +89,8 @@ void addCmdLineOptions(QCommandLineParser& parser)
     parser.addOption(QCommandLineOption(path2Option, i18n("With --command diff: a second file to compare with --path."), i18nc("@info:shell", "path")));
     parser.addOption(QCommandLineOption(startRevOption, i18n("With --command diff: the revision to compare from."), i18nc("@info:shell", "ref")));
     parser.addOption(QCommandLineOption(endRevOption, i18n("With --command diff: the revision to compare to."), i18nc("@info:shell", "ref")));
+    const QString msgHelp = i18n("With --command stashsave: the message to start with.");
+    parser.addOption(QCommandLineOption(msgOption, msgHelp, i18nc("@info:shell", "message")));
 }
 
 Result<CmdLineArgs> parseCmdLine(const QCommandLineParser& parser)
@@ -124,6 +128,9 @@ Result<CmdLineArgs> parseCmdLine(const QCommandLineParser& parser)
         if (parser.isSet(name)) {
             values.insert(name, parser.value(name));
         }
+    }
+    if (parser.isSet(msgOption)) {
+        values.insert(msgOption, parser.value(msgOption));
     }
     if (parser.isSet(path2Option)) {
         values.insert(path2Option, QDir::cleanPath(current.absoluteFilePath(parser.value(path2Option))));
