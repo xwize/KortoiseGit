@@ -14,10 +14,16 @@
 #include <QSignalSpy>
 #include <QTest>
 
+#include <tuple>
+
+Q_DECLARE_METATYPE(kgt::ResolveWith)
+
 using namespace kgt;
 
 namespace
 {
+
+using Entries = QList<GitStatusListEntry>;
 
 /**
  * Leaves the repository in a merge with conflicts in top.txt and dir/nested.txt, and clean.txt merged without one.
@@ -89,6 +95,69 @@ bool runResolve(const TestRepo& repo, const QList<GitStatusListEntry>& entries, 
 }
 
 /**
+ * Runs Resolve conflict using on some files, as the file list does.
+ * @param repo The repository.
+ * @param resolveWith The side.
+ * @param entries The files.
+ * @param dialog The dialog to run it in.
+ * @returns Whether the commands ended.
+ */
+bool runResolveWith(const TestRepo& repo, ResolveWith resolveWith, const Entries& entries, ProgressDlg& dialog)
+{
+    ResolveProgressCommand command(resolveWith);
+    command.setPathList(entries);
+    QSignalSpy read(&command, &ResolveProgressCommand::conflictInfoRead);
+    command.readConflictInfo(repo.path());
+    if ((read.isEmpty() && !read.wait()) || command.error()) {
+        return false;
+    }
+    command.setUp(repo.path(), dialog);
+    QSignalSpy finished(&dialog, &ProgressDlg::commandsFinished);
+    dialog.start();
+    return dialog.isDone() || finished.wait();
+}
+
+/**
+ * Leaves the repository in a merge with a delete/modify conflict in file.txt.
+ * @param repo An empty repository.
+ * @param oursDeletes Whether the current branch deleted the file; if not, the other branch did.
+ */
+void startDeleteModifyMerge(const TestRepo& repo, bool oursDeletes)
+{
+    const QString file = QStringLiteral("file.txt");
+    const QString other = QStringLiteral("other");
+    const auto change = [&repo, &file](bool deletes, const QByteArray& content) {
+        if (deletes) {
+            repo.run({QStringLiteral("rm"), QStringLiteral("--quiet"), file});
+        } else {
+            repo.write(file, content);
+        }
+        repo.commitAll(QStringLiteral("change"));
+    };
+    repo.write(file, "base\n");
+    repo.commitAll(QStringLiteral("base"));
+    repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("-b"), other});
+    change(!oursDeletes, "theirs\n");
+    repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
+    change(oursDeletes, "ours\n");
+    try {
+        repo.run({QStringLiteral("merge"), QStringLiteral("--quiet"), QStringLiteral("--no-edit"), other});
+    } catch (const RuntimeError&) { // NOLINT(bugprone-empty-catch): The conflict is the point
+    }
+}
+
+/**
+ * @param repo The repository.
+ * @param path A file.
+ * @returns What the working tree's file holds.
+ */
+QByteArray contentOf(const TestRepo& repo, const QString& path)
+{
+    QFile file(repo.filePath(path));
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+/**
  * @param dlg A dialog that has just been created.
  * @returns Whether its list finished loading.
  */
@@ -123,6 +192,11 @@ class ResolveTest : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
+    void initTestCase()
+    {
+        TestRepo::isolateGit();
+    }
+
     void listsOnlyConflictsBelowTheSelection()
     {
         const TestRepo repo;
@@ -197,6 +271,150 @@ private Q_SLOTS:
 
         QVERIFY(dialog.gitStatus() != 0);
         QVERIFY2(!dialog.logText().contains(QStringLiteral("Resolved  top.txt")), qPrintable(dialog.logText()));
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void takesTheChosenSide_data()
+    {
+        QTest::addColumn<ResolveWith>("resolveWith");
+        QTest::addColumn<QByteArray>("expected");
+        QTest::newRow("theirs") << ResolveWith::Theirs << QByteArray("theirs\n");
+        QTest::newRow("mine") << ResolveWith::Mine << QByteArray("ours\n");
+    }
+
+    void takesTheChosenSide()
+    {
+        QFETCH(const ResolveWith, resolveWith);
+        QFETCH(const QByteArray, expected);
+        const TestRepo repo;
+        startConflictedMerge(repo);
+
+        ProgressDlg dialog(repo.path());
+        const Entries entries{entryFor(QStringLiteral("top.txt"), TGitPath::Action::Unmerged),
+                              entryFor(QStringLiteral("dir/nested.txt"), TGitPath::Action::Unmerged)};
+        QVERIFY(runResolveWith(repo, resolveWith, entries, dialog));
+
+        QCOMPARE(dialog.gitStatus(), 0);
+        QCOMPARE(contentOf(repo, QStringLiteral("top.txt")), expected);
+        QCOMPARE(contentOf(repo, QStringLiteral("dir/nested.txt")), expected);
+        QCOMPARE(unmergedPaths(repo), QStringList());
+        QVERIFY2(dialog.logText().contains(QStringLiteral("Resolved  dir/nested.txt")), qPrintable(dialog.logText()));
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void deleteModifyFollowsTheChosenSide_data()
+    {
+        QTest::addColumn<bool>("oursDeletes");
+        QTest::addColumn<ResolveWith>("resolveWith");
+        QTest::addColumn<QByteArray>("expected"); // Empty if the file should be gone
+        QTest::newRow("we deleted, take mine") << true << ResolveWith::Mine << QByteArray();
+        QTest::newRow("we deleted, take theirs") << true << ResolveWith::Theirs << QByteArray("theirs\n");
+        QTest::newRow("they deleted, take theirs") << false << ResolveWith::Theirs << QByteArray();
+        QTest::newRow("they deleted, take mine") << false << ResolveWith::Mine << QByteArray("ours\n");
+    }
+
+    void deleteModifyFollowsTheChosenSide()
+    {
+        QFETCH(const bool, oursDeletes);
+        QFETCH(const ResolveWith, resolveWith);
+        QFETCH(const QByteArray, expected);
+        const TestRepo repo;
+        startDeleteModifyMerge(repo, oursDeletes);
+        const QString file = QStringLiteral("file.txt");
+
+        ProgressDlg dialog(repo.path());
+        QVERIFY(runResolveWith(repo, resolveWith, {entryFor(file, TGitPath::Action::Unmerged)}, dialog));
+
+        QCOMPARE(dialog.gitStatus(), 0);
+        QCOMPARE(unmergedPaths(repo), QStringList());
+        QCOMPARE(QFileInfo::exists(repo.filePath(file)), !expected.isEmpty());
+        QCOMPARE(contentOf(repo, file), expected);
+        const QByteArray indexed = repo.git().run({QStringLiteral("ls-files"), QStringLiteral("--"), file});
+        QCOMPARE(indexed.isEmpty(), expected.isEmpty());
+        QVERIFY2(dialog.logText().contains(QStringLiteral("Resolved  file.txt")), qPrintable(dialog.logText()));
+    }
+
+    void pathsNoLongerInConflictAreSkipped()
+    {
+        const TestRepo repo;
+        startConflictedMerge(repo);
+        // The list still calls it unmerged, as it would if the conflict was resolved elsewhere after the list loaded
+        repo.run({QStringLiteral("add"), QStringLiteral("top.txt")});
+
+        ProgressDlg dialog(repo.path());
+        const GitStatusListEntry stale = entryFor(QStringLiteral("top.txt"), TGitPath::Action::Unmerged);
+        QVERIFY(runResolveWith(repo, ResolveWith::Theirs, {stale}, dialog));
+
+        QCOMPARE(dialog.gitStatus(), 0);
+        QVERIFY2(dialog.logText().contains(QStringLiteral("Skipped  top.txt")), qPrintable(dialog.logText()));
+        QVERIFY(contentOf(repo, QStringLiteral("top.txt")).contains("<<<<<<<"));
+    }
+
+    void chosenSubmoduleSideIsLeftAlone()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("file.txt"), "file\n");
+        repo.commitAll(QStringLiteral("base"));
+        const QString revParse = QStringLiteral("rev-parse");
+        const QByteArray blob = repo.git().run({revParse, QStringLiteral("HEAD:file.txt")}).trimmed();
+        const QByteArray commit = repo.git().run({revParse, QStringLiteral("HEAD")}).trimmed();
+        const QByteArray stages = "100644 " + blob + " 2\tmod\n160000 " + commit + " 3\tmod\n";
+        const QStringList indexInfo{QStringLiteral("update-index"), QStringLiteral("--index-info")};
+        std::ignore = repo.git().run(indexInfo, RunMode::ReadWrite, stages);
+
+        ProgressDlg dialog(repo.path());
+        const GitStatusListEntry submodule = entryFor(QStringLiteral("mod"), TGitPath::Action::Unmerged);
+        QVERIFY(runResolveWith(repo, ResolveWith::Theirs, {submodule}, dialog));
+
+        QCOMPARE(dialog.gitStatus(), 0);
+        QVERIFY2(dialog.logText().contains(QStringLiteral("Skipped  mod")), qPrintable(dialog.logText()));
+        QCOMPARE(unmergedPaths(repo), QStringList{QStringLiteral("mod")});
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void rebaseTitlesNameTheVersionObtained_data()
+    {
+        QTest::addColumn<int>("entry");
+        QTest::addColumn<QString>("title");
+        QTest::addColumn<QByteArray>("expected");
+        QTest::newRow("branch being rebased") << 0 << QStringLiteral("feature") << QByteArray("feature\n");
+        QTest::newRow("branch rebased onto") << 1 << QStringLiteral("main") << QByteArray("main\n");
+    }
+
+    void rebaseTitlesNameTheVersionObtained()
+    {
+        QFETCH(const int, entry);
+        QFETCH(const QString, title);
+        QFETCH(const QByteArray, expected);
+        const TestRepo repo;
+        const QString file = QStringLiteral("file.txt");
+        const QString feature = QStringLiteral("feature");
+        repo.write(file, "base\n");
+        repo.commitAll(QStringLiteral("base"));
+        repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("-b"), feature});
+        repo.write(file, "feature\n");
+        repo.commitAll(QStringLiteral("on feature"));
+        repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        repo.write(file, "main\n");
+        repo.commitAll(QStringLiteral("on main"));
+        repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), feature});
+        try {
+            // --apply: CTGitPath::IsRebaseActive looks for rebase-apply
+            repo.run(QStringLiteral("rebase --quiet --apply main").split(QLatin1Char(' ')));
+        } catch (const RuntimeError&) { // NOLINT(bugprone-empty-catch): The conflict is the point
+        }
+
+        const ResolveDlg dlg(repo.path(), {repo.path()});
+        QVERIFY(waitLoaded(dlg));
+        const QList<GitStatusListCtrl::ResolveUsingEntry> entries = dlg.listCtrl()->resolveUsingEntries();
+        QCOMPARE(entries.size(), 2);
+        QVERIFY2(entries.at(entry).title.startsWith(title), qPrintable(entries.at(entry).title));
+
+        ProgressDlg dialog(repo.path());
+        const GitStatusListEntry conflicted = entryFor(file, TGitPath::Action::Unmerged);
+        QVERIFY(runResolveWith(repo, entries.at(entry).resolveWith, {conflicted}, dialog));
+        QCOMPARE(dialog.gitStatus(), 0);
+        QCOMPARE(contentOf(repo, file), expected);
     }
 };
 

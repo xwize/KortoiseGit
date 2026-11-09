@@ -29,8 +29,9 @@ class GitCall;
  * list goes through stdin instead of a temporary file. The paths are taken literally (--literal-pathspecs), so a
  * file named "*.txt" adds only itself.
  *
- * Only commands that take --pathspec-from-file can be run this way: add, rm, reset, checkout, restore and stash.
- * TortoiseGit's fallback that splits the list over several command lines is not ported yet.
+ * Only commands that take --pathspec-from-file can be run this way: add, rm, reset, checkout, restore and stash, as
+ * well as checkout-index, which reads the same list with --stdin -z. TortoiseGit's fallback that splits the list
+ * over several command lines is not ported yet.
  */
 class MassiveGitTask
 {

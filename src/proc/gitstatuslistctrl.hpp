@@ -14,6 +14,7 @@
 
 #include "gitstatuslistmodel.hpp"
 #include "progresscommands/addprogresscommand.hpp"
+#include "progresscommands/resolveprogresscommand.hpp"
 
 #include "utils/error.hpp"
 
@@ -43,8 +44,8 @@ class RevertProgressCommand;
  * The changed-files list. The owning dialog sets the working tree and the show flags, places the Select all
  * checkbox and the counter label, calls reload() and acts on checkedEntries(). Double-clicking a file compares it
  * with HEAD in git difftool, or edits a conflicted one as Edit conflicts does; the context menu offers Edit conflicts,
- * Resolved, Add, Compare with base, Revert..., Open, Open with..., Explore to and Delete; F5 reloads, and the Delete key
- * deletes.
+ * Resolved, Resolve conflict using, Add, Compare with base, Revert..., Open, Open with..., Explore to and Delete;
+ * F5 reloads, and the Delete key deletes.
  */
 class GitStatusListCtrl : public QTreeView
 {
@@ -58,7 +59,7 @@ public:
     enum class ContextMenu : unsigned int {
         Revert = 0x1, // GITSLC_POPREVERT
         Conflict = 0x2, // GITSLC_POPCONFLICT: Edit conflicts
-        Resolve = 0x4, // GITSLC_POPRESOLVE: Resolved
+        Resolve = 0x4, // GITSLC_POPRESOLVE: Resolved and Resolve conflict using
         Add = 0x8, // GITSLC_POPADD: Add, and with Shift Add as Executable and Add as Symlink
         All = 0xFFFFFFFF, // GITSLC_POPALL
     };
@@ -235,6 +236,19 @@ public:
     void resolveSelected();
 
     /**
+     * One "Resolve conflict using" entry of the context menu.
+     */
+    struct ResolveUsingEntry {
+        QString title; // The side's title, from CAppUtils::GetConflictTitles
+        ResolveWith resolveWith; // The side it gives
+    };
+
+    /**
+     * @returns The "Resolve conflict using" entries, in menu order. Empty if git failed; the error has been shown.
+     */
+    [[nodiscard]] QList<ResolveUsingEntry> resolveUsingEntries();
+
+    /**
      * @param entry An entry of this list.
      * @returns Its absolute path.
      */
@@ -293,8 +307,12 @@ private:
     void revertSelected();
     void onRevertFinished();
     void addConflictEntries(QMenu& menu, int selectedCount);
+    void addResolveEntries(QMenu& menu);
     void editConflict(const GitStatusListEntry& entry);
     void onResolveFinished();
+    [[nodiscard]] bool confirmResolve();
+    void resolveSelectedUsing(ResolveWith resolveWith);
+    void onConflictInfoRead();
     void deleteSelectedFiles();
     void onDeleteJobResult(const KJob *job);
     void removeDeletedFromIndex();
@@ -320,6 +338,7 @@ private:
     std::unique_ptr<GitCall> m_numStatCall;
     std::unique_ptr<RevertProgressCommand> m_revertCommand; // The running revert, if any
     std::unique_ptr<GitCall> m_resolveCall; // The running git add of Resolved, if any
+    std::unique_ptr<ResolveProgressCommand> m_resolveCommand; // The Resolve conflict using reading its stages, if any
     std::unique_ptr<GitCall> m_deleteCall; // The running git rm --cached of Delete, if any
     std::unique_ptr<AddProgressCommand> m_addCommand; // The running Add, if any
     QStringList m_deletingPaths; // The paths of the running Delete
@@ -334,6 +353,7 @@ private:
     bool m_includeStaged = false; // Whether staged changes outside m_pathFilter are listed too
     bool m_amend = false; // Changes are against HEAD~1 (m_amend)
     bool m_isBusy = false; // The owner is loading the entries (setBusy)
+    bool m_isRevertTheirMy = false; // A rebase is in progress (m_bIsRevertTheirMy)
     bool m_isDeleting = false; // A Delete is asking for confirmation, deleting files or updating the index
     bool m_hasDirectFiles = false; // The direct files have been taken from the path filter (m_setDirectFiles)
     ContextMenus m_contextMenus = ContextMenu::All; // TortoiseGit's m_dwContextMenus
