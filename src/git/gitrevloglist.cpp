@@ -179,6 +179,18 @@ void addTagInfo(QHash<QString, QString>& infos, const std::array<QByteArrayView,
     infos.insert(refName, info);
 }
 
+/**
+ * @param name A full ref name.
+ * @returns Whether git log's decorations list refs of its kind.
+ */
+bool isDecoratedRef(const QString& name)
+{
+    static const QStringList prefixes = QStringLiteral("refs/heads/ refs/remotes/ refs/tags/").split(QLatin1Char(' '));
+    return name == QLatin1String("refs/stash") || std::ranges::any_of(prefixes, [&name](const QString& prefix) {
+               return name.startsWith(prefix);
+           });
+}
+
 } // namespace
 
 namespace kgt
@@ -296,7 +308,7 @@ QStringList GitRevLoglist::refMapArguments()
     return {QStringLiteral("show-ref"), QStringLiteral("-d"), QStringLiteral("--head")};
 }
 
-QHash<QString, QList<GitRef>> GitRevLoglist::parseRefMap(const QByteArray& output, const QString& currentBranch)
+GitRefMap GitRevLoglist::parseRefMap(const QByteArray& output, const QString& currentBranch)
 {
     static const QString peeledSuffix = QStringLiteral("^{}");
     const QString currentRef = QStringLiteral("refs/heads/") + currentBranch;
@@ -319,13 +331,12 @@ QHash<QString, QList<GitRef>> GitRevLoglist::parseRefMap(const QByteArray& outpu
             name.chop(peeledSuffix.size());
         }
         // git log's decorations leave out what show-ref also lists, such as refs/bisect/
-        if (name.startsWith(QLatin1String("refs/heads/")) || name.startsWith(QLatin1String("refs/remotes/")) || name.startsWith(QLatin1String("refs/tags/"))
-            || name == QLatin1String("refs/stash")) {
+        if (isDecoratedRef(name)) {
             names.insert(hash, name);
         }
     }
 
-    QHash<QString, QList<GitRef>> map;
+    GitRefMap map;
     for (const QString& hash : names.uniqueKeys()) {
         QStringList sorted = names.values(hash);
         // git log decorates newest-added first: descending by name, the current branch ahead of the rest

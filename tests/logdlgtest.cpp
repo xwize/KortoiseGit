@@ -379,6 +379,8 @@ private:
     QTimer m_timer;
 };
 
+using MenuHandler = std::function<void(QMenu *)>; // Called with an open context menu
+
 /**
  * Selects a commit, right-clicks it, hands the open menu to @p handle and closes the menu.
  * @param list The list.
@@ -387,7 +389,7 @@ private:
  * @param position Where to click, in the viewport; by default on the commit's Author cell, away from any label.
  * @returns Whether a menu opened.
  */
-bool withMenuOn(GitLogList *list, int row, const std::function<void(QMenu *)>& handle, std::optional<QPoint> position = std::nullopt)
+bool withMenuOn(GitLogList *list, int row, const MenuHandler& handle, std::optional<QPoint> position = std::nullopt)
 {
     list->setCurrentIndex(list->logModel()->index(row, GitLogListModel::MessageColumn));
     bool opened = false;
@@ -399,7 +401,8 @@ bool withMenuOn(GitLogList *list, int row, const std::function<void(QMenu *)>& h
             menu->close();
         }
     });
-    const QPoint pos = position.value_or(list->visualRect(list->logModel()->index(row, GitLogListModel::AuthorColumn)).center());
+    const QModelIndex author = list->logModel()->index(row, GitLogListModel::AuthorColumn);
+    const QPoint pos = position.value_or(list->visualRect(author).center());
     QContextMenuEvent event(QContextMenuEvent::Mouse, pos, list->viewport()->mapToGlobal(pos));
     QApplication::sendEvent(list->viewport(), &event);
     return opened;
@@ -499,10 +502,11 @@ public:
         repo.commitAll(QStringLiteral("First"));
         repo.write(QStringLiteral("f.txt"), "2");
         repo.commitAll(QStringLiteral("Second"));
-        std::ignore = Git(upstream.path()).run({QStringLiteral("init"), QStringLiteral("--quiet"), QStringLiteral("--bare")});
+        const QStringList init = QStringLiteral("init --quiet --bare").split(QLatin1Char(' '));
+        std::ignore = Git(upstream.path()).run(init);
         repo.run({QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("origin"), upstream.path()});
         repo.run({QStringLiteral("branch"), QStringLiteral("feature")});
-        repo.run({QStringLiteral("push"), QStringLiteral("--quiet"), QStringLiteral("origin"), QStringLiteral("feature")});
+        repo.run(QStringLiteral("push --quiet origin feature").split(QLatin1Char(' ')));
     }
 
     QTemporaryDir upstream;
@@ -1323,8 +1327,7 @@ private Q_SLOTS:
     {
         QTest::addColumn<QStringList>("tagArguments");
         QTest::newRow("lightweight") << QStringList{QStringLiteral("tag"), QStringLiteral("v1")};
-        QTest::newRow("annotated")
-            << QStringList{QStringLiteral("tag"), QStringLiteral("-a"), QStringLiteral("-m"), QStringLiteral("Note"), QStringLiteral("v1")};
+        QTest::newRow("annotated") << QStringLiteral("tag -am Note v1").split(QLatin1Char(' '));
     }
 
     void deletesTagsAndUpdatesTheLabels()
@@ -1465,7 +1468,8 @@ private Q_SLOTS:
         // The ref under the mouse, unless it is a remote branch
         const QString mainText = QStringLiteral("Pus&h \"main\"...");
         QCOMPARE(preselected(0, labelPoint(list, 0, QStringLiteral("main")), mainText), QStringLiteral("main"));
-        QCOMPARE(preselected(0, labelPoint(list, 0, QStringLiteral("origin/feature")), QStringLiteral("Pus&h...")), QStringLiteral("feature"));
+        const std::optional<QPoint> remoteLabel = labelPoint(list, 0, QStringLiteral("origin/feature"));
+        QCOMPARE(preselected(0, remoteLabel, QStringLiteral("Pus&h...")), QStringLiteral("feature"));
     }
 
     void selectModeReturnsTheCommit()

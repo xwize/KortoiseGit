@@ -101,16 +101,17 @@ void GitLogList::showLogMenu(QContextMenuEvent *event)
         return;
     }
     const bool fromKeyboard = event->reason() == QContextMenuEvent::Keyboard;
-    const QPoint anchor =
-        fromKeyboard ? viewport()->mapToGlobal(visualRect(m_model->index(rows.constFirst(), GitLogListModel::MessageColumn)).center()) : event->globalPos();
+    const QModelIndex first = m_model->index(rows.constFirst(), GitLogListModel::MessageColumn);
+    const QPoint anchor = fromKeyboard ? viewport()->mapToGlobal(visualRect(first).center()) : event->globalPos();
 
     QMenu menu(this);
     if (rows.size() == 1) {
         const int row = rows.constFirst();
         const GitRevLoglist& rev = m_model->rev(row);
-        addSingleCommitEntries(
-            menu,
-            {.hash = rev.hash, .refs = sortedRefNames(rev), .label = fromKeyboard ? std::nullopt : refLabelAt(row, event->pos()), .isStash = isOnStash(row)});
+        const QStringList refs = sortedRefNames(rev);
+        const std::optional<GitRef> label = fromKeyboard ? std::nullopt : refLabelAt(row, event->pos());
+        const LogMenuTarget target{.hash = rev.hash, .refs = refs, .label = label, .isStash = isOnStash(row)};
+        addSingleCommitEntries(menu, target);
     }
     if (!menu.isEmpty()) {
         menu.exec(anchor);
@@ -139,7 +140,8 @@ bool GitLogList::isOnStash(int row) const
 void GitLogList::addSingleCommitEntries(QMenu& menu, const LogMenuTarget& target)
 {
     if (!target.isStash) {
-        menu.addAction(QIcon::fromTheme(QStringLiteral("tag")), i18n("Create &Tag at this version..."), this, [this, target] {
+        const QIcon icon = QIcon::fromTheme(QStringLiteral("tag"));
+        menu.addAction(icon, i18n("Create &Tag at this version..."), this, [this, target] {
             showingGitErrors(this, [this, &target] {
                 createTag(target);
             });
@@ -159,13 +161,16 @@ bool GitLogList::addPushEntry(QMenu& menu, const LogMenuTarget& target)
     // Shift shows it for any commit (showExtendedMenu)
     const bool showExtendedMenu = QGuiApplication::queryKeyboardModifiers().testFlag(Qt::ShiftModifier);
     // Only if the entry has an associated local branch or tag
-    const bool isLocal =
-        !firstWithPrefix(target.refs, QStringLiteral("refs/heads/")).isEmpty() || !firstWithPrefix(target.refs, QStringLiteral("refs/tags/")).isEmpty();
+    const bool hasBranch = !firstWithPrefix(target.refs, QStringLiteral("refs/heads/")).isEmpty();
+    const bool hasTag = !firstWithPrefix(target.refs, QStringLiteral("refs/tags/")).isEmpty();
+    const bool isLocal = hasBranch || hasTag;
     if (!showExtendedMenu && (target.isStash || !isLocal)) {
         return false;
     }
-    const bool namesLabel = target.label && (target.label->type == GitRef::Type::LocalBranch || target.label->type == GitRef::Type::Tag);
-    const QString text = namesLabel ? i18n("Pus&h \"%1\"...", menuText(target.label->name)) : i18n("Pus&h...");
+    const GitRef::Type labelType = target.label ? target.label->type : GitRef::Type::Other;
+    const bool namesLabel = labelType == GitRef::Type::LocalBranch || labelType == GitRef::Type::Tag;
+    const QString labelName = target.label ? menuText(target.label->name) : QString();
+    const QString text = namesLabel ? i18n("Pus&h \"%1\"...", labelName) : i18n("Pus&h...");
     menu.addAction(QIcon::fromTheme(QStringLiteral("vcs-push")), text, this, [this, target] {
         showingGitErrors(this, [this, &target] {
             push(target);
@@ -249,12 +254,14 @@ void GitLogList::reloadHashMap()
     // CGitLogListBase::ReloadHashMap
     const Git git(m_workingTree);
     try {
-        m_model->setRefMap(GitRevLoglist::parseRefMap(git.run(GitRevLoglist::refMapArguments(), RunMode::ReadOnly), git.currentBranch()));
+        const QByteArray output = git.run(GitRevLoglist::refMapArguments(), RunMode::ReadOnly);
+        m_model->setRefMap(GitRevLoglist::parseRefMap(output, git.currentBranch()));
     } catch (const RuntimeError& e) {
         if (e.error().category != ErrorCategory::Git) {
             throw;
         }
-        KMessageBox::error(this, i18n("Could not get all refs.") + QStringLiteral("\n") + e.error().message, QString(), KMessageBox::Options());
+        const QString message = i18n("Could not get all refs.") + QStringLiteral("\n") + e.error().message;
+        KMessageBox::error(this, message, QString(), KMessageBox::Options());
     }
 }
 

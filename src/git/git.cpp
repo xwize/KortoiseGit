@@ -203,22 +203,29 @@ void Git::deleteRef(const QString& reference) const
     static const QString tagsPrefix = QStringLiteral("refs/tags/");
     static const QString remotesPrefix = QStringLiteral("refs/remotes/");
     QStringList arguments;
+    QString name;
     if (reference.startsWith(headsPrefix)) {
-        arguments = {QStringLiteral("branch"), QStringLiteral("-D"), QStringLiteral("--"), reference.mid(headsPrefix.size())};
+        arguments = {QStringLiteral("branch"), QStringLiteral("-D")};
+        name = reference.mid(headsPrefix.size());
     } else if (reference.startsWith(tagsPrefix)) {
-        arguments = {QStringLiteral("tag"), QStringLiteral("-d"), QStringLiteral("--"), reference.mid(tagsPrefix.size())};
+        arguments = {QStringLiteral("tag"), QStringLiteral("-d")};
+        name = reference.mid(tagsPrefix.size());
     } else if (reference.startsWith(remotesPrefix)) {
-        arguments = {QStringLiteral("branch"), QStringLiteral("-r"), QStringLiteral("-D"), QStringLiteral("--"), reference.mid(remotesPrefix.size())};
+        arguments = {QStringLiteral("branch"), QStringLiteral("-r"), QStringLiteral("-D")};
+        name = reference.mid(remotesPrefix.size());
     } else {
-        throw RuntimeError({.category = ErrorCategory::Git, .message = QStringLiteral("unsupported reference type: %1").arg(reference)});
+        const QString message = QStringLiteral("unsupported reference type: %1").arg(reference);
+        throw RuntimeError({.category = ErrorCategory::Git, .message = message});
     }
+    arguments << QStringLiteral("--") << name;
     std::ignore = run(arguments);
 }
 
 bool Git::isFastForward(const QString& from, const QString& target) const
 {
+    const QStringList arguments{QStringLiteral("merge-base"), QStringLiteral("--is-ancestor"), from, target};
     try {
-        std::ignore = run({QStringLiteral("merge-base"), QStringLiteral("--is-ancestor"), from, target}, RunMode::ReadOnly);
+        std::ignore = run(arguments, RunMode::ReadOnly);
         return true;
     } catch (const RuntimeError& e) {
         if (e.error().category != ErrorCategory::Git) {

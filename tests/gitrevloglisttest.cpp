@@ -156,18 +156,20 @@ private Q_SLOTS:
         repo.run({QStringLiteral("branch"), QStringLiteral("aa")});
         repo.run({QStringLiteral("branch"), QStringLiteral("zz")});
         repo.run({QStringLiteral("tag"), QStringLiteral("light")});
-        repo.run({QStringLiteral("tag"), QStringLiteral("-a"), QStringLiteral("-m"), QStringLiteral("Note"), QStringLiteral("annotated")});
+        repo.run({QStringLiteral("tag"), QStringLiteral("-am"), QStringLiteral("Note"), QStringLiteral("annotated")});
         repo.run({QStringLiteral("update-ref"), QStringLiteral("refs/remotes/origin/main"), QStringLiteral("HEAD")});
         repo.run({QStringLiteral("update-ref"), QStringLiteral("refs/bisect/good"), QStringLiteral("HEAD")});
         if (detached) {
             repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("--detach")});
         }
-        const QByteArray decoration =
-            repo.git().run({QStringLiteral("log"), QStringLiteral("-1"), QStringLiteral("--decorate=full"), QStringLiteral("--format=%D")}, RunMode::ReadOnly);
-        const QString hash = QString::fromLatin1(repo.git().run({QStringLiteral("rev-parse"), QStringLiteral("HEAD")}, RunMode::ReadOnly)).trimmed();
+        const Git& git = repo.git();
+        const QStringList logArguments = QStringLiteral("log -1 --decorate=full --format=%D").split(QLatin1Char(' '));
+        const QByteArray decoration = git.run(logArguments, RunMode::ReadOnly);
+        const QByteArray head = git.run({QStringLiteral("rev-parse"), QStringLiteral("HEAD")}, RunMode::ReadOnly);
+        const QString hash = QString::fromLatin1(head).trimmed();
 
-        const QHash<QString, QList<GitRef>> map =
-            GitRevLoglist::parseRefMap(repo.git().run(GitRevLoglist::refMapArguments(), RunMode::ReadOnly), repo.git().currentBranch());
+        const QByteArray refs = git.run(GitRevLoglist::refMapArguments(), RunMode::ReadOnly);
+        const GitRefMap map = GitRevLoglist::parseRefMap(refs, git.currentBranch());
         QCOMPARE(map.value(hash), GitRevLoglist::parseRefs(QString::fromUtf8(decoration).trimmed()));
     }
 

@@ -49,6 +49,22 @@ namespace
 
 using namespace kgt;
 
+constexpr KMessageBox::Options noNotify = KMessageBox::Options();
+
+/**
+ * Asks a question with two choices and Abort.
+ * @param parent Parent of the question.
+ * @param text The question.
+ * @param first The first choice.
+ * @param second The second choice.
+ * @returns PrimaryAction, SecondaryAction or Cancel.
+ */
+KMessageBox::ButtonCode askOrAbort(QWidget *parent, const QString& text, const KGuiItem& first, const KGuiItem& second)
+{
+    const KGuiItem stop(i18n("A&bort"));
+    return KMessageBox::questionTwoActionsCancel(parent, text, QString(), first, second, stop, QString(), noNotify);
+}
+
 /**
  * Deletes a ref, showing git's error if it can't (the failure branches of CAppUtils::DeleteRef).
  * @param git Runs git.
@@ -64,7 +80,8 @@ bool deleteRefReportingFailure(const Git& git, const QString& ref, QWidget *pare
         if (e.error().category != ErrorCategory::Git) {
             throw;
         }
-        KMessageBox::error(parent, i18n("Could not delete reference.") + QStringLiteral("\n") + e.error().message, QString(), KMessageBox::Options());
+        const QString message = i18n("Could not delete reference.") + QStringLiteral("\n") + e.error().message;
+        KMessageBox::error(parent, message, QString(), noNotify);
         return false;
     }
     return true;
@@ -79,15 +96,13 @@ bool deleteRefReportingFailure(const Git& git, const QString& ref, QWidget *pare
  */
 bool deleteRemoteTrackingBranch(const Git& git, const QString& ref, QWidget *parent)
 {
-    const auto answer = KMessageBox::questionTwoActionsCancel(
-        parent,
-        i18n("The branch \"%1\" is a remote-tracking branch which locally represents a remote branch.\n\nDo you really want to delete it?", ref),
-        QString(),
-        KGuiItem(i18n("&Delete branch on remote && local remote-tracking branch")),
-        KGuiItem(i18n("Delete &local remote-tracking branch")),
-        KGuiItem(i18n("A&bort")),
-        QString(),
-        KMessageBox::Options());
+    const QString question = i18n(
+        "The branch \"%1\" is a remote-tracking branch which locally represents a remote branch.\n\n"
+        "Do you really want to delete it?",
+        ref);
+    const KGuiItem bothItem(i18n("&Delete branch on remote && local remote-tracking branch"));
+    const KGuiItem localItem(i18n("Delete &local remote-tracking branch"));
+    const auto answer = askOrAbort(parent, question, bothItem, localItem);
     if (answer == KMessageBox::SecondaryAction) {
         return deleteRefReportingFailure(git, ref, parent);
     }
@@ -113,21 +128,18 @@ bool deleteRemoteTrackingBranch(const Git& git, const QString& ref, QWidget *par
 bool deleteStash(const Git& git, const QString& ref, QWidget *parent)
 {
     qsizetype count = 0;
+    const QStringList reflog{QStringLiteral("reflog"), QStringLiteral("show"), QStringLiteral("--format=%H"), ref};
     try {
-        count = git.run({QStringLiteral("reflog"), QStringLiteral("show"), QStringLiteral("--format=%H"), ref}, RunMode::ReadOnly).count('\n');
+        count = git.run(reflog, RunMode::ReadOnly).count('\n');
     } catch (const RuntimeError& e) {
         if (e.error().category != ErrorCategory::Git) {
             throw;
         }
     }
-    const auto answer = KMessageBox::questionTwoActionsCancel(parent,
-                                                              i18n("Do you really want to delete ALL %1 stash?", count),
-                                                              QString(),
-                                                              KGuiItem(i18n("&Delete")),
-                                                              KGuiItem(i18n("Drop &one stash")),
-                                                              KGuiItem(i18n("A&bort")),
-                                                              QString(),
-                                                              KMessageBox::Options());
+    const QString question = i18n("Do you really want to delete ALL %1 stash?", count);
+    const KGuiItem allItem(i18n("&Delete"));
+    const KGuiItem oneItem(i18n("Drop &one stash"));
+    const auto answer = askOrAbort(parent, question, allItem, oneItem);
     if (answer != KMessageBox::PrimaryAction && answer != KMessageBox::SecondaryAction) {
         return false;
     }
@@ -504,8 +516,9 @@ bool AppUtils::deleteRef(const Git& git, const QString& ref, QWidget *parent)
     if (ref.startsWith(QLatin1String("refs/heads/")) && !git.isFastForward(ref, QStringLiteral("HEAD"))) {
         message += QStringLiteral("\n\n") + i18n("This branch is not fully merged into HEAD.");
     }
-    const auto answer =
-        KMessageBox::questionTwoActions(parent, message, QString(), KGuiItem(i18n("&Delete")), KGuiItem(i18n("A&bort")), QString(), KMessageBox::Options());
+    const KGuiItem erase(i18n("&Delete"));
+    const KGuiItem stop(i18n("A&bort"));
+    const auto answer = KMessageBox::questionTwoActions(parent, message, QString(), erase, stop, QString(), noNotify);
     return answer == KMessageBox::PrimaryAction && deleteRefReportingFailure(git, ref, parent);
 }
 

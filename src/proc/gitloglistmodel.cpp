@@ -244,7 +244,7 @@ bool GitLogListModel::isRebaseMode() const
     return m_rebaseMode;
 }
 
-void GitLogListModel::setRefMap(const QHash<QString, QList<GitRef>>& refMap)
+void GitLogListModel::setRefMap(const GitRefMap& refMap)
 {
     for (int row = 0; row < m_revs.size(); ++row) {
         const QList<GitRef> refs = refMap.value(m_revs.at(row).hash);

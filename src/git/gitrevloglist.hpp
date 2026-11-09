@@ -60,6 +60,8 @@ struct GitRef {
     [[nodiscard]] static GitRef fromFullName(const QString& fullName);
 };
 
+using GitRefMap = QHash<QString, QList<GitRef>>; // Each commit's refs by full hash (CGitLogListBase::m_HashMap)
+
 /**
  * What git log walks: the walk bits of CGit::GetLogCmd's mask (LOG_INFO_*) and its CFilterData date range.
  */
@@ -154,7 +156,7 @@ struct GitRevLoglist {
      * @param currentBranch The current branch's short name (CGit::GetCurrentBranch), which is marked as current.
      * @returns Each commit's refs by full hash. A detached HEAD gets a GitRef::Type::Head entry.
      */
-    [[nodiscard]] static QHash<QString, QList<GitRef>> parseRefMap(const QByteArray& output, const QString& currentBranch);
+    [[nodiscard]] static GitRefMap parseRefMap(const QByteArray& output, const QString& currentBranch);
 
     /**
      * Parses the complete records at the start of git log's output, so the log can be shown while git still
