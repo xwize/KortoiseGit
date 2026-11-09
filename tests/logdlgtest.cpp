@@ -1272,6 +1272,7 @@ private Q_SLOTS:
         const QString createTag = QStringLiteral("Create &Tag at this version...");
         const QString push = QStringLiteral("Pus&h...");
         const QString sep = QStringLiteral("-");
+        const QString copy = QStringLiteral("Copy to clipboard");
 
         QStringList texts;
         const auto collect = [&texts](QMenu *menu) {
@@ -1279,27 +1280,26 @@ private Q_SLOTS:
         };
         // The current branch is never offered, and is what makes HEAD pushable
         QVERIFY(withMenuOn(list, 0, collect));
-        QCOMPARE(texts, (QStringList{reset, createTag, sep, push, sep}));
+        QCOMPARE(texts, (QStringList{reset, createTag, sep, push, sep, copy}));
         QVERIFY(withMenuOn(list, 1, collect));
-        QCOMPARE(texts, (QStringList{reset, createTag, sep, push, QStringLiteral("&Delete refs/tags/v1"), sep}));
+        const QString deleteTag = QStringLiteral("&Delete refs/tags/v1");
+        QCOMPARE(texts, (QStringList{reset, createTag, sep, push, deleteTag, sep, copy}));
         // No refs: nothing to push or delete
         QVERIFY(withMenuOn(list, 2, collect));
-        QCOMPARE(texts, (QStringList{reset, createTag, sep}));
+        QCOMPARE(texts, (QStringList{reset, createTag, sep, copy}));
 
-        // None of the entries are for several commits
+        // Only Copy to clipboard is for several commits
         list->setCurrentIndex(list->logModel()->index(0, 0));
         list->selectAll();
-        bool opened = false;
-        QTimer::singleShot(0, list, [&opened] {
+        QTimer::singleShot(0, list, [&collect] {
             auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
-            if (menu) {
-                opened = true;
-                menu->close();
-            }
+            QVERIFY(menu);
+            collect(menu);
+            menu->close();
         });
         QContextMenuEvent event(QContextMenuEvent::Mouse, QPoint(5, 5), list->viewport()->mapToGlobal(QPoint(5, 5)));
         QApplication::sendEvent(list->viewport(), &event);
-        QVERIFY(!opened);
+        QCOMPARE(texts, (QStringList{copy}));
     }
 
     void resetNeedsAWorkingTree()
@@ -1417,10 +1417,13 @@ private Q_SLOTS:
             texts = entryTexts(menu);
         };
         QVERIFY(withMenuOn(list, 0, collect));
-        QCOMPARE(texts, (QStringList{QStringLiteral("-"), QStringLiteral("&Delete refs/stash"), QStringLiteral("-")}));
+        const QString sep = QStringLiteral("-");
+        const QString copy = QStringLiteral("Copy to clipboard");
+        QCOMPARE(texts, (QStringList{sep, QStringLiteral("&Delete refs/stash"), sep, copy}));
         // The commit holding the stash's index is on the stash too, when listed right below it
         QCOMPARE(model->rev(1).hash, model->rev(0).parents.at(1));
-        QVERIFY(!withMenuOn(list, 1, [](QMenu *) { }));
+        QVERIFY(withMenuOn(list, 1, collect));
+        QCOMPARE(texts, (QStringList{sep, copy}));
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
