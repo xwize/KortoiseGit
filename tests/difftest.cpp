@@ -156,6 +156,19 @@ private Q_SLOTS:
         QCOMPARE(DiffCommand::invocation(repo.filePath(file()), {}, start, {}).arguments, difftool({QStringLiteral("HEAD"), QStringLiteral("--"), file()}));
     }
 
+    void dirDiffOfCommits()
+    {
+        const QString commit = QStringLiteral("abc");
+        const QString parent = QStringLiteral("def");
+        const QString dirDiff = QStringLiteral("--dir-diff");
+        const QString dashes = QStringLiteral("--");
+        const QString dir = QStringLiteral("dir");
+
+        // Whole tree against the working tree, then the parent as the base of a commit, limited to a folder
+        QCOMPARE(GitDiff::dirArguments({}, {}, commit), difftool({dirDiff, commit}));
+        QCOMPARE(GitDiff::dirArguments({dir}, commit, parent), difftool({dirDiff, parent, commit, dashes, dir}));
+    }
+
     void twoFiles()
     {
         const QTemporaryDir notARepo;

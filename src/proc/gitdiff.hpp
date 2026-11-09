@@ -48,6 +48,16 @@ public:
     [[nodiscard]] static QStringList diffArguments(const QString& path, const QString& path2, const QString& rev1, const QString& rev2);
 
     /**
+     * Compares two versions of a whole tree in one run of the diff tool, for the commit comparisons that
+     * CGitDiff::DiffCommit shows in a CFileDiffDlg.
+     * @param paths The files and folders to limit it to, relative to the working tree root; empty for all of them.
+     * @param rev1 The right-hand revision; empty for the working tree.
+     * @param rev2 The left-hand revision.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList dirArguments(const QStringList& paths, const QString& rev1, const QString& rev2);
+
+    /**
      * Ported from CGitDiff::DiffNull, for a file added in the working tree: compares it with nothing.
      * @param path The file.
      * @returns The arguments after "git".
