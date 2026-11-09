@@ -18,6 +18,7 @@
 #include "mergeabortdlg.hpp"
 #include "progressdlg.hpp"
 #include "pushdlg.hpp"
+#include "resetdlg.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KConfigGroup>
@@ -328,6 +329,15 @@ bool AppUtils::reset(const QString& workingTree, ResetType type, const QString& 
     ProgressDlg progress(workingTree, parent);
     progress.addGitCmd(resetArguments(type, resetTo));
     return progress.exec() == QDialog::Accepted && progress.gitStatus() == 0;
+}
+
+bool AppUtils::gitReset(const QString& workingTree, const QString& ref, QWidget *parent)
+{
+    ResetDlg dlg(Git(workingTree), ref, parent);
+    if (dlg.exec() != QDialog::Accepted) {
+        return false;
+    }
+    return reset(workingTree, dlg.resetType(), dlg.resetToVersion(), parent);
 }
 
 bool AppUtils::mergeAbort(const QString& workingTree, QWidget *parent)

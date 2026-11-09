@@ -136,6 +136,15 @@ public:
     static bool reset(const QString& workingTree, ResetType type, const QString& resetTo, QWidget *parent = nullptr);
 
     /**
+     * Ported from CAppUtils::GitReset: asks what to reset to and how in ResetDlg, then resets.
+     * @param workingTree The working tree's root or the bare repository.
+     * @param ref What the dialog starts at.
+     * @param parent Parent of the dialogs.
+     * @returns True if the reset succeeded.
+     */
+    static bool gitReset(const QString& workingTree, const QString& ref, QWidget *parent = nullptr);
+
+    /**
      * Ported from CAppUtils::MergeAbort: asks how in MergeAbortDlg, then resets to HEAD.
      * @param workingTree The working tree.
      * @param parent Parent of the dialogs.

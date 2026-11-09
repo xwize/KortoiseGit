@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "logdlg.hpp"
+#include "chooseversion.hpp"
 #include "gitloglist.hpp"
 #include "gitstatuslistctrl.hpp"
 #include "gitstatuslistmodel.hpp"
+#include "progressdlg.hpp"
 #include "pushdlg.hpp"
+#include "resetdlg.hpp"
 #include "testrepo.hpp"
 
 #include <KConfigGroup>
@@ -26,6 +29,7 @@
 #include <QPalette>
 #include <QPixmap>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -1264,6 +1268,7 @@ private Q_SLOTS:
         QVERIFY(waitForLog(dlg));
         QVERIFY(showDialog(dlg));
         GitLogList *list = dlg.logList();
+        const QString reset = QStringLiteral("R&eset \"main\" to this...");
         const QString createTag = QStringLiteral("Create &Tag at this version...");
         const QString push = QStringLiteral("Pus&h...");
         const QString sep = QStringLiteral("-");
@@ -1274,12 +1279,12 @@ private Q_SLOTS:
         };
         // The current branch is never offered, and is what makes HEAD pushable
         QVERIFY(withMenuOn(list, 0, collect));
-        QCOMPARE(texts, (QStringList{createTag, sep, push, sep}));
+        QCOMPARE(texts, (QStringList{reset, createTag, sep, push, sep}));
         QVERIFY(withMenuOn(list, 1, collect));
-        QCOMPARE(texts, (QStringList{createTag, sep, push, QStringLiteral("&Delete refs/tags/v1"), sep}));
+        QCOMPARE(texts, (QStringList{reset, createTag, sep, push, QStringLiteral("&Delete refs/tags/v1"), sep}));
         // No refs: nothing to push or delete
         QVERIFY(withMenuOn(list, 2, collect));
-        QCOMPARE(texts, (QStringList{createTag, sep}));
+        QCOMPARE(texts, (QStringList{reset, createTag, sep}));
 
         // None of the entries are for several commits
         list->setCurrentIndex(list->logModel()->index(0, 0));
@@ -1295,6 +1300,101 @@ private Q_SLOTS:
         QContextMenuEvent event(QContextMenuEvent::Mouse, QPoint(5, 5), list->viewport()->mapToGlobal(QPoint(5, 5)));
         QApplication::sendEvent(list->viewport(), &event);
         QVERIFY(!opened);
+    }
+
+    void resetNeedsAWorkingTree()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        const QTemporaryDir bareDir;
+        QVERIFY(bareDir.isValid());
+        const QStringList clone = QStringLiteral("clone --quiet --bare").split(QLatin1Char(' '));
+        repo.run(clone + QStringList{repo.path(), bareDir.path()});
+
+        LogDlg dlg({bareDir.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        QStringList texts;
+        QVERIFY(withMenuOn(dlg.logList(), 0, [&texts](QMenu *menu) {
+            texts = entryTexts(menu);
+        }));
+        QVERIFY(texts.contains(QStringLiteral("Create &Tag at this version...")));
+        QVERIFY(!texts.contains(QStringLiteral("R&eset \"main\" to this...")));
+
+        // CResetDlg::OnInitDialog: only Soft is left
+        const ResetDlg resetDlg(Git(bareDir.path()), QStringLiteral("HEAD"));
+        QCOMPARE(resetDlg.resetType(), ResetType::Soft);
+        const auto isEnabled = [&resetDlg](const QString& start) {
+            const QList<QRadioButton *> radios = resetDlg.findChildren<QRadioButton *>();
+            const auto found = std::ranges::find_if(radios, [&start](const QRadioButton *radio) {
+                return radio->text().startsWith(start);
+            });
+            return found != radios.cend() && (*found)->isEnabled();
+        };
+        QVERIFY(isEnabled(QStringLiteral("&Soft")));
+        QVERIFY(!isEnabled(QStringLiteral("&Mixed")));
+        QVERIFY(!isEnabled(QStringLiteral("&Hard")));
+    }
+
+    void resetMovesTheLabelsAndKeepsTheCommits()
+    {
+        const TestRepo repo;
+        for (int i = 0; i < 3; ++i) {
+            repo.write(QStringLiteral("f.txt"), QByteArray::number(i));
+            repo.commitAll(QStringLiteral("Commit %1").arg(i));
+        }
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+        const GitLogListModel *model = list->logModel();
+        const QString newest = model->rev(0).hash;
+        const QString oldest = model->rev(2).hash;
+        const auto head = [&repo] {
+            return QString::fromLatin1(repo.git().run({QStringLiteral("rev-parse"), QStringLiteral("HEAD")})).trimmed();
+        };
+        const auto hasMain = [model](int row) {
+            return std::ranges::any_of(model->rev(row).refs, [](const GitRef& ref) {
+                return ref.name == QLatin1String("main");
+            });
+        };
+
+        // Answers ResetDlg once it has loaded, and closes the progress dialog when the reset is done
+        QString startVersion;
+        ResetType startType = ResetType::Merge;
+        const auto chooseReset = [&](bool accepted) {
+            QTimer answerer;
+            QObject::connect(&answerer, &QTimer::timeout, &answerer, [&] {
+                QWidget *modal = QApplication::activeModalWidget();
+                auto *resetDlg = qobject_cast<ResetDlg *>(modal);
+                auto *progress = qobject_cast<ProgressDlg *>(modal);
+                if (resetDlg && !resetDlg->chooseVersion()->isLoading()) {
+                    startVersion = resetDlg->chooseVersion()->versionName();
+                    startType = resetDlg->resetType();
+                    accepted ? resetDlg->accept() : resetDlg->reject();
+                } else if (progress && progress->isDone()) {
+                    progress->accept();
+                }
+            });
+            answerer.start(10);
+            return withMenuOn(list, 2, [](QMenu *menu) {
+                entry(menu, QStringLiteral("R&eset \"main\" to this..."))->trigger();
+            });
+        };
+
+        QVERIFY(chooseReset(false));
+        QCOMPARE(startVersion, oldest);
+        QCOMPARE(startType, ResetType::Mixed);
+        QCOMPARE(head(), newest);
+        QVERIFY(hasMain(0));
+
+        QVERIFY(chooseReset(true));
+        QCOMPARE(head(), oldest);
+        QVERIFY(!hasMain(0));
+        QVERIFY(hasMain(2));
+        QCOMPARE(model->rowCount(), 3);
+        QVERIFY(!list->isBusy());
     }
 
     void stashEntriesCanOnlyBeDeleted()

@@ -298,6 +298,7 @@ private:
     void onCopyTagInfoFinished();
     void finishCopyIfReady();
     void cancelCopy();
+    void resetToCommit(const LogMenuTarget& target);
     void createTag(const LogMenuTarget& target);
     void push(const LogMenuTarget& target);
     void deleteRefs(const QStringList& refs);
