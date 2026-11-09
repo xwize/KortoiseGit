@@ -74,6 +74,40 @@ private Q_SLOTS:
         TestRepo::isolateGit();
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void withDefaultToolChoosesTheTool_data()
+    {
+        QTest::addColumn<QString>("diffTool");
+        QTest::addColumn<QString>("mergeTool");
+        QTest::addColumn<QStringList>("installed");
+        QTest::addColumn<QString>("toolOption");
+        const QString vimdiff = QStringLiteral("vimdiff");
+        const QStringList both{QStringLiteral("kdiff3"), QStringLiteral("meld")};
+        const QStringList kdiff3{QStringLiteral("kdiff3")};
+        const QStringList meld{QStringLiteral("meld")};
+        QTest::newRow("meld before kdiff3") << QString() << QString() << both << QStringLiteral("--tool=meld");
+        QTest::newRow("meld alone") << QString() << QString() << meld << QStringLiteral("--tool=meld");
+        QTest::newRow("kdiff3 alone") << QString() << QString() << kdiff3 << QStringLiteral("--tool=kdiff3");
+        QTest::newRow("neither installed") << QString() << QString() << QStringList() << QString();
+        QTest::newRow("diff.tool wins") << vimdiff << QString() << both << QString();
+        QTest::newRow("merge.tool is left to git") << QString() << vimdiff << both << QString();
+    }
+
+    void withDefaultToolChoosesTheTool()
+    {
+        QFETCH(const QString, diffTool);
+        QFETCH(const QString, mergeTool);
+        QFETCH(const QStringList, installed);
+        QFETCH(const QString, toolOption);
+        const auto isInstalled = [&installed](const QString& tool) {
+            return installed.contains(tool);
+        };
+        const QString rev = QStringLiteral("abc");
+        const QStringList arguments = GitDiff::diffArguments(file(), file(), {}, rev);
+        const QStringList expected = toolOption.isEmpty() ? arguments : difftool({toolOption, rev, QStringLiteral("--"), file()});
+        QCOMPARE(GitDiff::withDefaultTool(arguments, diffTool, mergeTool, isInstalled), expected);
+    }
+
     void diffArguments()
     {
         const QString other = QStringLiteral("old.txt");

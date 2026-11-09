@@ -54,18 +54,18 @@ Configure Dolphin > Interface > Version Control, tick KortoiseGit and untick Git
 
 KortoiseGit has no diff or merge tool of its own. Diff and Edit conflicts run `git difftool` and `git mergetool`, so
 you need one of these tools installed. [KDiff3](https://apps.kde.org/kdiff3/) is the best fit for resolving conflicts,
-because it lets you choose a side for each conflict:
+because it lets you choose a side for each conflict, and [Meld](https://meldmerge.org/) is the best fit for diffs:
 
 ```sh
-sudo pacman -S kdiff3
+sudo pacman -S kdiff3 meld
 ```
 
-Once it's installed there is nothing to configure. Each tool is chosen like this:
+Once they're installed there is nothing to configure. Each tool is chosen like this:
 
 | Action | Tool used |
 |---|---|
 | **Edit conflicts** | Your `merge.tool` setting if you have one, otherwise KDiff3, then [Meld](https://meldmerge.org/). If neither is installed, KortoiseGit tells you so. |
-| **Diff** | Your `diff.tool` setting if you have one, otherwise the first tool git finds, which tries KDiff3 before Meld. If git finds none, nothing opens. |
+| **Diff** | Your `diff.tool`, then your `merge.tool`, otherwise Meld, then KDiff3, then any other tool git finds. |
 
 Your own settings always win, so to use a different tool for either action, set it in git:
 
