@@ -119,6 +119,8 @@ target_sources(kgtproc PRIVATE
     rebasedlg_rebase.cpp
     refleaflistmodel.cpp
     refleaflistmodel.hpp
+    resetdlg.cpp
+    resetdlg.hpp
     revertdlg.cpp
     revertdlg.hpp
     shadowtree.cpp
@@ -132,6 +134,7 @@ target_link_libraries(kgtproc PUBLIC
     Qt6::Core
     Qt6::Widgets
     KF6::ConfigCore
+    KF6::ConfigGui
     KF6::CoreAddons
     KF6::I18n
     KF6::KIOGui
