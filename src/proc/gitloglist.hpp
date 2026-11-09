@@ -251,6 +251,7 @@ private:
     void addSingleCommitEntries(QMenu& menu, const LogMenuTarget& target);
     [[nodiscard]] bool addPushEntry(QMenu& menu, const LogMenuTarget& target);
     [[nodiscard]] bool addDeleteEntries(QMenu& menu, const LogMenuTarget& target);
+    void resetToCommit(const LogMenuTarget& target);
     void createTag(const LogMenuTarget& target);
     void push(const LogMenuTarget& target);
     void deleteRefs(const QStringList& refs);

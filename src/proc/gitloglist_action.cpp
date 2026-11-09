@@ -14,6 +14,7 @@
 #include "apputils.hpp"
 #include "createbranchtagdlg.hpp"
 #include "git/git.hpp"
+#include "git/gitadmindir.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KLocalizedString>
@@ -139,6 +140,16 @@ bool GitLogList::isOnStash(int row) const
 
 void GitLogList::addSingleCommitEntries(QMenu& menu, const LogMenuTarget& target)
 {
+    // m_hasWC: CLogDlg sets it for anything but a bare repository
+    if (!target.isStash && !GitAdminDir::isBareRepo(m_workingTree)) {
+        const QString text = i18n("R&eset \"%1\" to this...", menuText(Git(m_workingTree).currentBranch()));
+        menu.addAction(QIcon::fromTheme(QStringLiteral("edit-reset")), text, this, [this, target] {
+            showingGitErrors(this, [this, &target] {
+                resetToCommit(target);
+            });
+        });
+    }
+
     if (!target.isStash) {
         const QIcon icon = QIcon::fromTheme(QStringLiteral("tag"));
         menu.addAction(icon, i18n("Create &Tag at this version..."), this, [this, target] {
@@ -204,6 +215,14 @@ bool GitLogList::addDeleteEntries(QMenu& menu, const LogMenuTarget& target)
         deleteRefs(refs);
     });
     return true;
+}
+
+void GitLogList::resetToCommit(const LogMenuTarget& target)
+{
+    // ID_RESET. ResetWcRev(true) only refreshes the working tree row, which this list doesn't have yet
+    if (AppUtils::gitReset(m_workingTree, target.hash, this)) {
+        reloadHashMap();
+    }
 }
 
 void GitLogList::createTag(const LogMenuTarget& target)
