@@ -49,7 +49,8 @@ Configure Dolphin > Interface > Version Control, tick KortoiseGit and untick Git
 - **Rebase**, with pick, squash, edit and skip for each commit
 - **Browse References**, to filter and delete branches and tags
 - **Clone** and **Create repository**
-- **Settings:** your git name, e-mail and signing key, the repository's remotes (also reached through Manage Remotes in
+- **Settings:** your git name, e-mail and signing key, line endings (AutoCrLf, SafeCrLf), QuotePath and Prune, the
+  repository's remotes (also reached through Manage Remotes in
   Push and Pull/Fetch), the diff and merge tools, and clearing saved histories, dialog sizes and "Don't show again"
   answers
 
