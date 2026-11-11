@@ -272,6 +272,43 @@ private Q_SLOTS:
         TestRepo::isolateGit();
     }
 
+    void startsWithTemplateFollowedByMergeMsg()
+    {
+        // CGit::LoadTextFile appends: commit.template, then MERGE_MSG, each normalised to end in one newline
+        const TestRepo repo;
+        makeConflict(repo);
+        repo.write(QStringLiteral("template.txt"), "Template\r\n\r\n");
+        repo.run({QStringLiteral("config"), QStringLiteral("commit.template"), repo.filePath(QStringLiteral("template.txt"))});
+
+        const CommitDlg dlg({repo.path()});
+        const QString message = dlg.messageEdit()->toPlainText();
+        QVERIFY2(message.startsWith(QStringLiteral("Template\nMerge branch 'side'")), qPrintable(message));
+        QVERIFY2(message.contains(QStringLiteral("# Conflicts:")), qPrintable(message));
+        QVERIFY(dlg.findChild<KMessageWidget *>()->isHidden());
+    }
+
+    void givenMessageIsKept()
+    {
+        const TestRepo repo;
+        makeConflict(repo);
+
+        const CommitDlg dlg({repo.path()}, QStringLiteral("Given"));
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Given"));
+    }
+
+    void unreadableTemplateIsReported()
+    {
+        const TestRepo repo;
+        commitTwoFiles(repo);
+        repo.run({QStringLiteral("config"), QStringLiteral("commit.template"), repo.filePath(QStringLiteral("missing.txt"))});
+
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(dlg.messageEdit()->toPlainText().isEmpty());
+        const auto *errorView = dlg.findChild<KMessageWidget *>();
+        QVERIFY(!errorView->isHidden());
+        QVERIFY2(errorView->text().contains(QStringLiteral("commit.template")), qPrintable(errorView->text()));
+    }
+
     void listsChangesWithTrackedChecked()
     {
         const TestRepo repo;

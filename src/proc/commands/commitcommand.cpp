@@ -5,8 +5,8 @@
 
 /**
  * @file
- * Ported from TortoiseGit src/TortoiseProc/Commands/CommitCommand.cpp and CAppUtils::Commit. The log message
- * options (--logmsg, --logmsgfile) and the bug ID come with the later commit dialog cards.
+ * Ported from TortoiseGit src/TortoiseProc/Commands/CommitCommand.cpp and CAppUtils::Commit. --logmsgfile and the
+ * bug ID come with the later commit dialog cards.
  */
 
 #include "commands/commitcommand.hpp"
@@ -23,7 +23,8 @@ CommitCommand::CommitCommand()
 
 bool CommitCommand::execute()
 {
-    CommitDlg dlg(paths());
+    // LoadLogMessage: the message passed with --logmsg
+    CommitDlg dlg(paths(), value(QStringLiteral("logmsg")));
     return dlg.exec() == QDialog::Accepted;
 }
 

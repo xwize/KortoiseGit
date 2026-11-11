@@ -71,10 +71,12 @@ class CommitDlg : public QDialog
 public:
     /**
      * @param paths The absolute paths the commit was asked for, all in one working tree.
+     * @param logMessage The message to start with (TortoiseGit's /logmsg), or empty for commit.template, SQUASH_MSG and
+     *   MERGE_MSG.
      * @param parent Parent widget, or nullptr for a top-level dialog.
      * @throws RuntimeError (category Git) if the first path is not inside a working tree.
      */
-    explicit CommitDlg(const QStringList& paths, QWidget *parent = nullptr);
+    explicit CommitDlg(const QStringList& paths, const QString& logMessage = QString(), QWidget *parent = nullptr);
     ~CommitDlg() override;
 
     CommitDlg(const CommitDlg&) = delete;
@@ -141,6 +143,11 @@ Q_SIGNALS:
 
 private:
     void createWidgets();
+    /**
+     * Puts the starting message in the editor, and shows any file that couldn't be loaded.
+     * @param logMessage The message passed in, which wins if it isn't empty.
+     */
+    void loadInitialMessage(const QString& logMessage);
     void refresh();
     void onListLoaded();
     void onAmendClicked(bool checked);
