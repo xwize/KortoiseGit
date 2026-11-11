@@ -4,6 +4,10 @@
 #include "commitdlg.hpp"
 #include "gitstatuslistctrl.hpp"
 #include "gitstatuslistmodel.hpp"
+#include "historycombo.hpp"
+#include "historydlg.hpp"
+#include "reghistory.hpp"
+#include "settings/setsaveddatapage.hpp"
 #include "testrepo.hpp"
 #include "utils/runtimeerror.hpp"
 
@@ -12,9 +16,12 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTest>
 #include <QTimer>
 
@@ -246,6 +253,54 @@ int commitCount(const TestRepo& repo)
  * @param dlg The dialog.
  * @returns Whether the list reloaded.
  */
+/**
+ * @returns The stored commit messages, newest first.
+ */
+QStringList storedMessages()
+{
+    return CommitDlg::historyGroup().readEntry(QStringLiteral("logmsgs"), QStringList());
+}
+
+/**
+ * @param messages The commit messages to store, newest first.
+ */
+void storeMessages(const QStringList& messages)
+{
+    KConfigGroup group = CommitDlg::historyGroup();
+    group.writeEntry(QStringLiteral("logmsgs"), messages);
+    group.sync();
+}
+
+/**
+ * @param menu A menu.
+ * @param text An action's text, with its accelerator.
+ * @returns The action, or nullptr.
+ */
+QAction *findAction(const QMenu *menu, const QString& text)
+{
+    const QList<QAction *> actions = menu->actions();
+    const auto found = std::ranges::find_if(actions, [&text](const QAction *action) {
+        return action->text() == text;
+    });
+    return found == actions.cend() ? nullptr : *found;
+}
+
+/**
+ * Picks rows of the Log History dialog once it opens, and accepts it.
+ * @param rows The rows to select.
+ */
+void pickFromHistoryDlg(const QList<int>& rows)
+{
+    QTimer::singleShot(0, [rows] {
+        auto *dlg = qobject_cast<HistoryDlg *>(QApplication::activeModalWidget());
+        QVERIFY(dlg);
+        for (const int row : rows) {
+            dlg->list()->item(row)->setSelected(true);
+        }
+        dlg->accept();
+    });
+}
+
 bool clickAmend(const CommitDlg& dlg)
 {
     if (!dlg.amendButton()->isEnabled()) {
@@ -269,7 +324,173 @@ class CommitDlgTest : public QObject
 private Q_SLOTS:
     void initTestCase()
     {
+        QStandardPaths::setTestModeEnabled(true);
         TestRepo::isolateGit();
+    }
+
+    void init()
+    {
+        KConfigGroup histories = HistoryCombo::allHistories();
+        histories.deleteGroup();
+        histories.sync();
+    }
+
+    void regHistoryIsCappedAndNewestFirst()
+    {
+        // CRegHistory: AddEntry moves a duplicate to the front; at most MaxHistoryItems are kept
+        RegHistory history;
+        history.load(CommitDlg::historyGroup(), QStringLiteral("logmsgs"));
+        for (int i = 0; i < 30; ++i) {
+            QVERIFY(history.addEntry(QString::number(i)));
+            QVERIFY(history.save());
+        }
+        QVERIFY(!history.addEntry(QStringLiteral("10")));
+        QVERIFY(history.save());
+        RegHistory reloaded;
+        QCOMPARE(reloaded.load(CommitDlg::historyGroup(), QStringLiteral("logmsgs")), 25);
+        QCOMPARE(reloaded.entry(0), QStringLiteral("10"));
+        QCOMPARE(reloaded.entry(1), QStringLiteral("29"));
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void addSignOff_data()
+    {
+        QTest::addColumn<QString>("message");
+        QTest::addColumn<QString>("expected");
+        QTest::newRow("subject") << QStringLiteral("Subject\n\n") << QStringLiteral("Subject\n\nSigned-off-by: A <a@b>\n");
+        QTest::newRow("after trailer") << QStringLiteral("Subject\n\nAcked-by: X <x@y>")
+                                       << QStringLiteral("Subject\n\nAcked-by: X <x@y>\nSigned-off-by: A <a@b>\n");
+        QTest::newRow("already there") << QStringLiteral("Subject\n\nSigned-off-by: A <a@b>") << QStringLiteral("Subject\n\nSigned-off-by: A <a@b>");
+        QTest::newRow("body mentions by:") << QStringLiteral("Subject\n\nWritten by: me")
+                                           << QStringLiteral("Subject\n\nWritten by: me\n\nSigned-off-by: A <a@b>\n");
+        QTest::newRow("body") << QStringLiteral("Subject\n\nBody") << QStringLiteral("Subject\n\nBody\n\nSigned-off-by: A <a@b>\n");
+    }
+
+    void addSignOff()
+    {
+        QFETCH(const QString, message);
+        QFETCH(const QString, expected);
+        QCOMPARE(CommitDlg::addSignOff(message, QStringLiteral("Signed-off-by: A <a@b>")), expected);
+    }
+
+    void signOffButtonAddsTheLineOnce()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        dlg.messageEdit()->setPlainText(QStringLiteral("Subject"));
+        dlg.signOffButton()->click();
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Subject\n\nSigned-off-by: Test <test@example.com>\n"));
+        dlg.signOffButton()->click();
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Subject\n\nSigned-off-by: Test <test@example.com>\n"));
+        // Undoable in one step
+        dlg.messageEdit()->undo();
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Subject"));
+    }
+
+    void commitStoresTheMessage()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("Base"));
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+        {
+            CommitDlg dlg({repo.path()});
+            QVERIFY(waitForList(dlg));
+            const std::unique_ptr<QMenu> menu(dlg.createMessageContextMenu(nullptr));
+            QVERIFY(!findAction(menu.get(), QStringLiteral("Paste &last commit message")));
+            QVERIFY(commitAndWait(dlg, QStringLiteral("First")));
+        }
+        QCOMPARE(storedMessages(), QStringList{QStringLiteral("First")});
+
+        repo.write(QStringLiteral("a.txt"), "b\n");
+        CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        dlg.messageEdit()->setPlainText(QStringLiteral("Second: "));
+        dlg.messageEdit()->moveCursor(QTextCursor::End);
+        const std::unique_ptr<QMenu> menu(dlg.createMessageContextMenu(nullptr));
+        QAction *pasteLast = findAction(menu.get(), QStringLiteral("Paste &last commit message"));
+        QVERIFY(pasteLast);
+        QVERIFY(findAction(menu.get(), QStringLiteral("Paste r&ecent message...")));
+        pasteLast->trigger();
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Second: First"));
+        QVERIFY(commitAndWait(dlg, QStringLiteral("Second")));
+        QCOMPARE(storedMessages(), (QStringList{QStringLiteral("Second"), QStringLiteral("First")}));
+    }
+
+    void cancelStoresAChangedMessage()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("template.txt"), "Template\n");
+        repo.run({QStringLiteral("config"), QStringLiteral("commit.template"), repo.filePath(QStringLiteral("template.txt"))});
+        {
+            CommitDlg dlg({repo.path()});
+            dlg.reject();
+        }
+        // Only the template: nothing to keep
+        QVERIFY(storedMessages().isEmpty());
+        CommitDlg dlg({repo.path()});
+        dlg.messageEdit()->setPlainText(QStringLiteral("Typed"));
+        dlg.reject();
+        QCOMPARE(storedMessages(), QStringList{QStringLiteral("Typed")});
+    }
+
+    void recentMessageReplacesTheTemplate()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("template.txt"), "Template\n");
+        repo.run({QStringLiteral("config"), QStringLiteral("commit.template"), repo.filePath(QStringLiteral("template.txt"))});
+        storeMessages({QStringLiteral("Newest\n\nBody"), QStringLiteral("Older")});
+
+        CommitDlg dlg({repo.path()});
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Template\n"));
+        const std::unique_ptr<QMenu> menu(dlg.createMessageContextMenu(nullptr));
+        pickFromHistoryDlg({1});
+        findAction(menu.get(), QStringLiteral("Paste r&ecent message..."))->trigger();
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Older"));
+
+        // Not the template any more: inserted at the cursor, followed by a newline. Several are joined by blank lines.
+        dlg.messageEdit()->setPlainText(QStringLiteral("Typed\n"));
+        dlg.messageEdit()->moveCursor(QTextCursor::End);
+        pickFromHistoryDlg({0, 1});
+        findAction(menu.get(), QStringLiteral("Paste r&ecent message..."))->trigger();
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Typed\nNewest\n\nBody\n\nOlder\n"));
+    }
+
+    void historyDlgShowsOneLineAndDeletes()
+    {
+        storeMessages({QStringLiteral("Subject\n\nBody"), QStringLiteral("Older")});
+        RegHistory history;
+        history.load(CommitDlg::historyGroup(), QStringLiteral("logmsgs"));
+        HistoryDlg dlg(history);
+        QCOMPARE(dlg.list()->count(), 2);
+        QCOMPARE(dlg.list()->item(0)->text(), QStringLiteral("Subject  Body"));
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&dlg));
+        dlg.list()->setCurrentRow(0);
+        dlg.list()->setFocus();
+        QTest::keyClick(dlg.list(), Qt::Key_Delete);
+        QCOMPARE(dlg.list()->count(), 1);
+        QCOMPARE(storedMessages(), QStringList{QStringLiteral("Older")});
+    }
+
+    void savedDataCountsCommitMessagesApart()
+    {
+        storeMessages({QStringLiteral("One"), QStringLiteral("Two")});
+        KConfigGroup urls = HistoryCombo::historyGroup(QStringLiteral("PullURLS"));
+        urls.writeEntry(QStringLiteral("url"), QStringList{QStringLiteral("https://example.com/a.git")});
+        urls.sync();
+        QCOMPARE(SetSavedDataPage::logHistoryCount(), (std::pair<qsizetype, qsizetype>{2, 1}));
+        QCOMPARE(SetSavedDataPage::historyCount(), 1);
+
+        const SetSavedDataPage page;
+        const QList<QPushButton *> clears = page.findChildren<QPushButton *>();
+        QVERIFY(clears.size() >= 2);
+        // Rows in TortoiseGit's order: URL history, then the log messages
+        clears.at(1)->click();
+        QCOMPARE(SetSavedDataPage::logHistoryCount(), (std::pair<qsizetype, qsizetype>{0, 0}));
+        QCOMPARE(SetSavedDataPage::historyCount(), 1);
     }
 
     void startsWithTemplateFollowedByMergeMsg()

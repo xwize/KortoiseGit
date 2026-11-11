@@ -12,6 +12,8 @@
 
 #include "settings/settingsproppage.hpp"
 
+#include <utility>
+
 class QPushButton;
 
 namespace kgt
@@ -34,9 +36,14 @@ public:
     explicit SetSavedDataPage(QWidget *parent = nullptr);
 
     /**
-     * @returns How many history entries are stored, in every history of the "History" group.
+     * @returns How many history entries are stored, in every history of the "History" group but the commit messages.
      */
     [[nodiscard]] static qsizetype historyCount();
+
+    /**
+     * @returns How many commit messages are stored, and in how many histories.
+     */
+    [[nodiscard]] static std::pair<qsizetype, qsizetype> logHistoryCount();
 
     /**
      * @returns How many dialogs have a stored size.
@@ -55,6 +62,11 @@ private:
     void onUrlHistClear();
 
     /**
+     * Ported from CSetSavedDataPage::OnBnClickedLoghistclear.
+     */
+    void onLogHistClear();
+
+    /**
      * Ported from CSetSavedDataPage::OnBnClickedResizablehistclear.
      */
     void onResizableHistClear();
@@ -65,6 +77,7 @@ private:
     void onStoredDecisionsClear();
 
     QPushButton *m_urlHistClear;
+    QPushButton *m_logHistClear;
     QPushButton *m_resizableHistClear;
     QPushButton *m_storedDecisionsClear;
 };
