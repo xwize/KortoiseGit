@@ -12,6 +12,7 @@
 
 #include "apputils.hpp"
 #include "git/gitadmindir.hpp"
+#include "historycombo.hpp"
 
 #include <KConfigGroup>
 #include <KLocalizedString>
@@ -37,75 +38,10 @@ namespace
 
 using namespace kgt;
 
-// CHistoryCombo's MAX_HISTORY_ITEMS
-constexpr qsizetype maxHistoryItems = 25;
-
-/**
- * A history of a CHistoryCombo, such as TortoiseGit's History\PullURLS with its entries url0, url1, ...
- */
-struct History {
-    QLatin1StringView name; // The history's name, such as "PullURLS"
-    QLatin1StringView key; // The key prefix TortoiseGit uses, such as "url"; here one list
-};
-
-constexpr History pullUrls{.name = QLatin1StringView("PullURLS"), .key = QLatin1StringView("url")};
-constexpr History pullRemoteBranches{.name = QLatin1StringView("PullRemoteBranch"), .key = QLatin1StringView("br")};
-
-/**
- * @param name A history, such as TortoiseGit's History\PullURLS.
- * @returns Where it is kept.
- */
-KConfigGroup historyGroup(const QString& name)
-{
-    return KSharedConfig::openConfig()->group(QStringLiteral("History")).group(name);
-}
-
-/**
- * Ported from CHistoryCombo::LoadHistory.
- * @param combo An editable combo box.
- * @param history The history.
- */
-void loadHistory(QComboBox *combo, const History& history)
-{
-    combo->addItems(historyGroup(history.name).readEntry(QString(history.key), QStringList()));
-}
-
-/**
- * Ported from CHistoryCombo::SaveHistory: the text shown goes first, without duplicates.
- * @param combo An editable combo box.
- * @param history The history.
- */
-void saveHistory(const QComboBox *combo, const History& history)
-{
-    const QString current = combo->currentText().trimmed();
-    if (current.isEmpty()) {
-        return;
-    }
-    KConfigGroup group = historyGroup(history.name);
-    QStringList entries = group.readEntry(QString(history.key), QStringList());
-    entries.removeAll(current);
-    entries.prepend(current);
-    group.writeEntry(QString(history.key), entries.mid(0, maxHistoryItems));
-    group.sync();
-}
-
-/**
- * Ported from CHistoryCombo::AddString: appends an entry unless it is there already, and selects it.
- * @param combo A combo box.
- * @param text The entry; nothing happens if it is empty.
- */
-void addString(QComboBox *combo, const QString& text)
-{
-    if (text.isEmpty()) {
-        return;
-    }
-    int index = combo->findText(text, Qt::MatchExactly | Qt::MatchCaseSensitive);
-    if (index < 0) {
-        combo->addItem(text);
-        index = combo->count() - 1;
-    }
-    combo->setCurrentIndex(index);
-}
+constexpr QLatin1StringView pullUrlsHistory("PullURLS"); // TortoiseGit's History\PullURLS, with its key "url"
+constexpr QLatin1StringView pullRemoteBranchHistory("PullRemoteBranch"); // History\PullRemoteBranch, with its key "br"
+constexpr QLatin1StringView urlKey("url");
+constexpr QLatin1StringView branchKey("br");
 
 /**
  * @param text A checkbox's label.
@@ -136,10 +72,11 @@ QString allRemotesText()
 namespace kgt
 {
 
-PullFetchDlg::PullFetchDlg(const QString& workingDirectory, bool isPull, QWidget *parent)
+PullFetchDlg::PullFetchDlg(const QString& workingDirectory, bool isPull, QWidget *parent, const QString& preSelectRemote)
     : QDialog(parent)
     , m_git(workingDirectory)
     , m_isPull(isPull)
+    , m_preSelectRemote(preSelectRemote)
     , m_remoteRadio(new QRadioButton(i18n("&Remote:"), this))
     , m_otherRadio(new QRadioButton(i18n("Arbitrary &URL:"), this))
     , m_remote(new QComboBox(this))
@@ -201,6 +138,11 @@ PullFetchDlg::PullFetchDlg(const QString& workingDirectory, bool isPull, QWidget
     optionLayout->setColumnStretch(2, 1);
     layout->addWidget(optionGroup);
 
+    // IDC_REMOTE_MANAGE, a link beside the PuTTY key option we don't have
+    auto *manageRemotes = new QLabel(QStringLiteral("<a href=\"#\">%1</a>").arg(i18n("Manage Remotes")), this);
+    connect(manageRemotes, &QLabel::linkActivated, this, &PullFetchDlg::onRemoteManage);
+    layout->addWidget(manageRemotes, 0, Qt::AlignRight);
+
     layout->addWidget(m_rebase);
     layout->addStretch();
 
@@ -242,8 +184,8 @@ PullFetchDlg::PullFetchDlg(const QString& workingDirectory, bool isPull, QWidget
     m_depthCheck->setChecked(shallow);
     m_depth->setEnabled(shallow);
 
-    loadHistory(m_other, pullUrls);
-    loadHistory(m_remoteBranch, pullRemoteBranches);
+    HistoryCombo::loadHistory(m_other, HistoryCombo::historyGroup(pullUrlsHistory), urlKey);
+    HistoryCombo::loadHistory(m_remoteBranch, HistoryCombo::historyGroup(pullRemoteBranchHistory), branchKey);
     if (m_remoteBranch->count() > 0) {
         m_remoteBranch->setCurrentIndex(0);
     }
@@ -298,7 +240,7 @@ void PullFetchDlg::accept()
     const PullFetchOptions chosen = options();
     if (m_otherRadio->isChecked()) {
         // Only store the URL in the history if it was used
-        saveHistory(m_other, pullUrls);
+        HistoryCombo::saveHistory(m_other, HistoryCombo::historyGroup(pullUrlsHistory), urlKey);
     }
 
     if (chosen.rebase && m_remoteBranch->currentText().trimmed().isEmpty() && m_isPull) {
@@ -306,9 +248,9 @@ void PullFetchDlg::accept()
         return;
     }
 
-    KConfigGroup remoteHistory = historyGroup(QStringLiteral("PullRemote"));
+    KConfigGroup remoteHistory = HistoryCombo::historyGroup(QStringLiteral("PullRemote"));
     remoteHistory.writeEntry(m_git.workingDirectory(), m_remote->currentText());
-    saveHistory(m_remoteBranch, pullRemoteBranches);
+    HistoryCombo::saveHistory(m_remoteBranch, HistoryCombo::historyGroup(pullRemoteBranchHistory), branchKey);
     KConfigGroup settings = KSharedConfig::openConfig()->group(settingsGroup());
     settings.writeEntry("rebase", m_rebase->isChecked());
     settings.writeEntry("ffonly", m_ffOnly->isChecked());
@@ -336,10 +278,13 @@ void PullFetchDlg::refresh()
     m_configPullBranch = pullBranch;
 
     // Without an upstream, the branch of the same name
-    addString(m_remoteBranch, pullBranch.isEmpty() ? currentBranch : pullBranch);
+    HistoryCombo::addString(m_remoteBranch, pullBranch.isEmpty() ? currentBranch : pullBranch);
 
     if (pullRemote.isEmpty()) {
-        pullRemote = historyGroup(QStringLiteral("PullRemote")).readEntry(m_git.workingDirectory(), QString());
+        pullRemote = HistoryCombo::historyGroup(QStringLiteral("PullRemote")).readEntry(m_git.workingDirectory(), QString());
+    }
+    if (!m_preSelectRemote.isEmpty()) {
+        pullRemote = m_preSelectRemote;
     }
 
     const QStringList remotes = QString::fromUtf8(m_git.run({QStringLiteral("remote")}, RunMode::ReadOnly)).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
@@ -354,6 +299,12 @@ void PullFetchDlg::refresh()
     // With several remotes and none configured, fetching defaults to "- all -"
     m_remote->setCurrentIndex(std::max(index, 0));
     onRemoteChanged();
+}
+
+void PullFetchDlg::onRemoteManage()
+{
+    AppUtils::launchRemoteSetting(m_git.workingDirectory(), this);
+    refresh();
 }
 
 void PullFetchDlg::onRemoteChanged()

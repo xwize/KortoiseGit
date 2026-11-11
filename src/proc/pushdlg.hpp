@@ -11,11 +11,15 @@
 
 #include "git/git.hpp"
 
+#include <KConfigGroup>
+
 #include <QDialog>
 #include <QString>
 
 class QCheckBox;
 class QComboBox;
+class QPushButton;
+class QRadioButton;
 
 namespace kgt
 {
@@ -25,7 +29,7 @@ namespace kgt
  */
 struct PushOptions {
     QString localBranch; // m_BranchSourceName: the local branch or ref; empty deletes the remote branch
-    QString remote; // m_URL: the remote's name
+    QString remote; // m_URL: the remote's name, or the URL typed with "Arbitrary URL"
     QString remoteBranch; // m_BranchRemoteName: empty pushes to the configured or same-named branch
     bool forceWithLease = false; // m_bForceWithLease: --force-with-lease
     bool tags = false; // m_bTags: --tags
@@ -34,9 +38,10 @@ struct PushOptions {
 
 /**
  * The "Push" dialog, cut down to the essentials: the local branch (the current one to begin with), the remote and
- * remote branch (the configured push target, or the only remote and the same name), and the options Force with
- * lease, Include Tags and Set upstream/track remote branch. Pushing all branches, arbitrary URLs, Force, the
- * push-remote/push-branch settings, submodule recursion and push options are left out for now.
+ * remote branch (the configured push target, or the only remote and the same name), or an arbitrary URL in place of
+ * the remote, and the options Force with lease, Include Tags and Set upstream/track remote branch. Pushing all
+ * branches or all remotes, Force, the push-remote/push-branch settings, submodule recursion and push options are
+ * left out for now.
  */
 class PushDlg : public QDialog
 {
@@ -83,6 +88,28 @@ private:
     void updateOptionStates();
 
     /**
+     * Ported from CPushDlg::EnDisablePushRemoteArchiveBranch: Set upstream needs a named remote and a local branch.
+     */
+    void enDisablePushRemoteArchiveBranch();
+
+    /**
+     * Ported from CPushDlg::OnBnClickedRd: switches between a named remote and an arbitrary URL, which a
+     * "git pull <url> <branch>" on the clipboard fills in.
+     */
+    void onSourceChanged();
+
+    /**
+     * Ported from CPushDlg::OnBnClickedRemoteManage: opens the Settings dialog on its Remote page, then reads the
+     * remotes again.
+     */
+    void onRemoteManage();
+
+    /**
+     * @returns Where the URL history is kept, TortoiseGit's History\PushURLS\<working tree>.
+     */
+    [[nodiscard]] KConfigGroup urlHistory() const;
+
+    /**
      * @param name A remote branch name.
      * @returns Whether git accepts it as a branch name.
      */
@@ -92,7 +119,11 @@ private:
     QString m_selectLocalBranch; // m_BranchSourceName, kept for F5
     QComboBox *m_branchSource;
     QComboBox *m_branchRemote;
+    QRadioButton *m_remoteRadio; // IDC_RD_REMOTE
+    QRadioButton *m_urlRadio; // IDC_RD_URL
     QComboBox *m_remote;
+    QPushButton *m_remoteManage; // IDC_REMOTE_MANAGE
+    QComboBox *m_remoteUrl; // m_RemoteURL
     QCheckBox *m_forceWithLease;
     QCheckBox *m_tags;
     QCheckBox *m_setUpstream;

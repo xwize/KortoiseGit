@@ -419,6 +419,7 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     , m_tagAction(new QAction(QIcon::fromTheme(QStringLiteral("tag")), i18n("Create &Tag..."), this))
     , m_resolveAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-ok-apply")), i18n("Res&olve..."), this))
     , m_mergeAbortAction(new QAction(QIcon::fromTheme(QStringLiteral("dialog-cancel")), i18n("Abort &Merge"), this))
+    , m_settingsAction(new QAction(QIcon::fromTheme(QStringLiteral("configure")), i18n("&Settings"), this))
     , m_aboutAction(new QAction(QIcon::fromTheme(QStringLiteral("help-about")), i18n("A&bout"), this))
     , m_gitMenu(std::make_unique<QMenu>())
     , m_gitMenuAction(new QAction(submenuIcon(), i18n("&KortoiseGit"), this))
@@ -526,6 +527,10 @@ ShellExt::ShellExt(QObject *parent, const QVariantList& args)
     m_addAction->setToolTip(i18n("Adds file(s) to Git control"));
     connect(m_addAction, &QAction::triggered, this, [this] {
         runCommand(QStringLiteral("add"), m_addAction);
+    });
+    m_settingsAction->setToolTip(i18n("Tweak KortoiseGit"));
+    connect(m_settingsAction, &QAction::triggered, this, [this] {
+        runCommand(QStringLiteral("settings"), m_settingsAction);
     });
     m_aboutAction->setToolTip(i18n("Shows information about KortoiseGit"));
     connect(m_aboutAction, &QAction::triggered, this, [this] {
@@ -677,13 +682,14 @@ QList<QAction *> ShellExt::menuActions(const QStringList& selected) const
             entry(entries.createRepo, m_createRepoAction),
             entry(entries.add, m_addAction),
             separator,
-            // MenuInfo's conditions are "folder" or "not a folder": always
+            // MenuInfo's conditions for Settings and About are "folder" or "not a folder": always
+            entry(true, m_settingsAction),
             entry(true, m_aboutAction),
         },
         topEntries,
         paths,
         *m_gitMenu);
-    // About is always in it, so unlike in CShellExt::QueryContextMenu the submenu is never empty
+    // Settings and About are always in it, so unlike in CShellExt::QueryContextMenu the submenu is never empty
     actions.append(m_gitMenuAction);
     return actions;
 }

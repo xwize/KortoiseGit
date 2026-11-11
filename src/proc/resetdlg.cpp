@@ -9,13 +9,13 @@
 
 #include "resetdlg.hpp"
 
+#include "apputils.hpp"
 #include "chooseversion.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 
 #include <KConfigGroup>
 #include <KLocalizedString>
-#include <KSharedConfig>
 #include <KWindowConfig>
 
 #include <QDialogButtonBox>
@@ -38,7 +38,7 @@ constexpr int initialWidth = 520;
  */
 KConfigGroup windowSettings()
 {
-    return KSharedConfig::openConfig()->group(QStringLiteral("ResetDlg"));
+    return kgt::AppUtils::resizableState(QStringLiteral("ResetDlg"));
 }
 
 } // namespace

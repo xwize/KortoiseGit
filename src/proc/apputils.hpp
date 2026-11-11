@@ -96,6 +96,24 @@ public:
     [[nodiscard]] static KConfigGroup generalSettings();
 
     /**
+     * @param dialog A dialog's name, such as "ResetDlg".
+     * @returns Where its size is kept, TortoiseGit's TortoiseProc\\ResizableState.
+     */
+    [[nodiscard]] static KConfigGroup resizableState(const QString& dialog);
+
+    /**
+     * @returns The group holding every dialog's size.
+     */
+    [[nodiscard]] static KConfigGroup allResizableStates();
+
+    /**
+     * Ported from CAppUtils::LaunchRemoteSetting: shows the Settings dialog on its Remote page until it is closed.
+     * @param workingTree The working tree's root or the bare repository.
+     * @param parent Parent of the dialog.
+     */
+    static void launchRemoteSetting(const QString& workingTree, QWidget *parent = nullptr);
+
+    /**
      * @param call A finished git call that lists branches or tags.
      * @returns Its output, or nothing if git failed: TortoiseGit's loading threads ignore these lists' errors too.
      * @throws RuntimeError for a failure other than git's.
@@ -357,6 +375,11 @@ public:
      * @returns What to do with it.
      */
     [[nodiscard]] static ConflictKind conflictKind(const ConflictHashes& hashes);
+
+    /**
+     * @returns The merge tools mergeToolArguments() chooses from, as git names them, the preferred one first.
+     */
+    [[nodiscard]] static QStringList mergeTools();
 
     /**
      * The command line that opens a content conflict in a merge tool. git asks before starting a tool it guessed,

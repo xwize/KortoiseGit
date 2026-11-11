@@ -75,6 +75,11 @@ public:
     [[nodiscard]] static QStringList extDiffArguments(const QString& file1, const QString& file2);
 
     /**
+     * @returns The diff tools withDefaultTool() chooses from, as git names them, the preferred one first.
+     */
+    [[nodiscard]] static QStringList defaultTools();
+
+    /**
      * Names a diff tool on a git difftool command line when the user's settings don't: Meld, otherwise KDiff3.
      * @param arguments The arguments after "git", from one of the functions above.
      * @param diffTool The value of diff.tool; empty if it isn't set.

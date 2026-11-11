@@ -82,7 +82,7 @@ QString showRefLog()
 /**
  * @param actions Actions the plugin returned.
  * @returns Their texts, with the "KortoiseGit" submenu replaced by its entries and separators left out: the top-level entries
- *          come first, then the submenu's. About, which is on every menu, is left out too, and so are Stash changes
+ *          come first, then the submenu's. Settings and About, which are on every menu, are left out too, and so are Stash changes
  *          and Show RefLog, which stashChangesEntry and refLogEntries check by themselves.
  */
 QStringList flatTexts(const QList<QAction *>& actions)
@@ -95,6 +95,7 @@ QStringList flatTexts(const QList<QAction *>& actions)
     }
     texts += submenuLayout(actions);
     texts.removeAll(QStringLiteral("-"));
+    texts.removeAll(QStringLiteral("&Settings"));
     texts.removeAll(QStringLiteral("A&bout"));
     texts.removeAll(stashChanges());
     texts.removeAll(showRefLog());
@@ -183,6 +184,14 @@ QString gitMenu()
 QString about()
 {
     return QStringLiteral("A&bout");
+}
+
+/**
+ * @returns The Settings entry's text.
+ */
+QString settings()
+{
+    return QStringLiteral("&Settings");
 }
 
 /**
@@ -464,7 +473,7 @@ private Q_SLOTS:
         const QString stash = stashChanges();
         const QStringList upToRebase{pull, fetch, push, separator(), log, showRefLog(), refs, rebase};
         QStringList afterRebase{separator(), resolve(), revert, separator(), switchTo, merge, branch, tag};
-        afterRebase << separator() << add << separator() << about();
+        afterRebase << separator() << add << separator() << settings() << about();
 
         // Commit stays at the top level; the separators around it are one in the submenu
         QList<QAction *> actions = actionsFor({});
@@ -474,25 +483,25 @@ private Q_SLOTS:
         // The separator after Commit's group comes first among the submenu's, and is dropped; none trails either
         actions = actionsFor(QStringLiteral("tracked.txt"));
         QCOMPARE(topLevelTexts(actions), (QStringList{commit, gitMenu()}));
-        QCOMPARE(submenuLayout(actions), (QStringList{diff, prevDiff, separator(), log, stash, separator(), about()}));
+        QCOMPARE(submenuLayout(actions), (QStringList{diff, prevDiff, separator(), log, stash, separator(), settings(), about()}));
         QCOMPARE(submenuLayout(actionsFor(QStringLiteral("modified.txt"))),
-                 (QStringList{diff, prevDiff, separator(), log, stash, separator(), revert, separator(), about()}));
+                 (QStringList{diff, prevDiff, separator(), log, stash, separator(), revert, separator(), settings(), about()}));
 
         // Only submenu entries
         actions = actionsFor(QStringLiteral("new.txt"));
         QCOMPARE(topLevelTexts(actions), QStringList{gitMenu()});
-        QCOMPARE(submenuLayout(actions), (QStringList{add, separator(), about()}));
+        QCOMPARE(submenuLayout(actions), (QStringList{add, separator(), settings(), about()}));
 
         // All three top-level entries that exist, in MenuInfo's order, the submenu after them
         actions = actionsFor(QStringLiteral("vendor"));
         QCOMPARE(topLevelTexts(actions), (QStringList{clone, commit, createRepo, gitMenu()}));
         QCOMPARE(submenuLayout(actions), upToRebase + afterRebase);
 
-        // Only About for the submenu: no separator comes first
+        // Only Settings and About for the submenu: no separator comes first
         const QTemporaryDir plain;
         actions = plugin.outOfVersionControlActions({item(plain.path())});
         QCOMPARE(topLevelTexts(actions), (QStringList{clone, createRepo, gitMenu()}));
-        QCOMPARE(submenuLayout(actions), QStringList{about()});
+        QCOMPARE(submenuLayout(actions), (QStringList{settings(), about()}));
     }
 
     void submenuCarriesTheAppIcon()
@@ -869,6 +878,19 @@ private Q_SLOTS:
         QFile arguments(record);
         QVERIFY(arguments.open(QIODevice::ReadOnly));
         QCOMPARE(arguments.readAll(), QByteArray("--command\nabout\n"));
+        arguments.close();
+        QVERIFY(QFile::remove(record));
+
+        // Settings, just before About, is given the folder, whose repository adds its pages
+        const QList<QAction *> entries = actions.constLast()->menu()->actions();
+        QAction *settingsEntry = entries.at(entries.size() - 2);
+        QCOMPARE(settingsEntry->text(), settings());
+        settingsEntry->trigger();
+        QVERIFY(QTest::qWaitFor([&record] {
+            return QFile::exists(record);
+        }));
+        QVERIFY(arguments.open(QIODevice::ReadOnly));
+        QCOMPARE(arguments.readAll(), QByteArray("--command\nsettings\n--path\n") + QFile::encodeName(repo.path()) + '\n');
     }
 
     void newRepositoryRefreshesDolphin()

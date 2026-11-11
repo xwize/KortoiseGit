@@ -28,6 +28,7 @@
 #include "commands/reflogcommand.hpp"
 #include "commands/resolvecommand.hpp"
 #include "commands/revertcommand.hpp"
+#include "commands/settingscommand.hpp"
 #include "commands/stashcommand.hpp"
 #include "commands/switchcommand.hpp"
 #include "commands/tagcommand.hpp"
@@ -78,6 +79,7 @@ constexpr std::array commands{
     CommandEntry{.name = u"repocreate", .create = &create<kgt::CreateRepositoryCommand>},
     CommandEntry{.name = u"resolve", .create = &create<kgt::ResolveCommand>},
     CommandEntry{.name = u"revert", .create = &create<kgt::RevertCommand>},
+    CommandEntry{.name = u"settings", .create = &create<kgt::SettingsCommand>},
     CommandEntry{.name = u"stashapply", .create = &create<kgt::StashApplyCommand>},
     CommandEntry{.name = u"stashpop", .create = &create<kgt::StashPopCommand>},
     CommandEntry{.name = u"stashsave", .create = &create<kgt::StashSaveCommand>},

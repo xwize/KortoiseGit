@@ -21,6 +21,7 @@
 #include "pushdlg.hpp"
 #include "rebasedlg.hpp"
 #include "resetdlg.hpp"
+#include "settings/settings.hpp"
 #include "stashsave.hpp"
 #include "toolprocess.hpp"
 #include "utils/runtimeerror.hpp"
@@ -529,6 +530,23 @@ KConfigGroup AppUtils::generalSettings()
     return KSharedConfig::openConfig()->group(QStringLiteral("General"));
 }
 
+KConfigGroup AppUtils::resizableState(const QString& dialog)
+{
+    return allResizableStates().group(dialog);
+}
+
+KConfigGroup AppUtils::allResizableStates()
+{
+    return KSharedConfig::openConfig()->group(QStringLiteral("ResizableState"));
+}
+
+void AppUtils::launchRemoteSetting(const QString& workingTree, QWidget *parent)
+{
+    Settings dlg(workingTree, parent);
+    dlg.setDefaultPage(QStringLiteral("gitremote"));
+    dlg.exec();
+}
+
 QByteArray AppUtils::outputOrEmpty(const GitCall& call)
 {
     try {
@@ -1005,6 +1023,12 @@ ConflictKind AppUtils::conflictKind(const ConflictHashes& hashes)
     return bothSides ? ConflictKind::Content : ConflictKind::DeleteModify;
 }
 
+QStringList AppUtils::mergeTools()
+{
+    // The graphical three-way tools, in the relative order of git's list_merge_tool_candidates
+    return {QStringLiteral("kdiff3"), QStringLiteral("meld")};
+}
+
 QStringList AppUtils::mergeToolArguments(const QString& configuredTool, const IsInstalled& isInstalled)
 {
     QStringList arguments{
@@ -1013,8 +1037,7 @@ QStringList AppUtils::mergeToolArguments(const QString& configuredTool, const Is
         QStringLiteral("--no-prompt"),
     };
     if (configuredTool.isEmpty()) {
-        // The graphical three-way tools, in the relative order of git's list_merge_tool_candidates
-        const QStringList candidates{QStringLiteral("kdiff3"), QStringLiteral("meld")};
+        const QStringList candidates = mergeTools();
         const auto found = std::ranges::find_if(candidates, isInstalled);
         if (found == candidates.cend()) {
             return {};

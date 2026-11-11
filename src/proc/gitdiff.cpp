@@ -83,15 +83,20 @@ QStringList GitDiff::extDiffArguments(const QString& file1, const QString& file2
     return difftool() << QStringLiteral("--no-index") << QStringLiteral("--") << file1 << file2;
 }
 
+QStringList GitDiff::defaultTools()
+{
+    // Not from TortoiseGit, which has TortoiseGitMerge for both jobs: this is our default until we have an equivalent.
+    // Left alone, git would try KDiff3 first (list_merge_tool_candidates), but Meld is the better fit for diffs.
+    return {QStringLiteral("meld"), QStringLiteral("kdiff3")};
+}
+
 QStringList GitDiff::withDefaultTool(const QStringList& arguments, const QString& diffTool, const QString& mergeTool, const AppUtils::IsInstalled& isInstalled)
 {
     // git difftool falls back to merge.tool when diff.tool isn't set (get_configured_merge_tool in git-mergetool--lib)
     if (!diffTool.isEmpty() || !mergeTool.isEmpty()) {
         return arguments;
     }
-    // Not from TortoiseGit, which has TortoiseGitMerge for both jobs: this is our default until we have an equivalent.
-    // Left alone, git would try KDiff3 first (list_merge_tool_candidates), but Meld is the better fit for diffs.
-    const QStringList candidates{QStringLiteral("meld"), QStringLiteral("kdiff3")};
+    const QStringList candidates = defaultTools();
     const auto found = std::ranges::find_if(candidates, isInstalled);
     if (found == candidates.cend()) {
         return arguments;
