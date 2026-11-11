@@ -14,6 +14,7 @@
 #include "utils/result.hpp"
 
 #include <QByteArray>
+#include <QIODevice>
 #include <QString>
 #include <QStringList>
 
@@ -301,6 +302,16 @@ public:
      * @returns The name to give git.
      */
     [[nodiscard]] QString fixBranchName(const QString& branchName) const;
+
+    /**
+     * Ported from CGit::GetOneFile: writes a file as it is in a revision, with the repository's filters applied
+     * (git cat-file --filters, as git_blob_filter does there), as checking it out would.
+     * @param refName The revision.
+     * @param path The file, relative to the working tree root, '/'-separated.
+     * @param output Where to write it, open for writing.
+     * @throws RuntimeError (category Git) if git fails, or (category Io) if it can't be written.
+     */
+    void getOneFile(const QString& refName, const QString& path, QIODevice& output) const;
 
     /**
      * The git command CGit::GetBranchList runs.

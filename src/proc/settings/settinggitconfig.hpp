@@ -115,7 +115,7 @@ private:
     void viewEffectiveConfig();
 
     /**
-     * CAppUtils::LaunchAlternativeEditor's role: opens a file in the user's text editor.
+     * Opens a file in the user's text editor with AppUtils::launchAlternativeEditor.
      * @param file The file; created empty if it doesn't exist yet and @p create is set.
      * @param create Whether a missing file is created, for a configuration file git would create itself.
      */

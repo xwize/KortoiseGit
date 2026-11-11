@@ -5,12 +5,13 @@
 
 /**
  * @file
- * Ported from TortoiseGit src/TortoiseProc/Commands/LogCommand.cpp. The range, limit and revision options come
- * with the log dialog.
+ * Ported from TortoiseGit src/TortoiseProc/Commands/LogCommand.cpp. Takes --range, --startrev, --endrev and --rev;
+ * the limit and find options come with the log dialog.
  */
 
 #include "commands/logcommand.hpp"
 
+#include "git/git.hpp"
 #include "logdlg.hpp"
 
 namespace kgt
@@ -23,7 +24,22 @@ LogCommand::LogCommand()
 
 bool LogCommand::execute()
 {
-    LogDlg dlg(paths(), value(QStringLiteral("range")));
+    // --startrev and --endrev make a range; --range wins over them
+    const Git git(Git::repositoryRoot(paths().constFirst()));
+    QString range;
+    if (const QString revStart = value(QStringLiteral("startrev")); !revStart.isEmpty()) {
+        range = git.fixBranchName(revStart) + QStringLiteral("..");
+    }
+    if (const QString revEnd = value(QStringLiteral("endrev")); !revEnd.isEmpty()) {
+        range += git.fixBranchName(revEnd);
+    }
+    if (const QString givenRange = value(QStringLiteral("range")); !givenRange.isEmpty()) {
+        range = givenRange;
+    }
+    LogDlg dlg(paths(), range);
+    if (const QString rev = value(QStringLiteral("rev")); !rev.isEmpty()) {
+        dlg.setHighlightRevision(rev);
+    }
     dlg.exec();
     return true;
 }

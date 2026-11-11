@@ -155,6 +155,13 @@ public:
     static bool runTortoiseGitProc(const QStringList& arguments);
 
     /**
+     * CAppUtils::LaunchAlternativeEditor's role: opens a file in the user's text editor, without waiting for it.
+     * @param file The file. It is opened as plain text whatever its name, as a text editor would.
+     * @param parent The window an error is shown over.
+     */
+    static void launchAlternativeEditor(const QString& file, QWidget *parent = nullptr);
+
+    /**
      * Ported from CAppUtils::IsTGitRebaseActive: whether a TortoiseGit rebase holds its lock (a tgitrebase.active
      * directory in the admin directory). If it does, asks whether to remove it as stale.
      * @param workingTree The working tree.

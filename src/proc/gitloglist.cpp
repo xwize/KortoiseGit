@@ -641,6 +641,12 @@ void GitLogList::setPathFilter(const QStringList& paths)
     m_pathFilter = paths;
 }
 
+void GitLogList::setLastSelectedHash(const QString& hash)
+{
+    m_lastSelectedHash = hash;
+    restoreSelection(0);
+}
+
 void GitLogList::reload()
 {
     Q_ASSERT(!m_workingTree.isEmpty());

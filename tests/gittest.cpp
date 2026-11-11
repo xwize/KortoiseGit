@@ -8,6 +8,7 @@
 #include "testrepo.hpp"
 #include "utils/runtimeerror.hpp"
 
+#include <QBuffer>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -53,9 +54,34 @@ private Q_SLOTS:
     void initTestCase()
     {
         // Keep the user's own git configuration out of the tests
-        qputenv("GIT_CONFIG_GLOBAL", "/dev/null");
-        qputenv("GIT_CONFIG_NOSYSTEM", "1");
+        TestRepo::isolateGit();
         QVERIFY(m_dir.isValid());
+    }
+
+    void getOneFileWritesTheRevision()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "old\n");
+        repo.commitAll(QStringLiteral("One"));
+        repo.run({QStringLiteral("tag"), QStringLiteral("-a"), QStringLiteral("-m"), QStringLiteral("Tag"), QStringLiteral("v1")});
+        repo.write(QStringLiteral("f.txt"), "new\n");
+        repo.commitAll(QStringLiteral("Two"));
+        const Git git(repo.path());
+        // An annotated tag is dereferenced to its commit
+        for (const QString& ref : {QStringLiteral("HEAD~1"), QStringLiteral("v1")}) {
+            QBuffer buffer;
+            QVERIFY(buffer.open(QIODevice::WriteOnly));
+            git.getOneFile(ref, QStringLiteral("f.txt"), buffer);
+            QCOMPARE(buffer.data(), QByteArray("old\n"));
+        }
+        QBuffer buffer;
+        QVERIFY(buffer.open(QIODevice::WriteOnly));
+        try {
+            git.getOneFile(QStringLiteral("HEAD"), QStringLiteral("missing.txt"), buffer);
+            QFAIL("no error");
+        } catch (const RuntimeError& e) {
+            QCOMPARE(e.error().category, ErrorCategory::Git);
+        }
     }
 
     void runReturnsOutput()

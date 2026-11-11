@@ -27,6 +27,7 @@
 #include <QCheckBox>
 #include <QContextMenuEvent>
 #include <QDir>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHeaderView>
@@ -37,7 +38,9 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QProcess>
+#include <QPushButton>
 #include <QSortFilterProxyModel>
+#include <QTemporaryFile>
 #include <QUrl>
 
 #include <algorithm>
@@ -127,7 +130,7 @@ protected:
 };
 
 /**
- * The length of a hash in a group header (CGit::GetShortHASHLength).
+ * The length of a shortened hash, in a group header or a file name (CGit::GetShortHASHLength).
  */
 constexpr qsizetype shortHashLength = 8;
 
@@ -242,6 +245,11 @@ void GitStatusListCtrl::setCurrentVersion(const QString& revision, const QString
 const QString& GitStatusListCtrl::currentVersion() const
 {
     return m_currentVersion;
+}
+
+void GitStatusListCtrl::setDisplayedBranch(const QString& branch)
+{
+    m_displayedBranch = branch;
 }
 
 void GitStatusListCtrl::updateWithGitPathList(const QList<GitStatusListEntry>& entries)
@@ -417,6 +425,7 @@ void GitStatusListCtrl::contextMenuEvent(QContextMenuEvent *event)
             QMetaObject::invokeMethod(this, &GitStatusListCtrl::revertSelected, Qt::QueuedConnection);
         });
     }
+    addRevisionEntries(menu, selected);
     // Open and Explore act on the working tree's file, which is not what a commit's list shows
     if (selected.size() == 1 && m_currentVersion.isEmpty()) {
         const GitStatusListEntry& entry = selected.constFirst();
@@ -442,6 +451,49 @@ void GitStatusListCtrl::contextMenuEvent(QContextMenuEvent *event)
     }
     if (!menu.isEmpty()) {
         menu.exec(event->globalPos());
+    }
+}
+
+void GitStatusListCtrl::addRevisionEntries(QMenu& menu, const QList<GitStatusListEntry>& selected)
+{
+    // CGitStatusListCtrl::OnContextMenuList's entries for a commit's files. The focused entry decides (wcStatus)
+    const GitStatusListEntry *focused = focusedEntry();
+    if (m_currentVersion.isEmpty() || !focused) {
+        return;
+    }
+    if (!(focused->actions & Action::Deleted)) {
+        menu.addAction(QIcon::fromTheme(QStringLiteral("edit-undo")), i18n("R&evert to this revision"), this, [this] {
+            // After the menu has closed, so the messages aren't nested in it
+            QMetaObject::invokeMethod(this, &GitStatusListCtrl::revertSelectedItemToVersion, Qt::QueuedConnection);
+        });
+    }
+    if (selected.size() != 1) {
+        return;
+    }
+    const GitStatusListEntry& entry = selected.constFirst();
+    if (isTracked(*focused)) {
+        menu.addAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"), this, [this, entry] {
+            showLog(entry);
+        });
+    }
+    if (isDirectory(entry)) {
+        return;
+    }
+    if (!(focused->actions & Action::Deleted)) {
+        menu.addAction(QIcon::fromTheme(QStringLiteral("document-save-as")), i18n("Save revision &to..."), this, [this, entry] {
+            // After the menu has closed, so the file dialog isn't nested in it
+            QMetaObject::invokeMethod(
+                this,
+                [this, entry] {
+                    fileSaveAs(entry);
+                },
+                Qt::QueuedConnection);
+        });
+    }
+    if (!isGone(*focused)) {
+        menu.addAction(QIcon::fromTheme(QStringLiteral("document-edit")), i18n("View revision in alternative editor"), this, [this, entry] {
+            viewRevision(entry);
+        });
     }
 }
 
@@ -984,6 +1036,119 @@ void GitStatusListCtrl::onRevertFinished()
     // TortoiseGit drops the reverted entries or refreshes the parent dialog; reloading does both
     reload();
     Q_EMIT reverted();
+}
+
+void GitStatusListCtrl::revertSelectedItemToVersion()
+{
+    // Ported from CGitStatusListCtrl::RevertSelectedItemToVersion(false). The files aren't moved to the trash first
+    // (RevertWithRecycleBin), as in RevertProgressCommand
+    if (m_currentVersion.isEmpty()) {
+        return;
+    }
+    const QList<GitStatusListEntry> selected = selectedEntries();
+    const Git git(m_workingTree);
+    int revertedCount = 0;
+    for (const GitStatusListEntry& entry : selected) {
+        // TortoiseGit checks out the old path of a rename or copy
+        const QString filename = entry.origPath.isEmpty() ? entry.path : entry.origPath;
+        try {
+            std::ignore = git.run({QStringLiteral("checkout"), m_currentVersion, QStringLiteral("--"), filename});
+            ++revertedCount;
+        } catch (const RuntimeError& e) {
+            if (e.error().category != ErrorCategory::Git) {
+                throw;
+            }
+            QMessageBox box(QMessageBox::Warning, i18n("KortoiseGit"), e.error().message, QMessageBox::NoButton, this);
+            box.addButton(i18n("&Ignore"), QMessageBox::AcceptRole);
+            const QAbstractButton *abort = box.addButton(i18n("&Abort"), QMessageBox::RejectRole);
+            box.exec();
+            if (box.clickedButton() == abort) {
+                break;
+            }
+        }
+    }
+    if (revertedCount > 0) {
+        // RefreshParent: the commit's own list doesn't change
+        reload();
+        Q_EMIT reverted();
+        QMessageBox::information(window(), i18n("KortoiseGit"), i18n("%1 files reverted to %2.", revertedCount, m_currentVersion));
+    }
+}
+
+bool GitStatusListCtrl::isDirectory(const GitStatusListEntry& entry) const
+{
+    // CTGitPath::IsDirectory. A commit's entries don't carry git's file mode here, so the working tree tells, as it
+    // does for TortoiseGit when the mode isn't known
+    return QFileInfo(absolutePath(entry)).isDir();
+}
+
+bool GitStatusListCtrl::writeRevision(const GitStatusListEntry& entry, const QString& file)
+{
+    // The CGit::GetOneFile call of FileSaveAs and OpenFile, and its error
+    QString error = QStringLiteral("Could not create file.");
+    QFile output(file);
+    if (output.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        try {
+            Git(m_workingTree).getOneFile(m_currentVersion, entry.path, output);
+            return true;
+        } catch (const RuntimeError& e) {
+            if (e.error().category != ErrorCategory::Git && e.error().category != ErrorCategory::Io) {
+                throw;
+            }
+            error = e.error().message;
+        }
+    }
+    // IDS_STATUSLIST_CHECKOUTFILEFAILED, with git's error after it as CGit::GetGitLastErr adds it
+    showError(window(), i18n("Failed to checkout file \"%1\" of revision %2 to \"%3\".", entry.path, m_currentVersion, file) + QLatin1Char('\n') + error);
+    return false;
+}
+
+void GitStatusListCtrl::fileSaveAs(const GitStatusListEntry& entry)
+{
+    // Ported from CGitStatusListCtrl::FileSaveAs, for a commit's file: <dir>/<basename>-<short hash><ext>
+    const QFileInfo info(absolutePath(entry));
+    const QString extension = info.suffix().isEmpty() ? QString() : QLatin1Char('.') + info.suffix();
+    const QString suggested = info.dir().filePath(info.completeBaseName() + QLatin1Char('-') + m_currentVersion.left(shortHashLength) + extension);
+    const QString filename = QFileDialog::getSaveFileName(this, QString(), suggested);
+    if (!filename.isEmpty()) {
+        std::ignore = writeRevision(entry, filename);
+    }
+}
+
+void GitStatusListCtrl::viewRevision(const GitStatusListEntry& entry)
+{
+    // Ported from CGitStatusListCtrl::OpenFile(..., ALTERNATIVEEDITOR) for a commit's file. As in
+    // CTempFiles::GetTempFilePath, the name keeps the file's own and its extension, for the editor to go by
+    const QFileInfo info(entry.path);
+    const QString extension = info.suffix().isEmpty() ? QString() : QLatin1Char('.') + info.suffix();
+    const QString nameTemplate = info.completeBaseName() + QLatin1Char('-') + m_currentVersion.left(shortHashLength) + QStringLiteral("-XXXXXX") + extension;
+    // Kept after we exit, for the editor to read: it is started without waiting for it
+    QTemporaryFile file(QDir::temp().filePath(nameTemplate));
+    file.setAutoRemove(false);
+    if (!file.open()) {
+        showError(window(), i18n("Could not create temp file."));
+        return;
+    }
+    file.close();
+    if (!writeRevision(entry, file.fileName())) {
+        file.remove();
+        return;
+    }
+    file.setPermissions(QFile::ReadOwner | QFile::ReadGroup | QFile::ReadOther);
+    AppUtils::launchAlternativeEditor(file.fileName(), this);
+}
+
+void GitStatusListCtrl::showLog(const GitStatusListEntry& entry) const
+{
+    // The IDGITLC_LOG entry of CGitStatusListCtrl::OnContextMenuList. TortoiseGit's /submodule for a folder isn't
+    // passed: there is no submodule log yet
+    QStringList arguments{QStringLiteral("--command"), QStringLiteral("log"), QStringLiteral("--path"), absolutePath(entry)};
+    if (!m_displayedBranch.isEmpty()) {
+        arguments << QStringLiteral("--range") << m_displayedBranch;
+    } else {
+        arguments << QStringLiteral("--endrev") << m_currentVersion << QStringLiteral("--rev") << m_currentVersion;
+    }
+    std::ignore = AppUtils::runTortoiseGitProc(arguments);
 }
 
 void GitStatusListCtrl::deleteSelectedFiles()

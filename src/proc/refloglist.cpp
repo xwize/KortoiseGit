@@ -247,9 +247,8 @@ void RefLogList::contextMenuEvent(QContextMenuEvent *event)
 
 void RefLogList::showLog(const QString& hash) const
 {
-    // TortoiseGit passes the commit as /endrev and /rev. Our log has neither yet: as a range the commit comes first
     QStringList arguments{QStringLiteral("--command"), QStringLiteral("log")};
-    arguments << QStringLiteral("--path") << m_workingTree << QStringLiteral("--range") << hash;
+    arguments << QStringLiteral("--path") << m_workingTree << QStringLiteral("--endrev") << hash << QStringLiteral("--rev") << hash;
     std::ignore = AppUtils::runTortoiseGitProc(arguments);
 }
 
