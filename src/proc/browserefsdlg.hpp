@@ -5,9 +5,10 @@
 /**
  * @file
  * Ported from TortoiseGit src/TortoiseProc/BrowseRefsDlg.h (CBrowseRefsDlg): the "Browse references" dialog, also
- * used as a ref picker by other dialogs. This is its first cut: the tree, the list with its columns, the filter, and
- * a context menu with Show log, the deletes and copying. Renaming, switching, merging, diffs, fetch, upstream and the
- * tree's own menu come later.
+ * used as a ref picker by other dialogs: the tree, the list with its columns, the filter, and the list's context menu
+ * (log, reflog, compares, fetch, merge, switch, create branch, edit description, rename, tracked branch, deletes and
+ * copying). Browse repository isn't there: there is no repository browser. The tree's own menu, Delete all tags and
+ * Delete remote tags come later.
  */
 
 #pragma once
@@ -28,6 +29,7 @@
 #include <optional>
 
 class QCheckBox;
+class QItemSelection;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -169,7 +171,7 @@ public:
     [[nodiscard]] QString infoText() const;
 
     /**
-     * Builds the context menu for the refs selected in the list, ShowContextMenu's first cut.
+     * Builds the context menu for the refs selected in the list, as ShowContextMenu does for them.
      * @returns The menu; its actions do their work when triggered.
      */
     [[nodiscard]] std::unique_ptr<QMenu> createListContextMenu();
@@ -203,6 +205,15 @@ public:
      *          of @p remotes.
      */
     [[nodiscard]] static std::optional<RemoteBranch> splitRemoteBranchName(QString ref, const QStringList& remotes);
+
+    /**
+     * Ported from CBrowseRefsDlg::GetTwoSelectedRefs: the last selected ref goes second.
+     * @param refNames The two selected refs' full names, in list order.
+     * @param lastSelected The full name of the ref selected last.
+     * @param separator Such as .. or ...
+     * @returns The short names joined, such as main..topic.
+     */
+    [[nodiscard]] static QString twoSelectedRefs(const QStringList& refNames, const QString& lastSelected, const QString& separator);
 
     /**
      * Records the picked ref when the dialog closes, as TortoiseGit's OnDestroy.
@@ -244,6 +255,21 @@ private:
     bool doDeleteRef(const QString& completeRefName);
     bool deleteRemoteRefs(const QString& remote, const QStringList& branches);
     void onCurrentBranchClicked();
+    void onListSelectionChanged(const QItemSelection& selected);
+    void addSingleRefEntries(QMenu& popupMenu, const ShadowTree& leaf);
+    void addTwoRefEntries(QMenu& popupMenu, const VectorShadowTree& leaves);
+    void showRefLog(const QString& refName);
+    void compareWithWorkingTree(const QString& refName);
+    void fetchFrom(const QString& remote);
+    void mergeRef(const QString& refName);
+    void switchToRef(const QString& refName);
+    void createBranch(const QString& hash);
+    void editBranchDescription(const QString& branch);
+    void startRename(const QString& refName);
+    void onNameEdited(const QString& refName, const QString& newText);
+    void dropUpstream(const QString& branch);
+    void setUpstream(const QString& branch);
+    void compareRefs(const QString& refName1, const QString& refName2);
 
     Git m_git;
     QString m_currentBranch; // The current branch's name, "HEAD" when detached, or empty if unknown
@@ -255,6 +281,8 @@ private:
     std::unique_ptr<GitCall> m_refsCall;
     std::unique_ptr<GitCall> m_configCall;
     QString m_pendingSelectRef; // What to select once the running load ends
+    QString m_lastSelected; // m_sLastSelected: the full name of the ref selected last in the list
+    bool m_hasWC = true; // m_bHasWC: false for a bare repository
 
     QLineEdit *m_filter = nullptr;
     QComboBox *m_branchFilter = nullptr;

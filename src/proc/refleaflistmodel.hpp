@@ -115,6 +115,29 @@ public:
      */
     void sort(int column, Qt::SortOrder order = Qt::AscendingOrder) override;
 
+    /**
+     * @param index A cell.
+     * @returns Its flags: a local branch's name is editable, as OnLvnBeginlabeleditListRefLeafs allows.
+     */
+    [[nodiscard]] Qt::ItemFlags flags(const QModelIndex& index) const override;
+
+    /**
+     * Reports an edited name through nameEdited() and keeps the old one: the dialog renames the branch and reloads.
+     * @param index A cell.
+     * @param value The text typed.
+     * @param role Qt::EditRole.
+     * @returns False: nothing changes here.
+     */
+    bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
+
+Q_SIGNALS:
+    /**
+     * A ref's name was edited in place, OnLvnEndlabeleditListRefLeafs's notification.
+     * @param refName The ref's full name.
+     * @param newText The text typed, relative to the tree node the list shows.
+     */
+    void nameEdited(const QString& refName, const QString& newText);
+
 private:
     QList<RefLeafListEntry> m_entries;
     QString m_currentBranchRef;

@@ -162,6 +162,26 @@ public:
     static void launchAlternativeEditor(const QString& file, QWidget *parent = nullptr);
 
     /**
+     * GetUnifiedDiffCmd in CGit, for two commits and the whole tree.
+     * @param rev1 The old side.
+     * @param rev2 The new side.
+     * @param diffContext diff.context, or a negative number if not set.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList unifiedDiffArguments(const QString& rev1, const QString& rev2, int diffContext);
+
+    /**
+     * Ported from CAppUtils::StartShowUnifiedDiff for two commits: writes the unified diff to a read-only temp file
+     * and opens it. TortoiseUDiff isn't ported, so the user's text editor shows it (launchAlternativeEditor).
+     * @param git Runs git in the repository.
+     * @param rev1 The old side.
+     * @param rev2 The new side.
+     * @param parent Parent of an error message.
+     * @returns Whether the diff was written and opened.
+     */
+    static bool startShowUnifiedDiff(const Git& git, const QString& rev1, const QString& rev2, QWidget *parent = nullptr);
+
+    /**
      * Ported from CAppUtils::IsTGitRebaseActive: whether a TortoiseGit rebase holds its lock (a tgitrebase.active
      * directory in the admin directory). If it does, asks whether to remove it as stale.
      * @param workingTree The working tree.

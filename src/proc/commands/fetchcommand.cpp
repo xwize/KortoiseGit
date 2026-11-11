@@ -206,14 +206,14 @@ bool FetchCommand::doFetch(const QString& repository, const PullFetchOptions& op
     return progress.gitStatus() == 0;
 }
 
-bool FetchCommand::fetch(const QString& repository, const QString& remoteName)
+bool FetchCommand::fetch(const QString& repository, const QString& remoteName, QWidget *parent)
 {
-    PullFetchDlg dlg(repository, false, nullptr, remoteName);
+    PullFetchDlg dlg(repository, false, parent, remoteName);
     if (dlg.exec() != QDialog::Accepted) {
         return false;
     }
     const PullFetchOptions options = dlg.options();
-    return doFetch(repository, options, options.rebase ? FetchRebase::Open : FetchRebase::None);
+    return doFetch(repository, options, options.rebase ? FetchRebase::Open : FetchRebase::None, parent);
 }
 
 } // namespace kgt
