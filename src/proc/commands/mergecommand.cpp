@@ -79,14 +79,14 @@ QStringList MergeCommand::mergeArguments(const MergeOptions& options, const QStr
     return arguments;
 }
 
-bool MergeCommand::merge(const QString& workingTree)
+bool MergeCommand::merge(const QString& workingTree, const QString& initialRefName, QWidget *parent)
 {
-    if (AppUtils::isTGitRebaseActive(workingTree)) {
+    if (AppUtils::isTGitRebaseActive(workingTree, parent)) {
         return false;
     }
 
     const Git git(workingTree);
-    MergeDlg dlg(git);
+    MergeDlg dlg(Git(workingTree), initialRefName, parent);
     if (dlg.exec() != QDialog::Accepted) {
         return false;
     }
@@ -97,12 +97,12 @@ bool MergeCommand::merge(const QString& workingTree)
     QTemporaryFile messageFile(QDir::temp().absoluteFilePath(QStringLiteral("kortoisegit-merge-XXXXXX.txt")));
     if (!options.message.isEmpty()) {
         if (!messageFile.open() || messageFile.write(options.message.toUtf8()) < 0 || !messageFile.flush()) {
-            KMessageBox::error(nullptr, i18n("Could not save merge message"), QString(), KMessageBox::Options());
+            KMessageBox::error(parent, i18n("Could not save merge message"), QString(), KMessageBox::Options());
             return false;
         }
     }
 
-    ProgressDlg progress(workingTree);
+    ProgressDlg progress(workingTree, parent);
     progress.addGitCmd(mergeArguments(options, messageFile.fileName()));
     // DoMerge's m_PostCmdCallback: a failed merge may have left conflicts to resolve
     QObject::connect(&progress, &ProgressDlg::commandsFinished, &progress, [&progress, &git] {
@@ -123,7 +123,7 @@ bool MergeCommand::merge(const QString& workingTree)
 
     // Leaving the progress dialog with Abort while files are in conflict offers to abort the merge
     if (progress.exec() != QDialog::Accepted && git.hasWorkingTreeConflicts()) {
-        std::ignore = AppUtils::mergeAbort(workingTree);
+        std::ignore = AppUtils::mergeAbort(workingTree, parent);
         return false;
     }
     return progress.gitStatus() == 0;

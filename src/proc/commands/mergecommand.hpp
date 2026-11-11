@@ -14,6 +14,8 @@
 
 #include <QStringList>
 
+class QWidget;
+
 namespace kgt
 {
 
@@ -42,13 +44,14 @@ public:
      */
     [[nodiscard]] static QStringList mergeArguments(const MergeOptions& options, const QString& messageFile);
 
-private:
     /**
      * Ported from CAppUtils::Merge and DoMerge, without the post-command buttons.
      * @param workingTree The working tree's root.
+     * @param initialRefName What MergeDlg selects first (m_initialRefName); empty for its default.
+     * @param parent Parent of the dialogs.
      * @returns True if git merge succeeded.
      */
-    [[nodiscard]] static bool merge(const QString& workingTree);
+    static bool merge(const QString& workingTree, const QString& initialRefName = {}, QWidget *parent = nullptr);
 };
 
 } // namespace kgt
