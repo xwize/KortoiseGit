@@ -5,8 +5,7 @@
 /**
  * @file
  * Ported from TortoiseGit src/TortoiseProc/Commands/FetchCommand.cpp, CAppUtils::Fetch and DoFetch. The
- * post-command buttons (Retry, Show Log, Reset, Fetch, Rebase, Switch), the /remote: preselection and the PuTTY key
- * are left out for now.
+ * post-command buttons (Retry, Show Log, Reset, Fetch, Rebase, Switch) and the PuTTY key are left out for now.
  */
 
 #include "commands/fetchcommand.hpp"
@@ -86,11 +85,11 @@ bool FetchCommand::execute()
                 result = false;
                 continue;
             }
-            result = fetch(clean) && result;
+            result = fetch(clean, value(QStringLiteral("remote"))) && result;
         }
         return result;
     }
-    return fetch(Git::repositoryRoot(paths().constFirst()));
+    return fetch(Git::repositoryRoot(paths().constFirst()), value(QStringLiteral("remote")));
 }
 
 QStringList FetchCommand::fetchArguments(const PullFetchOptions& options)
@@ -207,9 +206,9 @@ bool FetchCommand::doFetch(const QString& repository, const PullFetchOptions& op
     return progress.gitStatus() == 0;
 }
 
-bool FetchCommand::fetch(const QString& repository)
+bool FetchCommand::fetch(const QString& repository, const QString& remoteName)
 {
-    PullFetchDlg dlg(repository, false);
+    PullFetchDlg dlg(repository, false, nullptr, remoteName);
     if (dlg.exec() != QDialog::Accepted) {
         return false;
     }

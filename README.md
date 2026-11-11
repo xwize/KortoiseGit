@@ -43,12 +43,15 @@ Configure Dolphin > Interface > Version Control, tick KortoiseGit and untick Git
 - **Commit** with a checkable file list and Amend Last Commit
 - **Add** and **Revert**
 - **Diff** and **Diff with previous version**, through `git difftool`
-- **Pull, Fetch and Push**, asking for passwords and host keys through ksshaskpass
+- **Pull, Fetch and Push**, to a remote or an arbitrary URL, asking for passwords and host keys through ksshaskpass
 - **Switch/Checkout** and **Create Branch**
 - **Merge**, with Abort Merge while a merge is in progress
 - **Rebase**, with pick, squash, edit and skip for each commit
 - **Browse References**, to filter and delete branches and tags
 - **Clone** and **Create repository**
+- **Settings:** your git name, e-mail and signing key, the repository's remotes (also reached through Manage Remotes in
+  Push and Pull/Fetch), the diff and merge tools, and clearing saved histories, dialog sizes and "Don't show again"
+  answers
 
 ## Diff and merge tools
 
@@ -67,7 +70,9 @@ Once they're installed there is nothing to configure. Each tool is chosen like t
 | **Edit conflicts** | Your `merge.tool` setting if you have one, otherwise KDiff3, then [Meld](https://meldmerge.org/). If neither is installed, KortoiseGit tells you so. |
 | **Diff** | Your `diff.tool`, then your `merge.tool`, otherwise Meld, then KDiff3, then any other tool git finds. |
 
-Your own settings always win, so to use a different tool for either action, set it in git:
+Your own settings always win. To use a different tool for either action, choose it in KortoiseGit's Settings, on the
+Diff Viewer and Merge Tool pages, which set `diff.tool` and `merge.tool` in your global git config ("Default" removes
+them again). Or set them in git yourself:
 
 ```sh
 git config --global merge.tool meld

@@ -49,8 +49,8 @@ struct PullFetchOptions {
  * options (Squash, No Commit, No Fast Forward, Fast Forward Only), adds "- all -" when there are several remotes
  * and leaves the remote branch to the remote's refspecs.
  *
- * Left out for now: the "..." remote ref browser (SelectRemoteRefDlg), Manage Remotes, the PuTTY key, Help and a
- * submodule's default branch.
+ * Left out for now: the "..." remote ref browser (SelectRemoteRefDlg), the PuTTY key, Help and a submodule's default
+ * branch.
  */
 class PullFetchDlg : public QDialog
 {
@@ -62,9 +62,10 @@ public:
      * @param workingDirectory The working tree's root, or a bare repository.
      * @param isPull True for Pull, false for Fetch: m_IsPull.
      * @param parent Parent widget, or nullptr for a top-level dialog.
+     * @param preSelectRemote m_PreSelectRemote: the remote to start on; empty for the current branch's or the last used.
      * @throws RuntimeError (category Git) if the remotes can't be read.
      */
-    PullFetchDlg(const QString& workingDirectory, bool isPull, QWidget *parent = nullptr);
+    PullFetchDlg(const QString& workingDirectory, bool isPull, QWidget *parent = nullptr, const QString& preSelectRemote = {});
 
     /**
      * @returns The choices as OK would take them, without the checks or remembering them.
@@ -86,6 +87,12 @@ private:
      * Ported from CPullFetchDlg::OnCbnSelchangeRemote: shows the remote's default for tags and prune.
      */
     void onRemoteChanged();
+
+    /**
+     * Ported from CPullFetchDlg::OnStnClickedRemoteManage: opens the Settings dialog on its Remote page, then reads
+     * the remotes again.
+     */
+    void onRemoteManage();
 
     /**
      * Ported from CPullFetchDlg::OnBnClickedRd: switches between a named remote and an arbitrary URL.
@@ -110,6 +117,7 @@ private:
 
     Git m_git;
     bool m_isPull;
+    QString m_preSelectRemote; // m_PreSelectRemote
     bool m_rebaseActivatedInConfigForPull = false; // m_bRebaseActivatedInConfigForPull
     bool m_rebasePreserveMerges = false; // m_bRebasePreserveMerges
     QString m_configPullRemote; // m_configPullRemote: branch.<current>.remote

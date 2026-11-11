@@ -50,6 +50,26 @@ QList<QByteArray> nonEmptyLines(const QByteArray& output)
     return lines;
 }
 
+/**
+ * @param level A configuration file; not Effective, which has no switch.
+ * @returns git config's switch for it.
+ */
+QString configLevelSwitch(kgt::ConfigLevel level)
+{
+    switch (level) {
+    case kgt::ConfigLevel::Global:
+        return QStringLiteral("--global");
+    case kgt::ConfigLevel::System:
+        return QStringLiteral("--system");
+    case kgt::ConfigLevel::Effective:
+        Q_ASSERT(false);
+        [[fallthrough]];
+    case kgt::ConfigLevel::Local:
+        break;
+    }
+    return QStringLiteral("--local");
+}
+
 } // namespace
 
 namespace kgt
@@ -248,21 +268,43 @@ QString Git::configValue(const QString& name) const
     }
 }
 
+std::optional<QString> Git::configValueAt(const QString& name, ConfigLevel level) const
+{
+    QStringList arguments{QStringLiteral("config")};
+    if (level != ConfigLevel::Effective) {
+        arguments.append(configLevelSwitch(level));
+    }
+    arguments << QStringLiteral("--get") << name;
+    try {
+        QByteArray value = run(arguments, RunMode::ReadOnly);
+        if (value.endsWith('\n')) {
+            value.chop(1);
+        }
+        return QString::fromUtf8(value);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        // Exit code 1: not set. A missing file, or --local outside a repository, counts the same
+        return std::nullopt;
+    }
+}
+
 bool Git::isConfigTrue(const QString& value)
 {
     const QString lower = value.toLower();
     return lower == QLatin1String("true") || lower == QLatin1String("yes") || lower == QLatin1String("on") || lower == QLatin1String("1");
 }
 
-void Git::setConfigValue(const QString& name, const QString& value) const
+void Git::setConfigValue(const QString& name, const QString& value, ConfigLevel level) const
 {
     // After --: a value may start with a dash
-    std::ignore = run({QStringLiteral("config"), QStringLiteral("--local"), QStringLiteral("--"), name, value});
+    std::ignore = run({QStringLiteral("config"), configLevelSwitch(level), QStringLiteral("--"), name, value});
 }
 
-void Git::unsetConfigValue(const QString& name) const
+void Git::unsetConfigValue(const QString& name, ConfigLevel level) const
 {
-    std::ignore = run({QStringLiteral("config"), QStringLiteral("--local"), QStringLiteral("--unset"), QStringLiteral("--"), name});
+    std::ignore = run({QStringLiteral("config"), configLevelSwitch(level), QStringLiteral("--unset"), QStringLiteral("--"), name});
 }
 
 void Git::deleteRef(const QString& reference) const

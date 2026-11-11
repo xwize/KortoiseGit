@@ -43,6 +43,10 @@ constexpr auto endRevOption = "endrev"_L1;
 constexpr auto msgOption = "msg"_L1;
 // TortoiseGit's /ref: RefLogCommand starts on this ref
 constexpr auto refOption = "ref"_L1;
+// TortoiseGit's /page: SettingsCommand starts on this page
+constexpr auto pageOption = "page"_L1;
+// TortoiseGit's /remote: FetchCommand preselects this remote
+constexpr auto remoteOption = "remote"_L1;
 
 /**
  * Ported from the /pathfile handling in CTortoiseProcApp::InitInstance.
@@ -95,6 +99,10 @@ void addCmdLineOptions(QCommandLineParser& parser)
     parser.addOption(QCommandLineOption(msgOption, msgHelp, i18nc("@info:shell", "message")));
     const QString refHelp = i18n("With --command reflog: the ref to start on.");
     parser.addOption(QCommandLineOption(refOption, refHelp, i18nc("@info:shell", "ref")));
+    const QString pageHelp = i18n("With --command settings: the page to start on, such as gitremote.");
+    parser.addOption(QCommandLineOption(pageOption, pageHelp, i18nc("@info:shell", "page")));
+    const QString remoteHelp = i18n("With --command fetch: the remote to preselect.");
+    parser.addOption(QCommandLineOption(remoteOption, remoteHelp, i18nc("@info:shell", "remote")));
 }
 
 Result<CmdLineArgs> parseCmdLine(const QCommandLineParser& parser)
@@ -133,7 +141,7 @@ Result<CmdLineArgs> parseCmdLine(const QCommandLineParser& parser)
             values.insert(name, parser.value(name));
         }
     }
-    for (const QLatin1StringView name : {msgOption, refOption}) {
+    for (const QLatin1StringView name : {msgOption, refOption, pageOption, remoteOption}) {
         if (parser.isSet(name)) {
             values.insert(name, parser.value(name));
         }

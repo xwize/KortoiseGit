@@ -97,9 +97,10 @@ private:
     /**
      * Ported from CAppUtils::Fetch.
      * @param repository The working tree's root or the bare repository.
+     * @param remoteName The remote to preselect, from --remote; empty for the dialog's own choice.
      * @returns True if git fetch succeeded.
      */
-    [[nodiscard]] static bool fetch(const QString& repository);
+    [[nodiscard]] static bool fetch(const QString& repository, const QString& remoteName);
 };
 
 } // namespace kgt

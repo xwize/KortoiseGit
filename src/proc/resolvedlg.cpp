@@ -8,11 +8,11 @@
 #include "resolvedlg.hpp"
 
 #include "adddlg.hpp"
+#include "apputils.hpp"
 #include "gitstatuslistctrl.hpp"
 
 #include <KConfigGroup>
 #include <KLocalizedString>
-#include <KSharedConfig>
 #include <KWindowConfig>
 
 #include <QCheckBox>
@@ -40,7 +40,7 @@ constexpr int initialHeight = 400;
  */
 KConfigGroup windowSettings()
 {
-    return KSharedConfig::openConfig()->group(QStringLiteral("ResolveDlg"));
+    return kgt::AppUtils::resizableState(QStringLiteral("ResolveDlg"));
 }
 
 } // namespace

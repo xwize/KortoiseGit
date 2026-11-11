@@ -35,6 +35,16 @@ enum BranchType : unsigned int { // NOLINT(cppcoreguidelines-use-enum-class): Co
 };
 
 /**
+ * Which configuration file a value is read from or written to, CGit's CONFIG_TYPE with "every file" added.
+ */
+enum class ConfigLevel {
+    Effective, // What git itself would use: every file, the more specific one winning. Reading only
+    Local, // CONFIG_LOCAL: the repository's own config
+    Global, // CONFIG_GLOBAL: the user's ~/.gitconfig or $XDG_CONFIG_HOME/git/config
+    System, // CONFIG_SYSTEM: the machine's, usually /etc/gitconfig
+};
+
+/**
  * A sorted branch list and which entry is the current branch, as CGit::GetBranchList returns them.
  */
 struct BranchList {
@@ -191,25 +201,35 @@ public:
     [[nodiscard]] QString configValue(const QString& name) const;
 
     /**
+     * Reads a value from one configuration file, telling "not set there" from "set to nothing".
+     * @param name A configuration key, such as user.name.
+     * @param level The file to read, or Effective for all of them.
+     * @returns Its value, or nothing if it isn't set at that level or the level can't be read.
+     */
+    [[nodiscard]] std::optional<QString> configValueAt(const QString& name, ConfigLevel level) const;
+
+    /**
      * @param value A git configuration value.
      * @returns Whether git reads it as true.
      */
     [[nodiscard]] static bool isConfigTrue(const QString& value);
 
     /**
-     * Ported from CGit::SetConfigValue, for the repository's own configuration.
+     * Ported from CGit::SetConfigValue.
      * @param name A configuration key, such as branch.main.description.
      * @param value Its new value.
+     * @param level The file to write to; not Effective.
      * @throws RuntimeError (category Git) if git fails.
      */
-    void setConfigValue(const QString& name, const QString& value) const;
+    void setConfigValue(const QString& name, const QString& value, ConfigLevel level = ConfigLevel::Local) const;
 
     /**
-     * Ported from CGit::UnsetConfigValue, for the repository's own configuration.
+     * Ported from CGit::UnsetConfigValue.
      * @param name A configuration key.
+     * @param level The file to remove it from; not Effective.
      * @throws RuntimeError (category Git) if git fails, which includes the key not being set.
      */
-    void unsetConfigValue(const QString& name) const;
+    void unsetConfigValue(const QString& name, ConfigLevel level = ConfigLevel::Local) const;
 
     /**
      * Ported from CGit::GetCurrentBranch.

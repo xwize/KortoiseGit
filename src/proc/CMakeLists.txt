@@ -79,6 +79,8 @@ target_sources(kgtproc PRIVATE
     commands/resolvecommand.hpp
     commands/revertcommand.cpp
     commands/revertcommand.hpp
+    commands/settingscommand.cpp
+    commands/settingscommand.hpp
     commands/stashcommand.cpp
     commands/stashcommand.hpp
     commands/switchcommand.cpp
@@ -103,6 +105,8 @@ target_sources(kgtproc PRIVATE
     gitstatuslistmodel.hpp
     gitswitchdlg.cpp
     gitswitchdlg.hpp
+    historycombo.cpp
+    historycombo.hpp
     icons.qrc
     logdlg.cpp
     logdlg.hpp
@@ -141,6 +145,22 @@ target_sources(kgtproc PRIVATE
     resolvedlg.hpp
     revertdlg.cpp
     revertdlg.hpp
+    settings/setsaveddatapage.cpp
+    settings/setsaveddatapage.hpp
+    settings/settinggitconfig.cpp
+    settings/settinggitconfig.hpp
+    settings/settinggitremote.cpp
+    settings/settinggitremote.hpp
+    settings/settings.cpp
+    settings/settings.hpp
+    settings/settingsprogsdiff.cpp
+    settings/settingsprogsdiff.hpp
+    settings/settingsprogsmerge.cpp
+    settings/settingsprogsmerge.hpp
+    settings/settingsprogstool.cpp
+    settings/settingsprogstool.hpp
+    settings/settingsproppage.cpp
+    settings/settingsproppage.hpp
     shadowtree.cpp
     shadowtree.hpp
     stashsave.cpp

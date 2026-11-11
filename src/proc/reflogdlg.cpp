@@ -9,6 +9,7 @@
 
 #include "reflogdlg.hpp"
 
+#include "apputils.hpp"
 #include "refloglist.hpp"
 #include "utils/runtimeerror.hpp"
 
@@ -16,7 +17,6 @@
 #include <KGuiItem>
 #include <KLocalizedString>
 #include <KMessageBox>
-#include <KSharedConfig>
 #include <KWindowConfig>
 
 #include <QCheckBox>
@@ -47,7 +47,7 @@ constexpr int initialHeight = 420;
  */
 KConfigGroup windowSettings()
 {
-    return KSharedConfig::openConfig()->group(QStringLiteral("RefLogDlg"));
+    return kgt::AppUtils::resizableState(QStringLiteral("RefLogDlg"));
 }
 
 /**

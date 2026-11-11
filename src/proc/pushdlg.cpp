@@ -9,6 +9,8 @@
 
 #include "pushdlg.hpp"
 
+#include "apputils.hpp"
+#include "historycombo.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KGuiItem>
@@ -20,7 +22,10 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
+#include <QPushButton>
+#include <QRadioButton>
 #include <QShortcut>
 #include <QVBoxLayout>
 
@@ -83,7 +88,11 @@ PushDlg::PushDlg(const QString& workingTree, QWidget *parent, const QString& sel
     , m_selectLocalBranch(selectLocalBranch)
     , m_branchSource(new QComboBox(this))
     , m_branchRemote(new QComboBox(this))
+    , m_remoteRadio(new QRadioButton(i18n("Re&mote:"), this))
+    , m_urlRadio(new QRadioButton(i18n("Arbitrary &URL:"), this))
     , m_remote(new QComboBox(this))
+    , m_remoteManage(new QPushButton(i18n("Mana&ge"), this))
+    , m_remoteUrl(new QComboBox(this))
     , m_forceWithLease(new QCheckBox(i18n("Force &with lease"), this))
     , m_tags(new QCheckBox(i18n("Include &Tags"), this))
     , m_setUpstream(new QCheckBox(i18n("&Set upstream/track remote branch"), this))
@@ -103,9 +112,23 @@ PushDlg::PushDlg(const QString& workingTree, QWidget *parent, const QString& sel
     layout->addWidget(refGroup);
 
     auto *destinationGroup = new QGroupBox(i18n("Destination"), this);
-    auto *destinationLayout = new QFormLayout(destinationGroup);
-    destinationLayout->addRow(i18n("Re&mote:"), m_remote);
+    auto *destinationLayout = new QGridLayout(destinationGroup);
+    destinationLayout->addWidget(m_remoteRadio, 0, 0);
+    destinationLayout->addWidget(m_remote, 0, 1);
+    destinationLayout->addWidget(m_remoteManage, 0, 2);
+    destinationLayout->addWidget(m_urlRadio, 1, 0);
+    destinationLayout->addWidget(m_remoteUrl, 1, 1, 1, 2);
+    destinationLayout->setColumnStretch(1, 1);
     layout->addWidget(destinationGroup);
+
+    // OnInitDialog: the URL history, disabled until "Arbitrary URL" is chosen
+    m_urlRadio->setObjectName(QStringLiteral("urlRadio"));
+    m_remoteUrl->setObjectName(QStringLiteral("remoteUrl"));
+    m_remoteUrl->setEditable(true);
+    m_remoteUrl->setInsertPolicy(QComboBox::NoInsert);
+    HistoryCombo::loadHistory(m_remoteUrl, urlHistory(), QStringLiteral("url"));
+    m_remoteUrl->setEnabled(false);
+    m_remoteRadio->setChecked(true);
 
     auto *optionGroup = new QGroupBox(i18n("Options"), this);
     auto *optionLayout = new QVBoxLayout(optionGroup);
@@ -126,6 +149,8 @@ PushDlg::PushDlg(const QString& workingTree, QWidget *parent, const QString& sel
     connect(m_branchSource, &QComboBox::currentTextChanged, this, &PushDlg::selectRemoteBranch);
     connect(m_forceWithLease, &QCheckBox::toggled, this, &PushDlg::updateOptionStates);
     connect(m_tags, &QCheckBox::toggled, this, &PushDlg::updateOptionStates);
+    connect(m_remoteRadio, &QRadioButton::toggled, this, &PushDlg::onSourceChanged);
+    connect(m_remoteManage, &QPushButton::clicked, this, &PushDlg::onRemoteManage);
 
     // PreTranslateMessage's VK_F5. A failure is shown, as Refresh does, since nothing above the event loop catches it
     connect(new QShortcut(QKeySequence(Qt::Key_F5), this), &QShortcut::activated, this, [this] {
@@ -144,18 +169,19 @@ PushOptions PushDlg::options() const
 {
     return {
         .localBranch = m_branchSource->currentText().trimmed(),
-        .remote = m_remote->currentText(),
+        .remote = m_remoteRadio->isChecked() ? m_remote->currentText() : m_remoteUrl->currentText().trimmed(),
         .remoteBranch = m_branchRemote->currentText().trimmed(),
         .forceWithLease = m_forceWithLease->isEnabled() && m_forceWithLease->isChecked(),
         .tags = m_tags->isEnabled() && m_tags->isChecked(),
-        .setUpstream = m_setUpstream->isChecked(),
+        .setUpstream = m_setUpstream->isEnabled() && m_setUpstream->isChecked(),
     };
 }
 
 void PushDlg::accept()
 {
     const PushOptions chosen = options();
-    if (chosen.remote.isEmpty()) {
+    // OnBnClickedOk checks only the named remote; git itself reports an empty URL
+    if (m_remoteRadio->isChecked() && chosen.remote.isEmpty()) {
         KMessageBox::error(this, i18n("Remote name must not be empty."), QString(), noNotify);
         return;
     }
@@ -170,6 +196,9 @@ void PushDlg::accept()
     } else if (!chosen.remoteBranch.isEmpty() && !isBranchNameValid(chosen.remoteBranch)) {
         KMessageBox::error(this, i18n("Branch/Tag name is invalid."), QString(), noNotify);
         return;
+    } else if (m_remoteUrl->isEnabled()) {
+        // Remote URLs are stored only if used
+        HistoryCombo::saveHistory(m_remoteUrl, urlHistory(), QStringLiteral("url"));
     }
     QDialog::accept();
 }
@@ -219,12 +248,14 @@ void PushDlg::refresh(const QString& selectLocalBranch)
         m_setUpstream->setChecked(true);
     }
     updateOptionStates();
+    enDisablePushRemoteArchiveBranch();
 }
 
 void PushDlg::selectRemoteBranch(const QString& localBranch)
 {
     const QString branch = localBranch.trimmed();
     if (branch.isEmpty()) {
+        enDisablePushRemoteArchiveBranch();
         return;
     }
     // CGit::GetRemotePushBranch
@@ -251,6 +282,7 @@ void PushDlg::selectRemoteBranch(const QString& localBranch)
 
     // TortoiseGit falls back to the branch history; without one, the same name as the local branch
     m_branchRemote->setEditText(pushBranch.isEmpty() && branch != QLatin1String("HEAD") ? branch : pushBranch);
+    enDisablePushRemoteArchiveBranch();
 }
 
 void PushDlg::updateOptionStates()
@@ -258,6 +290,70 @@ void PushDlg::updateOptionStates()
     // --force-with-lease and --tags don't go together
     m_tags->setEnabled(!m_forceWithLease->isChecked());
     m_forceWithLease->setEnabled(!m_tags->isChecked());
+}
+
+void PushDlg::enDisablePushRemoteArchiveBranch()
+{
+    // Without "Push all branches" and the push-remote/push-branch options, only Set upstream is left to decide
+    const bool enableUpstream = m_remoteRadio->isChecked() && !m_branchSource->currentText().trimmed().isEmpty();
+    if (!enableUpstream) {
+        m_setUpstream->setChecked(false);
+    }
+    m_setUpstream->setEnabled(enableUpstream);
+}
+
+void PushDlg::onSourceChanged()
+{
+    if (m_remoteRadio->isChecked()) {
+        m_remote->setEnabled(true);
+        m_remoteManage->setEnabled(true);
+        m_remoteUrl->setEnabled(false);
+        enDisablePushRemoteArchiveBranch();
+        return;
+    }
+
+    // Similar code in PullFetchDlg::onSourceChanged
+    QString clipPath = AppUtils::getClipboardLink(QStringLiteral("git pull"), 1);
+    if (clipPath.isEmpty()) {
+        clipPath = AppUtils::getClipboardLink(QStringLiteral("git fetch"), 1);
+    }
+    const auto unquote = [](QString text) {
+        if (text.size() > 2
+            && ((text.front() == QLatin1Char('"') && text.back() == QLatin1Char('"'))
+                || (text.front() == QLatin1Char('\'') && text.back() == QLatin1Char('\'')))) {
+            text = text.mid(1, text.size() - 2);
+        }
+        return text;
+    };
+    if (clipPath.isEmpty()) {
+        if (m_remoteUrl->count() > 0) {
+            m_remoteUrl->setCurrentIndex(0);
+        }
+    } else if (const qsizetype separator = clipPath.indexOf(QLatin1Char(' ')); separator > 1 && clipPath.size() > separator + 2) {
+        m_remoteUrl->setEditText(unquote(clipPath.left(separator)));
+        m_branchRemote->setEditText(unquote(clipPath.mid(separator + 1)));
+    } else {
+        m_remoteUrl->setEditText(clipPath);
+    }
+    m_remote->setEnabled(false);
+    m_remoteManage->setEnabled(false);
+    m_remoteUrl->setEnabled(true);
+    enDisablePushRemoteArchiveBranch();
+}
+
+void PushDlg::onRemoteManage()
+{
+    AppUtils::launchRemoteSetting(m_git.workingDirectory(), this);
+    try {
+        refresh(m_selectLocalBranch);
+    } catch (const RuntimeError& e) {
+        KMessageBox::error(this, e.error().message, QString(), noNotify);
+    }
+}
+
+KConfigGroup PushDlg::urlHistory() const
+{
+    return HistoryCombo::historyGroup(QStringLiteral("PushURLS")).group(m_git.workingDirectory());
 }
 
 bool PushDlg::isBranchNameValid(const QString& name) const

@@ -33,6 +33,7 @@ set(kgt_tests
     resolvetest
     resulttest
     reverttest
+    settingstest
     stashrestoretest
     stashsavetest
     switchtest
