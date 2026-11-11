@@ -16,7 +16,6 @@
 #include "progressdlg.hpp"
 #include "pullfetchdlg.hpp"
 #include "rebasedlg.hpp"
-#include "utils/runtimeerror.hpp"
 
 #include <KGuiItem>
 #include <KLocalizedString>
@@ -29,48 +28,6 @@ namespace
 {
 
 using namespace kgt;
-
-/**
- * Ported from CGit::GetHash.
- * @param git Runs git in the repository.
- * @param ref A ref, or FETCH_HEAD.
- * @returns Its commit, or an empty string if it has none.
- */
-QString hashOf(const Git& git, const QString& ref)
-{
-    const QString name = git.fixBranchName(ref);
-    if (name.isEmpty()) {
-        return {};
-    }
-    try {
-        return QString::fromLatin1(git.run({QStringLiteral("rev-parse"),
-                                            QStringLiteral("--verify"),
-                                            QStringLiteral("-q"),
-                                            QStringLiteral("--end-of-options"),
-                                            name + QStringLiteral("^{commit}")},
-                                           RunMode::ReadOnly))
-            .trimmed();
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        return {};
-    }
-}
-
-/**
- * Ported from CGit::IsFastForward, which goes through FixBranchName.
- * @param git Runs git in the repository.
- * @param from A ref, or FETCH_HEAD.
- * @param target A ref, or FETCH_HEAD.
- * @returns Whether @p from is an ancestor of @p target; a ref that doesn't exist counts as no.
- */
-bool isFastForward(const Git& git, const QString& from, const QString& target)
-{
-    const QString fromName = git.fixBranchName(from);
-    const QString targetName = git.fixBranchName(target);
-    return !fromName.isEmpty() && !targetName.isEmpty() && git.isFastForward(fromName, targetName);
-}
 
 /**
  * Asks whether to open the rebase dialog although there seems to be nothing to rebase; No is the default.
@@ -185,7 +142,7 @@ FetchedUpstream FetchCommand::rebaseUpstream(const Git& git, const PullFetchOpti
             fetched.upstream = QStringLiteral("remotes/%1/%2").arg(options.remoteUrl, pullBranch);
         }
     }
-    fetched.oldHash = hashOf(git, fetched.upstream);
+    fetched.oldHash = git.hash(fetched.upstream);
     return fetched;
 }
 
@@ -193,9 +150,9 @@ void FetchCommand::rebaseFetched(const Git& git, const FetchedUpstream& fetched,
 {
     const QString& upstream = fetched.upstream;
     if (runRebase == FetchRebase::Open) {
-        const QString remoteBranchHash = hashOf(git, upstream);
-        const QString headHash = hashOf(git, QStringLiteral("HEAD"));
-        if (!headHash.isEmpty() && (remoteBranchHash == headHash || isFastForward(git, upstream, QStringLiteral("HEAD")))
+        const QString remoteBranchHash = git.hash(upstream);
+        const QString headHash = git.hash(QStringLiteral("HEAD"));
+        if (!headHash.isEmpty() && (remoteBranchHash == headHash || git.isFastForward(upstream, QStringLiteral("HEAD")))
             && !askOpenRebase(parent,
                               i18n("Current branch is up to date or newer than the fetched branch. Open rebase anyway?"),
                               QStringLiteral("OpenRebaseRemoteBranchEqualsHEAD"))) {
@@ -207,7 +164,7 @@ void FetchCommand::rebaseFetched(const Git& git, const FetchedUpstream& fetched,
                               QStringLiteral("OpenRebaseRemoteBranchUnchanged"))) {
             return;
         }
-        if (isFastForward(git, QStringLiteral("HEAD"), upstream)) {
+        if (git.isFastForward(QStringLiteral("HEAD"), upstream)) {
             const auto answer = KMessageBox::questionTwoActionsCancel(
                 parent,
                 i18n("The fetched branch fast-forwards upon the current branch.\n\nMerge or open the rebase dialog anyway?"),
@@ -227,9 +184,11 @@ void FetchCommand::rebaseFetched(const Git& git, const FetchedUpstream& fetched,
         }
     }
 
-    AppUtils::rebaseAfterFetch(git.workingDirectory(),
-                               {.upstream = upstream, .force = false, .autoStart = runRebase == FetchRebase::AutoStart, .preserveMerges = preserveMerges},
-                               parent);
+    RebaseOptions rebaseOptions;
+    rebaseOptions.upstream = upstream;
+    rebaseOptions.autoStart = runRebase == FetchRebase::AutoStart;
+    rebaseOptions.preserveMerges = preserveMerges;
+    AppUtils::rebaseAfterFetch(git.workingDirectory(), rebaseOptions, parent);
 }
 
 bool FetchCommand::doFetch(const QString& repository, const PullFetchOptions& options, FetchRebase runRebase, QWidget *parent)

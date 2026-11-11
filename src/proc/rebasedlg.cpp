@@ -479,7 +479,7 @@ bool RebaseDlg::checkFetchLogListRefs(QString& branchHash, QString& upstreamHash
         m_commitList->showText(i18n("Please select branch"));
         return false;
     }
-    branchHash = hashOf(branch);
+    branchHash = m_git.hash(branch);
     if (branchHash.isEmpty()) {
         m_commitList->showText(i18n("Could not get hash of \"%1\".", branch));
         return false;
@@ -488,7 +488,7 @@ bool RebaseDlg::checkFetchLogListRefs(QString& branchHash, QString& upstreamHash
         m_commitList->showText(i18n("Please select upstream"));
         return false;
     }
-    upstreamHash = hashOf(upstream);
+    upstreamHash = m_git.hash(upstream);
     if (upstreamHash.isEmpty()) {
         m_commitList->showText(i18n("Could not get hash of \"%1\".", upstream));
         return false;
@@ -592,13 +592,13 @@ void RebaseDlg::preserveMergesDropCommits()
 {
     // FetchLogList's m_bPreserveMerges part: keep the commits that descend from the merge base
     GitLogListModel *model = m_commitList->logModel();
-    const QString head = hashOf(QStringLiteral("HEAD"));
+    const QString head = m_git.hash(QStringLiteral("HEAD"));
     if (head.isEmpty()) {
         addLogString(i18n("No HEAD found"));
         return;
     }
     const QString upstreamRef = m_onto.isEmpty() ? m_upstreamCtrl->currentText() : m_onto;
-    const QString upstreamHash = hashOf(upstreamRef);
+    const QString upstreamHash = m_git.hash(upstreamRef);
     if (upstreamHash.isEmpty()) {
         showError(i18n("Could not get hash of \"%1\".", upstreamRef));
         return;
@@ -838,13 +838,13 @@ void RebaseDlg::onOnto()
     m_onto = BrowseRefsDlg::pickRef(m_git.workingDirectory(), {.initialRef = m_onto, .pickRefKind = PickRefAll}, this);
     if (!m_onto.isEmpty()) {
         // Make sure that the user did not select upstream or the selected branch
-        const QString hash = hashOf(m_onto);
+        const QString hash = m_git.hash(m_onto);
         if (hash.isEmpty()) {
             showError(i18n("Could not get hash of \"%1\".", m_onto));
             m_onto.clear();
         } else {
             const auto sameAs = [this, &hash](const QString& ref) {
-                const QString refHash = hashOf(ref);
+                const QString refHash = m_git.hash(ref);
                 return refHash.isEmpty() || refHash == hash;
             };
             if (sameAs(m_upstreamCtrl->currentText()) || sameAs(m_branchCtrl->currentText())) {

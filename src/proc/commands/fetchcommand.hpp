@@ -40,8 +40,8 @@ struct FetchedUpstream {
 
 /**
  * Fetches ("fetch"): asks where from in PullFetchDlg, then runs git fetch in ProgressDlg, as CAppUtils::Fetch
- * and DoFetch do, and opens RebaseDlg afterwards if asked to. Works in a bare repository too. Several paths are fetched one after another, each of which must
- * be a working tree's root or a bare repository.
+ * and DoFetch do, and opens RebaseDlg afterwards if asked to. Works in a bare repository too. Several paths are
+ * fetched one after another, each of which must be a working tree's root or a bare repository.
  */
 class FetchCommand : public Command
 {

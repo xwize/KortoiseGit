@@ -352,7 +352,6 @@ private:
     void abortJob();
     void restoreAfterAbort();
     [[nodiscard]] GitResult gitRun(const QStringList& arguments, const QByteArray& input = {}) const;
-    [[nodiscard]] QString hashOf(const QString& ref) const;
     [[nodiscard]] std::optional<GitRevLoglist> getCommit(const QString& ref) const;
     [[nodiscard]] bool isFastForward(const QString& fromRef, const QString& toRef, QString *commonAncestor = nullptr) const;
     [[nodiscard]] bool checkCleanWorkTree(bool stagedOk = false) const;

@@ -225,9 +225,17 @@ public:
     void deleteRef(const QString& reference) const;
 
     /**
+     * Ported from CGit::GetHash, peeled to the commit.
+     * @param ref A ref, a revision or FETCH_HEAD.
+     * @returns Its commit's hash, or an empty string if it names none.
+     * @throws RuntimeError for a failure other than git's.
+     */
+    [[nodiscard]] QString hash(const QString& ref) const;
+
+    /**
      * Ported from CGit::IsFastForward.
-     * @param from A revision.
-     * @param target A revision.
+     * @param from A revision, or FETCH_HEAD.
+     * @param target A revision, or FETCH_HEAD.
      * @returns Whether @p from is an ancestor of @p target; any failure counts as no.
      */
     [[nodiscard]] bool isFastForward(const QString& from, const QString& target) const;

@@ -290,9 +290,37 @@ void Git::deleteRef(const QString& reference) const
     std::ignore = run(arguments);
 }
 
+QString Git::hash(const QString& ref) const
+{
+    // No need to look up a ref if it's already an OID
+    if (isHash(ref.toLatin1())) {
+        return ref;
+    }
+    if (ref.isEmpty()) {
+        return {};
+    }
+    QString name = fixBranchName(ref);
+    if (name.isEmpty()) {
+        name = ref;
+    }
+    const QStringList arguments{QStringLiteral("rev-parse"),
+                                QStringLiteral("--verify"),
+                                QStringLiteral("-q"),
+                                QStringLiteral("--end-of-options"),
+                                name + QStringLiteral("^{commit}")};
+    try {
+        return QString::fromLatin1(run(arguments, RunMode::ReadOnly)).trimmed();
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        return {};
+    }
+}
+
 bool Git::isFastForward(const QString& from, const QString& target) const
 {
-    const QStringList arguments{QStringLiteral("merge-base"), QStringLiteral("--is-ancestor"), from, target};
+    const QStringList arguments{QStringLiteral("merge-base"), QStringLiteral("--is-ancestor"), fixBranchName(from), fixBranchName(target)};
     try {
         std::ignore = run(arguments, RunMode::ReadOnly);
         return true;

@@ -33,7 +33,7 @@ struct PullFetchOptions {
     QString remoteBranchName; // m_RemoteBranchName: empty for the remote's configured refspecs
     bool allRemotes = false; // m_bAllRemotes: fetch from every remote ("- all -")
     bool rebase = false; // m_bRebase: fetch, then open RebaseDlg
-    bool rebaseActivatedInConfigForPull = false; // m_bRebaseActivatedInConfigForPull: branch.<name>.rebase or pull.rebase asks for it
+    bool rebaseActivatedInConfigForPull = false; // m_bRebaseActivatedInConfigForPull: the configuration asks for it
     bool rebasePreserveMerges = false; // m_bRebasePreserveMerges: that setting is "merges"
     bool noFF = false; // m_bNoFF: --no-ff
     bool ffOnly = false; // m_bFFonly: --ff-only
