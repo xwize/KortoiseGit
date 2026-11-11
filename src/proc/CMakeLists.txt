@@ -107,6 +107,8 @@ target_sources(kgtproc PRIVATE
     gitswitchdlg.hpp
     historycombo.cpp
     historycombo.hpp
+    historydlg.cpp
+    historydlg.hpp
     icons.qrc
     logdlg.cpp
     logdlg.hpp
@@ -139,6 +141,8 @@ target_sources(kgtproc PRIVATE
     refloglist.hpp
     refloglistmodel.cpp
     refloglistmodel.hpp
+    reghistory.cpp
+    reghistory.hpp
     resetdlg.cpp
     resetdlg.hpp
     resolvedlg.cpp

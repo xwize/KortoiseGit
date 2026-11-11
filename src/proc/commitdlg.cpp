@@ -8,7 +8,9 @@
  * Ported from TortoiseGit src/TortoiseProc/CommitDlg.cpp: OnInitDialog (the layout), StatusThread (what the list
  * shows and checks), OnUpdateOKButton, OnBnClickedShowunversioned, OnBnClickedCommitAmend, OnCheck (All and None),
  * OnOK with PrepareIndexForCommitWithoutStagingSupport, and GetCommitTemplate with CGit::LoadTextFile for the starting
- * message. TortoiseGit's progress dialog for git commit becomes an error message inside the dialog.
+ * message. TortoiseGit's progress dialog for git commit becomes an error message inside the dialog. Also the recent
+ * messages (ReloadHistoryEntries, InsertMenuItems, HandleMenuItemClick, OnBnClickedHistory) and Add Signed-off-by
+ * (GetSignedOffByLine, OnBnClickedSignOff).
  */
 
 #include "commitdlg.hpp"
@@ -19,6 +21,8 @@
 #include "git/massivegittask.hpp"
 #include "gitstatuslistctrl.hpp"
 #include "gitstatuslistmodel.hpp"
+#include "historycombo.hpp"
+#include "historydlg.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KGuiItem>
@@ -36,12 +40,14 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QTemporaryFile>
+#include <QTextCursor>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -272,6 +278,32 @@ QString commitTemplate(const QString& root)
     return *text;
 }
 
+/**
+ * Ported from CGit::GetUserName and CGit::GetUserEmail: the environment wins over author.* and then user.*.
+ * @param root The working tree root.
+ * @param variable GIT_AUTHOR_NAME or GIT_AUTHOR_EMAIL.
+ * @param what "name" or "email".
+ * @returns The value, or an empty string if none is set.
+ */
+QString userValue(const QString& root, const char *variable, const QString& what)
+{
+    if (QString value = qEnvironmentVariable(variable); !value.isEmpty()) {
+        return value;
+    }
+    const Git git(root);
+    try {
+        if (QString value = git.configValue(QStringLiteral("author.") + what); !value.isEmpty()) {
+            return value;
+        }
+        return git.configValue(QStringLiteral("user.") + what);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        return {};
+    }
+}
+
 } // namespace
 
 namespace kgt
@@ -304,20 +336,23 @@ void CommitDlg::loadInitialMessage(const QString& logMessage)
     // OnInitDialog: a message passed in is kept. Otherwise the message starts as commit.template, and SQUASH_MSG and
     // MERGE_MSG from the working tree's own admin directory follow it. CGit::LoadTextFile appends, so all that exist are
     // joined in that order, as git commit itself puts SQUASH_MSG before MERGE_MSG.
-    if (!logMessage.isEmpty()) {
-        m_message->setPlainText(logMessage);
-        return;
-    }
-    QString message;
+    // GetCommitTemplate(m_sLogTemplate) runs either way: the recent messages compare with it
     QStringList errors;
     try {
-        message = commitTemplate(m_workingTree);
+        m_logTemplate = commitTemplate(m_workingTree);
     } catch (const RuntimeError& e) {
         if (e.error().category != ErrorCategory::Io) {
             throw;
         }
-        errors.append(e.error().message);
+        if (logMessage.isEmpty()) {
+            errors.append(e.error().message);
+        }
     }
+    if (!logMessage.isEmpty()) {
+        m_message->setPlainText(logMessage);
+        return;
+    }
+    QString message = m_logTemplate;
     const QDir adminDir(GitAdminDir::worktreeAdminDirPath(m_workingTree));
     for (const QString& name : {QStringLiteral("SQUASH_MSG"), QStringLiteral("MERGE_MSG")}) {
         try {
@@ -390,6 +425,134 @@ QCheckBox *CommitDlg::amendButton() const
     return m_amendButton;
 }
 
+QPushButton *CommitDlg::signOffButton() const
+{
+    return m_signOffButton;
+}
+
+KConfigGroup CommitDlg::historyGroup()
+{
+    // TortoiseGit names the group commit<UUID>, but never sets m_ListCtrl.m_sUUID: every repository shares one
+    // history, "commit". The same here.
+    return HistoryCombo::historyGroup(QStringLiteral("commit"));
+}
+
+void CommitDlg::reloadHistoryEntries()
+{
+    // TortoiseGit's MaxHistoryItems, 25 by default; not configurable yet
+    m_history.load(historyGroup(), QStringLiteral("logmsgs"));
+}
+
+void CommitDlg::addToHistory(const QString& message)
+{
+    // OnOK and OnCancel: the message, then the one typed before amend was ticked unless it is only the template
+    if (!message.isEmpty()) {
+        reloadHistoryEntries();
+        m_history.addEntry(message);
+        m_history.save();
+    }
+    if (isAmending() && !m_noAmendStr.isEmpty() && m_logTemplate != m_noAmendStr) {
+        reloadHistoryEntries();
+        m_history.addEntry(m_noAmendStr);
+        m_history.save();
+    }
+}
+
+QMenu *CommitDlg::createMessageContextMenu(QWidget *parent)
+{
+    QMenu *menu = m_message->createStandardContextMenu();
+    menu->setParent(parent, menu->windowFlags());
+    reloadHistoryEntries();
+    if (m_history.isEmpty()) {
+        return menu;
+    }
+    menu->addSeparator();
+    // HandleMenuItemClick: the newest message goes in at the cursor
+    connect(menu->addAction(i18n("Paste &last commit message")), &QAction::triggered, this, [this] {
+        reloadHistoryEntries();
+        if (!m_history.isEmpty()) {
+            m_message->insertPlainText(m_history.entry(0));
+        }
+    });
+    connect(menu->addAction(i18n("Paste r&ecent message...")), &QAction::triggered, this, &CommitDlg::onHistory);
+    return menu;
+}
+
+void CommitDlg::onShowMessageContextMenu(const QPoint& pos)
+{
+    QMenu *menu = createMessageContextMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->popup(m_message->viewport()->mapToGlobal(pos));
+}
+
+void CommitDlg::onHistory()
+{
+    reloadHistoryEntries();
+    HistoryDlg historyDlg(m_history, this);
+    if (historyDlg.exec() != QDialog::Accepted) {
+        return;
+    }
+    // The chosen message replaces one that is only the template, and is inserted otherwise; nothing happens if the
+    // message already starts with it. TortoiseGit's bug ID lookup isn't ported.
+    const QString sMsg = historyDlg.selectedText();
+    const QString text = m_message->toPlainText();
+    if (sMsg != text.left(sMsg.size())) {
+        if (m_logTemplate != text) {
+            // CSciEdit::InsertText(sMsg, bNewLine): a newline follows unless the message was empty
+            m_message->insertPlainText(text.isEmpty() ? sMsg : sMsg + QLatin1Char('\n'));
+        } else {
+            m_message->setPlainText(sMsg);
+        }
+    }
+    m_message->setFocus();
+}
+
+QString CommitDlg::signedOffByLine(const QString& workingTree)
+{
+    QString userName = userValue(workingTree, "GIT_AUTHOR_NAME", QStringLiteral("name"));
+    QString email = userValue(workingTree, "GIT_AUTHOR_EMAIL", QStringLiteral("email"));
+    userName.remove(QLatin1Char('\n'));
+    email.remove(QLatin1Char('\n'));
+    return QStringLiteral("Signed-off-by: %1 <%2>").arg(userName, email);
+}
+
+QString CommitDlg::addSignOff(const QString& message, const QString& line)
+{
+    if (message.contains(line)) {
+        return message;
+    }
+    // TrimRight
+    QString text = message;
+    while (!text.isEmpty() && text.back().isSpace()) {
+        text.chop(1);
+    }
+    QString str = line;
+    const qsizetype lastNewline = text.lastIndexOf(QLatin1Char('\n'));
+    qsizetype foundByLine = -1;
+    if (lastNewline > 0) {
+        foundByLine = text.indexOf("-by: "_L1, lastNewline);
+    }
+    if (foundByLine == -1 || foundByLine < lastNewline) {
+        str.prepend(QLatin1Char('\n'));
+    }
+    return text + QLatin1Char('\n') + str + QLatin1Char('\n');
+}
+
+void CommitDlg::onSignOff()
+{
+    const QString text = m_message->toPlainText();
+    const QString signedOff = addSignOff(text, signedOffByLine(m_workingTree));
+    if (signedOff == text) {
+        return;
+    }
+    // Replaced through a cursor, so that it can be undone
+    QTextCursor cursor(m_message->document());
+    cursor.select(QTextCursor::Document);
+    cursor.insertText(signedOff);
+    m_message->setTextCursor(cursor);
+    m_message->setFocus();
+}
+
 bool CommitDlg::isCommitting() const
 {
     return m_isCommitting;
@@ -451,6 +614,10 @@ void CommitDlg::reject()
     if (m_isCommitting || m_fileList->isModifying()) {
         return;
     }
+    // OnCancel: a message other than the one the dialog started with is kept in the history
+    const QString message = m_message->toPlainText();
+    const bool hasChangedMessage = !message.isEmpty() && message != (isAmending() ? m_amendStr : m_logTemplate);
+    addToHistory(hasChangedMessage ? message : QString());
     QDialog::reject();
 }
 
@@ -482,7 +649,14 @@ void CommitDlg::createWidgets()
         i18n("Use this to modify/replace the latest checked out commit with a new commit. The message from the original commit is used as the "
              "starting point. Attention: This modifies the Git history."));
     m_amendButton->setEnabled(false);
-    messageLayout->addWidget(m_amendButton);
+    auto *amendRow = new QHBoxLayout;
+    amendRow->addWidget(m_amendButton);
+    amendRow->addStretch();
+    m_signOffButton = new QPushButton(i18n("Add &Signed-off-by"), messageGroup);
+    m_signOffButton->setAutoDefault(false);
+    amendRow->addWidget(m_signOffButton);
+    messageLayout->addLayout(amendRow);
+    m_message->setContextMenuPolicy(Qt::CustomContextMenu);
     splitter->addWidget(messageGroup);
 
     auto *listGroup = new QGroupBox(i18n("Changes made (F5: refresh, double-click on file for diff):"), splitter);
@@ -537,6 +711,8 @@ void CommitDlg::createWidgets()
     connect(m_fileList, &GitStatusListCtrl::loaded, this, &CommitDlg::onListLoaded);
     connect(m_fileList, &GitStatusListCtrl::loadFailed, this, &CommitDlg::updateOkButton);
     connect(m_showUnversioned, &QCheckBox::toggled, this, &CommitDlg::onShowUnversionedToggled);
+    connect(m_signOffButton, &QPushButton::clicked, this, &CommitDlg::onSignOff);
+    connect(m_message, &QPlainTextEdit::customContextMenuRequested, this, &CommitDlg::onShowMessageContextMenu);
     // Only the user's click swaps the message (ON_BN_CLICKED); the dialog unticks it without swapping
     connect(m_amendButton, &QCheckBox::clicked, this, &CommitDlg::onAmendClicked);
     // PreTranslateMessage's VK_F5, wherever the focus is; ignored while m_bBlock (a commit or a status load is running)
@@ -674,6 +850,7 @@ void CommitDlg::finishCommit()
     m_messageFile.reset();
     setBusy(false);
     if (!m_commitError) {
+        addToHistory(m_message->toPlainText());
         // TortoiseGit resets amend after a successful commit, for when the dialog stays open
         m_amendStr.clear();
         {
@@ -697,6 +874,7 @@ void CommitDlg::setBusy(bool busy)
     m_message->setReadOnly(busy);
     m_fileList->setEnabled(!busy);
     m_showUnversioned->setEnabled(!busy);
+    m_signOffButton->setEnabled(!busy);
     if (busy) {
         m_amendButton->setEnabled(false);
     }

@@ -6,8 +6,7 @@
 /**
  * @file
  * Ported from TortoiseGit src/TortoiseProc/Settings/SetSavedDataPage.cpp and its IDD_SETTINGSSAVEDDATA resource,
- * without the rows for what we don't keep: log messages, authentication data, temporary files, the log cache and
- * the action log.
+ * without the rows for what we don't keep: authentication data, temporary files, the log cache and the action log.
  */
 
 #include "settings/setsaveddatapage.hpp"
@@ -46,6 +45,15 @@ qsizetype recursivelyCount(const KConfigGroup& group)
 }
 
 /**
+ * @param name A history's group, under "History".
+ * @returns Whether it holds commit messages, as CSetSavedDataPage tells them by the "commit" prefix.
+ */
+bool isLogHistory(const QString& name)
+{
+    return name.startsWith(QLatin1String("commit"), Qt::CaseInsensitive);
+}
+
+/**
  * @returns Where KMessageBox keeps the "Don't show this message again" answers.
  */
 KConfigGroup storedDecisions()
@@ -61,6 +69,7 @@ namespace kgt
 SetSavedDataPage::SetSavedDataPage(QWidget *parent)
     : SettingsPropPage(parent)
     , m_urlHistClear(new QPushButton(i18n("Clear"), this))
+    , m_logHistClear(new QPushButton(i18n("Clear"), this))
     , m_resizableHistClear(new QPushButton(i18n("Clear"), this))
     , m_storedDecisionsClear(new QPushButton(i18n("Clear"), this))
 {
@@ -77,25 +86,54 @@ SetSavedDataPage::SetSavedDataPage(QWidget *parent)
     // tree, and the branch names typed live beside the URLs, so every entry is counted
     const qsizetype histories = historyCount();
     addRow(0, i18n("URL history"), m_urlHistClear, histories, i18np("Clears %1 stored history entry", "Clears %1 stored history entries", histories));
-    const qsizetype dialogs = resizableCount();
+    const auto [messages, workingTrees] = logHistoryCount();
     addRow(1,
+           i18n("Log messages (Input dialog)"),
+           m_logHistClear,
+           messages + workingTrees,
+           i18n("Clears %1 log messages stored for %2 working trees", messages, workingTrees));
+    const qsizetype dialogs = resizableCount();
+    addRow(2,
            i18n("Dialog sizes and positions"),
            m_resizableHistClear,
            dialogs,
            i18np("Clears the stored sizes and positions of %1 dialog", "Clears the stored sizes and positions of %1 dialogs", dialogs));
     const qsizetype decisions = storedDecisionCount();
-    addRow(2, i18n("Stored decisions"), m_storedDecisionsClear, decisions, i18np("Clears %1 stored decision", "Clears %1 stored decisions", decisions));
+    addRow(3, i18n("Stored decisions"), m_storedDecisionsClear, decisions, i18np("Clears %1 stored decision", "Clears %1 stored decisions", decisions));
     layout->setColumnStretch(0, 1);
-    layout->setRowStretch(3, 1);
+    layout->setRowStretch(4, 1);
 
     connect(m_urlHistClear, &QPushButton::clicked, this, &SetSavedDataPage::onUrlHistClear);
+    connect(m_logHistClear, &QPushButton::clicked, this, &SetSavedDataPage::onLogHistClear);
     connect(m_resizableHistClear, &QPushButton::clicked, this, &SetSavedDataPage::onResizableHistClear);
     connect(m_storedDecisionsClear, &QPushButton::clicked, this, &SetSavedDataPage::onStoredDecisionsClear);
 }
 
 qsizetype SetSavedDataPage::historyCount()
 {
-    return recursivelyCount(HistoryCombo::allHistories());
+    const KConfigGroup histories = HistoryCombo::allHistories();
+    qsizetype count = 0;
+    for (const QString& name : histories.groupList()) {
+        if (!isLogHistory(name)) {
+            count += recursivelyCount(histories.group(name));
+        }
+    }
+    return count;
+}
+
+std::pair<qsizetype, qsizetype> SetSavedDataPage::logHistoryCount()
+{
+    // CSetSavedDataPage::OnInitDialog's nLogHistMsg and nLogHistWC
+    const KConfigGroup histories = HistoryCombo::allHistories();
+    qsizetype messages = 0;
+    qsizetype workingTrees = 0;
+    for (const QString& name : histories.groupList()) {
+        if (isLogHistory(name)) {
+            ++workingTrees;
+            messages += recursivelyCount(histories.group(name));
+        }
+    }
+    return {messages, workingTrees};
 }
 
 qsizetype SetSavedDataPage::resizableCount()
@@ -111,10 +149,27 @@ qsizetype SetSavedDataPage::storedDecisionCount()
 void SetSavedDataPage::onUrlHistClear()
 {
     KConfigGroup histories = HistoryCombo::allHistories();
-    histories.deleteGroup();
+    for (const QString& name : histories.groupList()) {
+        if (!isLogHistory(name)) {
+            histories.deleteGroup(name);
+        }
+    }
     histories.sync();
     m_urlHistClear->setEnabled(false);
     m_urlHistClear->setToolTip(QString());
+}
+
+void SetSavedDataPage::onLogHistClear()
+{
+    KConfigGroup histories = HistoryCombo::allHistories();
+    for (const QString& name : histories.groupList()) {
+        if (isLogHistory(name)) {
+            histories.deleteGroup(name);
+        }
+    }
+    histories.sync();
+    m_logHistClear->setEnabled(false);
+    m_logHistClear->setToolTip(QString());
 }
 
 void SetSavedDataPage::onResizableHistClear()

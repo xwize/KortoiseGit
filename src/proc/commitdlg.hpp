@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include "reghistory.hpp"
 #include "utils/error.hpp"
 
 #include <QByteArray>
@@ -27,6 +28,7 @@ class KMessageWidget;
 class QCheckBox;
 class QLabel;
 class QLineEdit;
+class QMenu;
 class QPlainTextEdit;
 class QPushButton;
 class QTemporaryFile;
@@ -119,6 +121,41 @@ public:
     [[nodiscard]] QCheckBox *amendButton() const;
 
     /**
+     * @returns The "Add Signed-off-by" button.
+     */
+    [[nodiscard]] QPushButton *signOffButton() const;
+
+    /**
+     * Ported from CCommitDlg::InsertMenuItems: the message editor's context menu, with "Paste last commit message" and
+     * "Paste recent message..." added when there are stored messages.
+     * @param parent The menu's parent.
+     * @returns The menu, owned by @p parent.
+     */
+    [[nodiscard]] QMenu *createMessageContextMenu(QWidget *parent);
+
+    /**
+     * Ported from CCommitDlg::ReloadHistoryEntries.
+     * @returns Where the commit messages are kept, TortoiseGit's History\commit<UUID>.
+     */
+    [[nodiscard]] static KConfigGroup historyGroup();
+
+    /**
+     * Ported from CCommitDlg::GetSignedOffByLine.
+     * @param workingTree The working tree, whose user name and email are used.
+     * @returns "Signed-off-by: name <email>".
+     */
+    [[nodiscard]] static QString signedOffByLine(const QString& workingTree);
+
+    /**
+     * Ported from CCommitDlg::OnBnClickedSignOff: appends the Signed-off-by line, after a blank line unless the last
+     * line is already a -by: trailer. Does nothing if the message has the line already.
+     * @param message The message.
+     * @param line The Signed-off-by line, from signedOffByLine().
+     * @returns The message with the line.
+     */
+    [[nodiscard]] static QString addSignOff(const QString& message, const QString& line);
+
+    /**
      * @returns Whether a commit is running.
      */
     [[nodiscard]] bool isCommitting() const;
@@ -160,6 +197,24 @@ private:
     void onStepFinished();
     void finishCommit();
     void setBusy(bool busy);
+    /**
+     * Ported from CCommitDlg::ReloadHistoryEntries.
+     */
+    void reloadHistoryEntries();
+    /**
+     * Stores the message, and the one typed before amend was ticked, as OnOK and OnCancel do.
+     * @param message The message to store, or an empty string for none.
+     */
+    void addToHistory(const QString& message);
+    void onShowMessageContextMenu(const QPoint& pos);
+    /**
+     * Ported from CCommitDlg::OnBnClickedHistory.
+     */
+    void onHistory();
+    /**
+     * Ported from CCommitDlg::OnBnClickedSignOff.
+     */
+    void onSignOff();
 
     QString m_workingTree;
     QLineEdit *m_commitTo = nullptr;
@@ -168,6 +223,7 @@ private:
     QLabel *m_statistics = nullptr;
     QCheckBox *m_showUnversioned = nullptr;
     QCheckBox *m_amendButton = nullptr; // m_bCommitAmend
+    QPushButton *m_signOffButton = nullptr;
     QPushButton *m_okButton = nullptr;
     KMessageWidget *m_errorView = nullptr;
     QList<CommitStep> m_steps; // The commit's steps still to run
@@ -177,6 +233,8 @@ private:
     std::optional<Error> m_commitError; // The first failure of the running commit
     QString m_amendStr; // HEAD's message, as last shown while amending (m_AmendStr)
     QString m_noAmendStr; // The message typed before amend was ticked (m_NoAmendStr)
+    QString m_logTemplate; // commit.template's text (m_sLogTemplate)
+    RegHistory m_history; // The commit messages used before (m_History)
     bool m_amendDiffToLastCommit = false; // HEAD is a root commit, so amending compares with HEAD itself
     bool m_mergeActive = false; // A merge is being concluded (CTGitPath::IsMergeActive)
     bool m_isCommitting = false;
