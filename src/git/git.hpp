@@ -46,6 +46,16 @@ enum class ConfigLevel {
 };
 
 /**
+ * What git_config_get_bool reports for a key: not set, a boolean, or a value git can't read as one.
+ */
+enum class ConfigBool {
+    NotSet, // GIT_ENOTFOUND
+    False,
+    True,
+    NotBoolean, // Set, but neither a boolean nor a number, such as core.autocrlf's "input"
+};
+
+/**
  * A sorted branch list and which entry is the current branch, as CGit::GetBranchList returns them.
  */
 struct BranchList {
@@ -208,6 +218,15 @@ public:
      * @returns Its value, or nothing if it isn't set at that level or the level can't be read.
      */
     [[nodiscard]] std::optional<QString> configValueAt(const QString& name, ConfigLevel level) const;
+
+    /**
+     * Reads a value from one configuration file as a boolean, the way git_config_get_bool does: true/yes/on,
+     * false/no/off/empty, a number (true unless zero) or a key with no value (true). Git itself parses it.
+     * @param name A configuration key, such as core.autocrlf.
+     * @param level The file to read, or Effective for all of them.
+     * @returns Whether it is set there and how git reads it.
+     */
+    [[nodiscard]] ConfigBool configBoolAt(const QString& name, ConfigLevel level) const;
 
     /**
      * @param value A git configuration value.

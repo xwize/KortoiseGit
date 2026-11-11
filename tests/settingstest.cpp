@@ -147,8 +147,9 @@ private Q_SLOTS:
         const TestRepo repo;
         const Git git(repo.path());
         git.setConfigValue(QStringLiteral("core.autocrlf"), QStringLiteral("Input"), ConfigLevel::Local);
-        git.setConfigValue(QStringLiteral("core.safecrlf"), QStringLiteral("yes"), ConfigLevel::Local);
-        git.setConfigValue(QStringLiteral("core.quotepath"), QStringLiteral("false"), ConfigLevel::Local);
+        // A number is a boolean too, as git and git_config_get_bool read it
+        git.setConfigValue(QStringLiteral("core.safecrlf"), QStringLiteral("2"), ConfigLevel::Local);
+        git.setConfigValue(QStringLiteral("core.quotepath"), QStringLiteral("0"), ConfigLevel::Local);
 
         SettingGitConfig page(repo.path());
         auto *autoCrLf = page.findChild<QComboBox *>(QStringLiteral("autoCrLf"));
@@ -161,7 +162,7 @@ private Q_SLOTS:
         QVERIFY(!autoCrLf->isEnabled() && !safeCrLf->isEnabled() && !quotePath->isEnabled());
         QCOMPARE(autoCrLf->currentText(), QStringLiteral("input"));
 
-        // Local: the text decides between input and false, a boolean reads as true
+        // Local: the text decides between input and false, a true number reads as true
         page.setConfigSource(SettingGitConfig::ConfigSource::Local);
         QVERIFY(autoCrLf->isEnabled() && safeCrLf->isEnabled() && quotePath->isEnabled());
         QCOMPARE(autoCrLf->currentText(), QStringLiteral("input"));

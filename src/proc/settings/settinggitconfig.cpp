@@ -144,19 +144,28 @@ QCheckBox *inheritCheckBox(QWidget *parent)
 
 /**
  * Ported from the core.autocrlf and core.safecrlf parts of CSettingGitConfig::LoadDataImpl.
- * @param value The key's value at the level shown, if it is set there.
+ * @param git Runs git.
+ * @param key core.autocrlf or core.safecrlf.
+ * @param level The level shown.
  * @param combo AutoCrLf's or SafeCrLf's list: "", false, true and then @p other.
  * @param other "input" or "warn".
  */
-void loadCrLf(const std::optional<QString>& value, QComboBox *combo, QLatin1String other)
+void loadCrLf(const Git& git, const QString& key, ConfigLevel level, QComboBox *combo, QLatin1String other)
 {
-    if (!value) {
+    switch (git.configBoolAt(key, level)) {
+    case ConfigBool::NotSet:
         combo->setCurrentIndex(0);
-    } else if (Git::isConfigTrue(*value)) {
+        return;
+    case ConfigBool::True:
         combo->setCurrentIndex(2);
-    } else {
-        combo->setCurrentIndex(value->toLower().trimmed() == other ? 3 : 1);
+        return;
+    case ConfigBool::False:
+    case ConfigBool::NotBoolean:
+        break;
     }
+    // Not true: the text decides between "input" or "warn" and false
+    const QString value = git.configValueAt(key, level).value_or(QString());
+    combo->setCurrentIndex(value.toLower().trimmed() == other ? 3 : 1);
 }
 
 } // namespace
@@ -423,13 +432,22 @@ void SettingGitConfig::loadData()
         load(QStringLiteral("user.email"), m_userEmail, m_inheritEmail);
     }
 
-    loadCrLf(m_git.configValueAt(QStringLiteral("core.autocrlf"), level), m_autoCrLf, QLatin1String("input"));
+    loadCrLf(m_git, QStringLiteral("core.autocrlf"), level, m_autoCrLf, QLatin1String("input"));
 
-    if (const std::optional<QString> quotePath = m_git.configValueAt(QStringLiteral("core.quotepath"), level)) {
-        m_quotePath->setCheckState(Git::isConfigTrue(*quotePath) ? Qt::Checked : Qt::Unchecked);
-    } else {
-        // Not set: git quotes by default
+    switch (m_git.configBoolAt(QStringLiteral("core.quotepath"), level)) {
+    case ConfigBool::NotSet:
+        // Git quotes by default
         m_quotePath->setCheckState(m_configSource == ConfigSource::Effective ? Qt::Checked : Qt::PartiallyChecked);
+        break;
+    case ConfigBool::True:
+        m_quotePath->setCheckState(Qt::Checked);
+        break;
+    case ConfigBool::False:
+        m_quotePath->setCheckState(Qt::Unchecked);
+        break;
+    case ConfigBool::NotBoolean:
+        // As git_config_get_bool failing leaves m_bQuotePath alone: the checkbox keeps what it showed
+        break;
     }
 
     if (const std::optional<QString> prune = m_git.configValueAt(QStringLiteral("fetch.prune"), level)) {
@@ -439,7 +457,7 @@ void SettingGitConfig::loadData()
         m_prune->setCheckState(m_configSource == ConfigSource::Effective ? Qt::Unchecked : Qt::PartiallyChecked);
     }
 
-    loadCrLf(m_git.configValueAt(QStringLiteral("core.safecrlf"), level), m_safeCrLf, QLatin1String("warn"));
+    loadCrLf(m_git, QStringLiteral("core.safecrlf"), level, m_safeCrLf, QLatin1String("warn"));
 
     m_needSave = false;
     setModified(false);
