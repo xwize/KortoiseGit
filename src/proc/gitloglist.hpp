@@ -302,6 +302,7 @@ private:
         bool isStash = false; // IsOnStash
         int row = -1; // The commit's row
         QStringList parents; // GetParentHashes
+        bool isHead = false; // isHeadCommit
     };
 
     /**
@@ -327,6 +328,9 @@ private:
     void showLogMenu(QContextMenuEvent *event);
     [[nodiscard]] bool isOnStash(int row) const;
     void addSingleCommitEntries(QMenu& menu, const LogMenuTarget& target);
+    void addSwitchBranchEntry(QMenu& menu, const LogMenuTarget& target);
+    void addRevertEntry(QMenu& menu, const LogMenuTarget& target);
+    [[nodiscard]] bool isMergeActive() const;
     void addCompareEntries(QMenu& menu, const LogMenuTarget& target);
     [[nodiscard]] QStringList parentHashes(const GitRevLoglist& rev);
     [[nodiscard]] QString parentInfo(qsizetype number, const QString& hash) const;
@@ -342,6 +346,14 @@ private:
     void cancelCopy();
     void resetToCommit(const LogMenuTarget& target);
     void createTag(const LogMenuTarget& target);
+    void createBranch(const LogMenuTarget& target);
+    void switchToRev(const LogMenuTarget& target);
+    void switchBranch(const QString& ref);
+    void mergeRev(const LogMenuTarget& target);
+    void rebaseToVersion(const LogMenuTarget& target);
+    void revertRev(int parent);
+    [[nodiscard]] bool revertSelectedCommits(int parent);
+    void openCommitDlg();
     void push(const LogMenuTarget& target);
     void deleteRefs(const QStringList& refs);
     void reloadHashMap();
