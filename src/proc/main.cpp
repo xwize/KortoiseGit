@@ -102,7 +102,8 @@ int main(int argc, char *argv[])
                          i18n("A port of TortoiseGit to KDE. Not affiliated with the TortoiseGit project."),
                          KAboutLicense::GPL_V2,
                          i18n("© 2026 James Jones"));
-    aboutData.setLicense(KAboutLicense::GPL_V2, KAboutLicense::OrLaterVersions);
+    // lanes.cpp/hpp come from QGit and are GPL-2.0-only, which makes the combined program GPL-2.0-only.
+    aboutData.setLicense(KAboutLicense::GPL_V2, KAboutLicense::OnlyThisVersion);
     KAboutData::setApplicationData(aboutData);
 
     QApplication::setWindowIcon(AppUtils::appIcon());

@@ -81,12 +81,14 @@ git config --global diff.tool meld
 
 ## Licence
 
-GPL-2.0-or-later; see [LICENSES/](LICENSES/). Files ported from TortoiseGit keep its copyright lines and say which
-file they come from.
+KortoiseGit as a whole is GPL-2.0-only; see [LICENSES/](LICENSES/).
+
+The project's own files and the files ported from TortoiseGit are GPL-2.0-or-later. Files ported from TortoiseGit keep
+its copyright lines and say which file they come from.
 
 The commit graph's lane code, `src/proc/lanes.hpp` and `lanes.cpp`, comes from TortoiseGit's `lanes.cpp`, which took it
-from [QGit](https://github.com/tibirna/qgit) (Marco Costalba). Those two files are GPL-2.0-only, which makes the
-combined program GPL-2.0-only.
+from [QGit](https://github.com/tibirna/qgit) (Marco Costalba). Those two files are GPL-2.0-only, and that is what makes
+the combined program GPL-2.0-only.
 
 The log list's action icons in `src/proc/icons/` are TortoiseGit's (`src/Resources/action*.ico`, converted to PNG),
 derived from the [TortoiseSVN](https://tortoisesvn.net/) project's icons. TortoiseGit offers them under the GPL or the
