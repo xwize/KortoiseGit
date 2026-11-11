@@ -188,6 +188,8 @@ QVariant RefLeafListModel::data(const QModelIndex& index, int role) const
     case Qt::DisplayRole:
     case Qt::ToolTipRole:
         return cellText(row, index.column());
+    case Qt::EditRole:
+        return index.column() == NameColumn ? QVariant(row.name) : QVariant();
     case Qt::FontRole:
         // The current branch is bold, as TortoiseGit's list draws it
         if (!m_currentBranchRef.isEmpty() && row.tree->refName() == m_currentBranchRef) {
@@ -256,6 +258,27 @@ void RefLeafListModel::sort(int column, Qt::SortOrder order)
     }
     changePersistentIndexList(oldIndexes, newIndexes);
     Q_EMIT layoutChanged({}, QAbstractItemModel::VerticalSortHint);
+}
+
+Qt::ItemFlags RefLeafListModel::flags(const QModelIndex& index) const
+{
+    Qt::ItemFlags flags = QAbstractTableModel::flags(index);
+    // OnLvnBeginlabeleditListRefLeafs: don't allow renaming anything but branches
+    if (index.isValid() && index.column() == NameColumn && index.row() < m_entries.size()
+        && m_entries.at(index.row()).tree->isFrom(QLatin1StringView("refs/heads/"))) {
+        flags |= Qt::ItemIsEditable;
+    }
+    return flags;
+}
+
+bool RefLeafListModel::setData(const QModelIndex& index, const QVariant& value, int role)
+{
+    if (role != Qt::EditRole || !index.isValid() || index.column() != NameColumn || index.row() >= m_entries.size()) {
+        return false;
+    }
+    Q_EMIT nameEdited(m_entries.at(index.row()).tree->refName(), value.toString());
+    // As TortoiseGit: "Do as if it failed to rename. Let Refresh() do the job."
+    return false;
 }
 
 } // namespace kgt

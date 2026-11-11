@@ -8,7 +8,12 @@
 
 #include "apputils.hpp"
 #include "browserefsdlgfilter.hpp"
+#include "commands/fetchcommand.hpp"
+#include "commands/mergecommand.hpp"
+#include "createbranchtagdlg.hpp"
+#include "gitdiff.hpp"
 #include "progressdlg.hpp"
+#include "reflogdlg.hpp"
 
 #include "git/gitadmindir.hpp"
 #include "git/gitcall.hpp"
@@ -28,6 +33,8 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
+#include <QInputDialog>
+#include <QItemSelection>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -124,6 +131,7 @@ namespace kgt
 BrowseRefsDlg::BrowseRefsDlg(const QString& workingTree, QWidget *parent)
     : QDialog(parent)
     , m_git(workingTree)
+    , m_hasWC(!GitAdminDir::isBareRepo(workingTree))
     , m_initialRef(QStringLiteral("HEAD"))
 {
     createWidgets();
@@ -244,7 +252,9 @@ void BrowseRefsDlg::createWidgets()
         refresh();
     });
     connect(m_refTree->selectionModel(), &QItemSelectionModel::currentChanged, this, &BrowseRefsDlg::fillListCtrlForTreeNode);
-    connect(m_listRefLeafs->selectionModel(), &QItemSelectionModel::selectionChanged, this, &BrowseRefsDlg::updateInfoLabel);
+    connect(m_listRefLeafs->selectionModel(), &QItemSelectionModel::selectionChanged, this, &BrowseRefsDlg::onListSelectionChanged);
+    // Queued: the rename runs git and may show a message box, which mustn't happen inside the editor's commit
+    connect(m_listModel, &RefLeafListModel::nameEdited, this, &BrowseRefsDlg::onNameEdited, Qt::QueuedConnection);
     connect(m_listRefLeafs, &QWidget::customContextMenuRequested, this, &BrowseRefsDlg::onListContextMenu);
     connect(m_listRefLeafs, &QAbstractItemView::doubleClicked, this, &BrowseRefsDlg::onListDoubleClicked);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -562,6 +572,17 @@ QString BrowseRefsDlg::infoText() const
     return m_infoLabel->text();
 }
 
+void BrowseRefsDlg::onListSelectionChanged(const QItemSelection& selected)
+{
+    // OnItemChangedListRefLeafs
+    for (const QModelIndex& index : selected.indexes()) {
+        if (index.column() == RefLeafListModel::NameColumn) {
+            m_lastSelected = m_listModel->entry(index.row()).tree->refName();
+        }
+    }
+    updateInfoLabel();
+}
+
 void BrowseRefsDlg::updateInfoLabel()
 {
     m_infoLabel->setText(i18n("Showing %1 ref(s), %2 ref(s) selected", m_listModel->rowCount(), m_listRefLeafs->selectionModel()->selectedRows().size()));
@@ -630,19 +651,12 @@ std::unique_ptr<QMenu> BrowseRefsDlg::createListContextMenu()
             connect(popupMenu->addAction(i18n("Select")), &QAction::triggered, this, &QDialog::accept);
             popupMenu->addSeparator();
         }
-        if (leaves.constFirst()->ref.objectType == GitObjectType::Commit) {
-            QAction *log = popupMenu->addAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show &log"));
-            const QString refName = leaves.constFirst()->refName();
-            connect(log, &QAction::triggered, this, [this, refName] {
-                showLog(refName);
-            });
-            popupMenu->setDefaultAction(log);
-        }
-        // TODO: Browse repository, reflog, compare with working tree, fetch, merge, switch, create branch, edit
-        // description, rename and the upstream entries come with Phase 4
+        addSingleRefEntries(*popupMenu, *leaves.constFirst());
+        addSeparator = true;
+    } else if (leaves.size() == 2) {
+        addTwoRefEntries(*popupMenu, leaves);
         addSeparator = true;
     }
-    // TODO: with two refs selected, the compare and log range entries come with Phase 4
 
     QString deleteText;
     if (!leaves.isEmpty() && areAllFrom(refNames, remotesPrefix)) {
@@ -681,6 +695,293 @@ std::unique_ptr<QMenu> BrowseRefsDlg::createListContextMenu()
         AppUtils::copyToClipboard(hashes.join(QLatin1Char('\n')));
     });
     return popupMenu;
+}
+
+void BrowseRefsDlg::addSingleRefEntries(QMenu& popupMenu, const ShadowTree& leaf)
+{
+    // ShowContextMenu with one ref selected. Entries take the ref by name and value: a refresh finishing while the
+    // menu is open rebuilds the tree
+    const QString refName = leaf.refName();
+    const bool isCommit = leaf.ref.objectType == GitObjectType::Commit;
+    const bool isHead = leaf.isFrom(headsPrefix);
+    const bool isRemote = leaf.isFrom(remotesPrefix);
+    const bool showReflogOption = isHead || isRemote;
+    const bool showRenameOption = isHead;
+    const bool showEditBranchDescriptionOption = isHead && isCommit;
+    const bool showCreateBranchOption = isRemote;
+    // Only a ref under a known remote can be fetched
+    const std::optional<RemoteBranch> remoteBranch = isRemote ? splitRemoteBranchName(refName, m_remotes) : std::nullopt;
+
+    const auto addEntry = [this, &popupMenu](const QString& iconName, const QString& text, auto handler) {
+        QAction *action = popupMenu.addAction(QIcon::fromTheme(iconName), text);
+        connect(action, &QAction::triggered, this, handler);
+        return action;
+    };
+
+    if (isCommit) {
+        popupMenu.setDefaultAction(addEntry(QStringLiteral("view-history"), i18n("Show &log"), [this, refName] {
+            showLog(refName);
+        }));
+    }
+    if (showReflogOption) {
+        addEntry(QStringLiteral("view-history"), i18n("Show &RefLog"), [this, refName] {
+            showRefLog(refName);
+        });
+    }
+    if (m_hasWC && isCommit) {
+        popupMenu.addSeparator();
+        addEntry(QStringLiteral("vcs-diff"), i18n("Compare with &working tree"), [this, refName] {
+            compareWithWorkingTree(refName);
+        });
+    }
+    popupMenu.addSeparator();
+
+    if (remoteBranch) {
+        const QString remote = remoteBranch->remote;
+        addEntry(QStringLiteral("vcs-pull"), i18n("Fetch from \"%1\"", remote), [this, remote] {
+            fetchFrom(remote);
+        });
+        popupMenu.addSeparator();
+    }
+
+    if (m_hasWC && isCommit) {
+        const QString currentBranch = m_git.currentBranch();
+        if (refName != headsPrefix + currentBranch) {
+            addEntry(QStringLiteral("vcs-merge"), i18n("&Merge to \"%1\"...", currentBranch), [this, refName] {
+                mergeRef(refName);
+            });
+        }
+        addEntry(QStringLiteral("vcs-branch"), i18n("Sw&itch/Checkout to this..."), [this, refName] {
+            switchToRef(refName);
+        });
+        popupMenu.addSeparator();
+    }
+
+    if (showCreateBranchOption) {
+        const QString hash = leaf.ref.hash;
+        addEntry(QStringLiteral("vcs-branch"), i18n("Create &Branch..."), [this, hash] {
+            createBranch(hash);
+        });
+    }
+    if (showEditBranchDescriptionOption) {
+        const QString branch = leaf.refsHeadsName();
+        addEntry(QStringLiteral("edit-rename"), i18n("Edit description"), [this, branch] {
+            editBranchDescription(branch);
+        });
+    }
+    if (showRenameOption) {
+        addEntry(QStringLiteral("edit-rename"), i18n("Rename"), [this, refName] {
+            startRename(refName);
+        });
+    }
+
+    if (m_hasWC && isCommit && isHead) {
+        popupMenu.addSeparator();
+        const QString branch = leaf.refsHeadsName();
+        if (!leaf.ref.upstreamRef.isEmpty()) {
+            addEntry(QString(), i18n("Unset tracked branch"), [this, branch] {
+                dropUpstream(branch);
+            });
+        }
+        addEntry(QString(), i18n("Select tracked branch"), [this, branch] {
+            setUpstream(branch);
+        });
+    }
+}
+
+void BrowseRefsDlg::addTwoRefEntries(QMenu& popupMenu, const VectorShadowTree& leaves)
+{
+    // ShowContextMenu with two refs selected
+    const QString refName1 = leaves.at(0)->refName();
+    const QString refName2 = leaves.at(1)->refName();
+    const QString hash1 = leaves.at(0)->ref.hash;
+    const QString hash2 = leaves.at(1)->ref.hash;
+    connect(popupMenu.addAction(QIcon::fromTheme(QStringLiteral("vcs-diff")), i18n("Compare selected refs")),
+            &QAction::triggered,
+            this,
+            [this, refName1, refName2] {
+                compareRefs(refName1, refName2);
+            });
+    // eCmd_UnifiedDiff. Shift's alternative viewer doesn't apply: there is only the text editor
+    connect(popupMenu.addAction(QIcon::fromTheme(QStringLiteral("vcs-diff")), i18n("Show changes as &unified diff")),
+            &QAction::triggered,
+            this,
+            [this, hash1, hash2] {
+                std::ignore = AppUtils::startShowUnifiedDiff(m_git, hash1, hash2, this);
+            });
+    const QStringList refNames{refName1, refName2};
+    for (const QString& separator : {QStringLiteral(".."), QStringLiteral("...")}) {
+        // eCmd_ViewLogRange and eCmd_ViewLogRangeReachableFromOnlyOne
+        const QString range = twoSelectedRefs(refNames, m_lastSelected, separator);
+        connect(popupMenu.addAction(QIcon::fromTheme(QStringLiteral("view-history")), i18n("Show log of %1", range)), &QAction::triggered, this, [this, range] {
+            showLog(range);
+        });
+    }
+}
+
+QString BrowseRefsDlg::twoSelectedRefs(const QStringList& refNames, const QString& lastSelected, const QString& separator)
+{
+    Q_ASSERT(refNames.size() == 2);
+    const QString& other = refNames.at(0) == lastSelected ? refNames.at(1) : refNames.at(0);
+    return Git::stripRefName(other) + separator + Git::stripRefName(lastSelected);
+}
+
+void BrowseRefsDlg::showRefLog(const QString& refName)
+{
+    // eCmd_ShowReflog
+    RefLogDlg refLogDlg(m_git.workingDirectory(), this);
+    refLogDlg.setCurrentBranch(refName);
+    refLogDlg.refresh();
+    refLogDlg.exec();
+}
+
+void BrowseRefsDlg::compareWithWorkingTree(const QString& refName)
+{
+    // eCmd_DiffWC opens showcompare between the ref and the working tree, whose Changed Files dialog isn't ported;
+    // as the log dialog's compares, git difftool --dir-diff shows every changed file in one window
+    std::ignore = GitDiff::start(this, {.workingDirectory = m_git.workingDirectory(), .arguments = GitDiff::dirArguments({}, QString(), refName)});
+}
+
+void BrowseRefsDlg::compareRefs(const QString& refName1, const QString& refName2)
+{
+    // eCmd_Diff: CFileDiffDlg::SetDiff(nullptr, first, second) with the second as the base, which isn't ported; see
+    // compareWithWorkingTree()
+    std::ignore = GitDiff::start(this, {.workingDirectory = m_git.workingDirectory(), .arguments = GitDiff::dirArguments({}, refName1, refName2)});
+}
+
+void BrowseRefsDlg::fetchFrom(const QString& remote)
+{
+    // eCmd_Fetch
+    std::ignore = FetchCommand::fetch(m_git.workingDirectory(), remote, this);
+    refresh();
+}
+
+void BrowseRefsDlg::mergeRef(const QString& refName)
+{
+    // eCmd_Merge. TortoiseGit doesn't refresh; a merge moves the current branch, so the list is reloaded here
+    if (MergeCommand::merge(m_git.workingDirectory(), refName, this)) {
+        refresh();
+    }
+}
+
+void BrowseRefsDlg::switchToRef(const QString& refName)
+{
+    // eCmd_Switch. Reloaded, as the switch may create a branch and changes which one is current (bold)
+    if (AppUtils::switchTo(m_git.workingDirectory(), refName, this)) {
+        refresh();
+    }
+}
+
+void BrowseRefsDlg::createBranch(const QString& hash)
+{
+    // eCmd_CreateBranch
+    CreateBranchTagParams params;
+    params.initialRefName = hash;
+    AppUtils::createBranchTag(m_git.workingDirectory(), params, this);
+    refresh();
+}
+
+void BrowseRefsDlg::editBranchDescription(const QString& branch)
+{
+    // eCmd_EditBranchDescription: CInputDlg with the hint and title both "Edit description", starting from the
+    // description the list shows
+    const QString description = treeNode(headsPrefix + branch, nullptr, false).ref.description;
+    bool accepted = false;
+    const QString text = QInputDialog::getMultiLineText(this, i18n("Edit description"), i18n("Edit description"), description, &accepted);
+    if (accepted) {
+        AppUtils::updateBranchDescription(m_git, branch, text);
+        refresh();
+    }
+}
+
+void BrowseRefsDlg::startRename(const QString& refName)
+{
+    // eCmd_Rename: edit the name in place; onNameEdited() takes it from there
+    for (int row = 0; row < m_listModel->rowCount(); ++row) {
+        if (m_listModel->entry(row).tree->refName() == refName) {
+            const QModelIndex index = m_listModel->index(row, RefLeafListModel::NameColumn);
+            m_listRefLeafs->setCurrentIndex(index);
+            m_listRefLeafs->edit(index);
+            return;
+        }
+    }
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): The parameters of RefLeafListModel::nameEdited
+void BrowseRefsDlg::onNameEdited(const QString& refName, const QString& newText)
+{
+    // OnLvnEndlabeleditListRefLeafs
+    if (!refName.startsWith(headsPrefix)) {
+        KMessageBox::error(this, i18n("At the moment, you can only rename branches."), QString(), noNotify);
+        return;
+    }
+    const QString origName = refName.mid(headsPrefix.size());
+    QString newName;
+    if (m_listCtrlRoot) {
+        newName = m_listCtrlRoot->refName() + QLatin1Char('/');
+    }
+    newName += newText;
+    if (!newName.startsWith(headsPrefix)) {
+        KMessageBox::error(this, i18n("You cannot change the type of this ref with a rename."), QString(), noNotify);
+        return;
+    }
+    const QString newNameTrunced = newName.mid(headsPrefix.size());
+    try {
+        std::ignore = m_git.run({QStringLiteral("branch"), QStringLiteral("-m"), origName, QStringLiteral("--"), newNameTrunced});
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        KMessageBox::error(this, e.error().message, QString(), noNotify);
+        return;
+    }
+    // TortoiseGit means to keep the tree node selected; the branch's new name may be under another one
+    refresh(newName);
+}
+
+void BrowseRefsDlg::dropUpstream(const QString& branch)
+{
+    // eCmd_UpstreamDrop. As g_Git.UnsetConfigValue's result is ignored there, a key that isn't set doesn't matter
+    for (const QString& key : {QStringLiteral("branch.%1.remote").arg(branch), QStringLiteral("branch.%1.merge").arg(branch)}) {
+        try {
+            m_git.unsetConfigValue(key);
+        } catch (const RuntimeError& e) {
+            if (e.error().category != ErrorCategory::Git) {
+                throw;
+            }
+        }
+    }
+    refresh();
+}
+
+void BrowseRefsDlg::setUpstream(const QString& branch)
+{
+    // eCmd_UpstreamSet
+    const QString newRef = pickRef(m_git.workingDirectory(), {.initialRef = QString(), .pickRefKind = PickRefRemote, .pickMultipleRefs = false}, this);
+    if (newRef.isEmpty() || !newRef.startsWith(remotesPrefix)) {
+        return;
+    }
+    const std::optional<RemoteBranch> split = splitRemoteBranchName(newRef, m_remotes);
+    if (!split) {
+        return;
+    }
+    // Setting the config keys directly might result in an invalid situation if the remote is not set to fetch the
+    // desired upstream branch (in remote.x.fetch), cf. TortoiseGit issue #3638
+    try {
+        std::ignore = m_git.run(
+            {QStringLiteral("branch"), QStringLiteral("--set-upstream-to=") + split->remote + QLatin1Char('/') + split->branch, QStringLiteral("--"), branch});
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        KMessageBox::error(this,
+                           e.error().message + QStringLiteral("\n\n")
+                               + i18n("This is usually caused when the setting \"remote.%1.fetch\" does not include the desired branch.", split->remote),
+                           QString(),
+                           noNotify);
+        return;
+    }
+    refresh();
 }
 
 void BrowseRefsDlg::onListContextMenu(const QPoint& pos)

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "browserefsdlg.hpp"
+#include "apputils.hpp"
+#include "pullfetchdlg.hpp"
 #include "testrepo.hpp"
 
 #include "utils/runtimeerror.hpp"
@@ -9,7 +11,9 @@
 #include <QApplication>
 #include <QDialogButtonBox>
 #include <QFont>
+#include <QInputDialog>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QPixmap>
 #include <QPushButton>
@@ -122,6 +126,31 @@ QAction *findAction(const QMenu& menu, const QString& text)
         }
     }
     return nullptr;
+}
+
+/**
+ * @param menu A menu.
+ * @returns Its entries' texts, without separators.
+ */
+QStringList actionTexts(const QMenu& menu)
+{
+    QStringList texts;
+    for (const QAction *action : menu.actions()) {
+        if (!action->isSeparator()) {
+            texts.append(action->text());
+        }
+    }
+    return texts;
+}
+
+/**
+ * @param repo A repository.
+ * @param key A config key.
+ * @returns Its value, or an empty string if it isn't set.
+ */
+QString configValue(const TestRepo& repo, const QString& key)
+{
+    return repo.git().configValue(key);
 }
 
 /**
@@ -405,9 +434,210 @@ private Q_SLOTS:
         QCOMPARE(dlg.pickedRef(), QStringLiteral("main"));
     }
 
-private:
-    std::unique_ptr<TestRepo> m_upstream;
-    std::unique_ptr<TestRepo> m_repo;
+    void singleRefMenu()
+    {
+        BrowseRefsDlg dlg(m_repo->path());
+        QVERIFY(waitLoaded(dlg));
+
+        // The current branch, with an upstream: no merge into itself
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/heads/main"), true));
+        std::unique_ptr<QMenu> menu = dlg.createListContextMenu();
+        QCOMPARE(actionTexts(*menu),
+                 (QStringList{QStringLiteral("Show &log"),
+                              QStringLiteral("Show &RefLog"),
+                              QStringLiteral("Compare with &working tree"),
+                              QStringLiteral("Sw&itch/Checkout to this..."),
+                              QStringLiteral("Edit description"),
+                              QStringLiteral("Rename"),
+                              QStringLiteral("Unset tracked branch"),
+                              QStringLiteral("Select tracked branch"),
+                              QStringLiteral("Delete branch"),
+                              QStringLiteral("Copy ref names"),
+                              QStringLiteral("Copy SHA-1")}));
+        QCOMPARE(menu->defaultAction()->text(), QStringLiteral("Show &log"));
+
+        // Another branch without an upstream can be merged into the current one
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/heads/other"), true));
+        menu = dlg.createListContextMenu();
+        QVERIFY(findAction(*menu, QStringLiteral("&Merge to \"main\"...")));
+        QVERIFY(!findAction(*menu, QStringLiteral("Unset tracked branch")));
+        QVERIFY(findAction(*menu, QStringLiteral("Select tracked branch")));
+
+        // A remote branch: fetch from its remote and create a branch, but no rename or description
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/remotes/origin/topic"), true));
+        menu = dlg.createListContextMenu();
+        QCOMPARE(actionTexts(*menu),
+                 (QStringList{QStringLiteral("Show &log"),
+                              QStringLiteral("Show &RefLog"),
+                              QStringLiteral("Compare with &working tree"),
+                              QStringLiteral("Fetch from \"origin\""),
+                              QStringLiteral("&Merge to \"main\"..."),
+                              QStringLiteral("Sw&itch/Checkout to this..."),
+                              QStringLiteral("Create &Branch..."),
+                              QStringLiteral("Delete remote branch"),
+                              QStringLiteral("Copy ref names"),
+                              QStringLiteral("Copy SHA-1")}));
+
+        // An annotated tag isn't a commit: only the delete and copies
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/tags/v2"), true));
+        menu = dlg.createListContextMenu();
+        QCOMPARE(actionTexts(*menu), (QStringList{QStringLiteral("Delete tag"), QStringLiteral("Copy ref names"), QStringLiteral("Copy SHA-1")}));
+        // A lightweight one is
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/tags/v1"), true));
+        menu = dlg.createListContextMenu();
+        QVERIFY(findAction(*menu, QStringLiteral("Show &log")));
+        QVERIFY(findAction(*menu, QStringLiteral("Sw&itch/Checkout to this...")));
+        QVERIFY(!findAction(*menu, QStringLiteral("Show &RefLog")));
+        QVERIFY(!findAction(*menu, QStringLiteral("Rename")));
+    }
+
+    void twoRefMenu()
+    {
+        QCOMPARE(BrowseRefsDlg::twoSelectedRefs({QStringLiteral("refs/heads/a"), QStringLiteral("refs/heads/b")},
+                                                QStringLiteral("refs/heads/a"),
+                                                QStringLiteral("..")),
+                 QStringLiteral("b..a"));
+        QCOMPARE(BrowseRefsDlg::twoSelectedRefs({QStringLiteral("refs/heads/a"), QStringLiteral("refs/tags/v")},
+                                                QStringLiteral("refs/tags/v"),
+                                                QStringLiteral("...")),
+                 QStringLiteral("a...tags/v"));
+
+        BrowseRefsDlg dlg(m_repo->path());
+        QVERIFY(waitLoaded(dlg));
+        // Select other, then main: main was selected last and goes second
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/heads/other"), true));
+        const RefLeafListModel *model = dlg.listModel();
+        dlg.refList()->selectionModel()->select(model->index(rowOf(model, QStringLiteral("main")), 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        const std::unique_ptr<QMenu> menu = dlg.createListContextMenu();
+        QCOMPARE(actionTexts(*menu),
+                 (QStringList{QStringLiteral("Compare selected refs"),
+                              QStringLiteral("Show changes as &unified diff"),
+                              QStringLiteral("Show log of other..main"),
+                              QStringLiteral("Show log of other...main"),
+                              QStringLiteral("Delete 2 branches"),
+                              QStringLiteral("Copy ref names"),
+                              QStringLiteral("Copy SHA-1")}));
+    }
+
+    void unifiedDiffArguments()
+    {
+        QCOMPARE(AppUtils::unifiedDiffArguments(QStringLiteral("a"), QStringLiteral("b"), -1),
+                 (QStringList{QStringLiteral("diff-tree"),
+                              QStringLiteral("-r"),
+                              QStringLiteral("-p"),
+                              QStringLiteral("--stat"),
+                              QStringLiteral("--end-of-options"),
+                              QStringLiteral("a"),
+                              QStringLiteral("b"),
+                              QStringLiteral("--")}));
+        QVERIFY(AppUtils::unifiedDiffArguments(QStringLiteral("a"), QStringLiteral("b"), 5).contains(QStringLiteral("--unified=5")));
+        // The command runs
+        const QString diff = QString::fromUtf8(m_repo->git().run(AppUtils::unifiedDiffArguments(QStringLiteral("main"), QStringLiteral("other"), -1)));
+        QVERIFY(diff.contains(QStringLiteral("+++ b/b.txt")));
+    }
+
+    void rename()
+    {
+        BrowseRefsDlg dlg(m_repo->path());
+        QVERIFY(waitLoaded(dlg));
+        dlg.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&dlg));
+        RefLeafListModel *model = dlg.listModel();
+
+        // Only branch names are editable
+        const int featureRow = rowOf(model, QStringLiteral("feature/x"));
+        QVERIFY(model->flags(model->index(featureRow, RefLeafListModel::NameColumn)).testFlag(Qt::ItemIsEditable));
+        QVERIFY(!model->flags(model->index(featureRow, RefLeafListModel::MsgColumn)).testFlag(Qt::ItemIsEditable));
+
+        // Rename edits the name in place, relative to the tree node the list shows: refs/heads/feature
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/heads/feature/x"), true));
+        const std::unique_ptr<QMenu> menu = dlg.createListContextMenu();
+        findAction(*menu, QStringLiteral("Rename"))->trigger();
+        const auto *editor = dlg.refList()->viewport()->findChild<QLineEdit *>();
+        QVERIFY(editor);
+        QCOMPARE(editor->text(), QStringLiteral("x"));
+
+        // Finishing the edit runs git branch -m and reloads, with the renamed branch selected
+        QVERIFY(model->setData(dlg.refList()->currentIndex(), QStringLiteral("y")) == false);
+        QVERIFY(waitLoaded(dlg));
+        QVERIFY(!refExists(*m_repo, QStringLiteral("refs/heads/feature/x")));
+        QVERIFY(refExists(*m_repo, QStringLiteral("refs/heads/feature/y")));
+        QCOMPARE(dlg.selectedRef(true, false), QStringLiteral("refs/heads/feature/y"));
+
+        // Tags can't be renamed
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/tags/v1"), true));
+        QVERIFY(!model->flags(model->index(0, RefLeafListModel::NameColumn)).testFlag(Qt::ItemIsEditable));
+    }
+
+    void trackedBranch()
+    {
+        BrowseRefsDlg dlg(m_repo->path());
+        QVERIFY(waitLoaded(dlg));
+
+        // Unset tracked branch drops branch.main.remote and .merge
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/heads/main"), true));
+        std::unique_ptr<QMenu> menu = dlg.createListContextMenu();
+        findAction(*menu, QStringLiteral("Unset tracked branch"))->trigger();
+        QVERIFY(waitLoaded(dlg));
+        QVERIFY(configValue(*m_repo, QStringLiteral("branch.main.remote")).isEmpty());
+        QVERIFY(configValue(*m_repo, QStringLiteral("branch.main.merge")).isEmpty());
+        QCOMPARE(dlg.listModel()->index(rowOf(dlg.listModel(), QStringLiteral("main")), RefLeafListModel::UpstreamColumn).data().toString(), QString());
+
+        // Select tracked branch picks a remote branch from a picker that only lists them
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/heads/main"), true));
+        menu = dlg.createListContextMenu();
+        whenModal<BrowseRefsDlg>(
+            [](BrowseRefsDlg *picker) {
+                QVERIFY(picker->selectRef(QStringLiteral("refs/remotes/origin/topic"), true));
+                picker->accept();
+            },
+            [](BrowseRefsDlg *picker) {
+                return !picker->isLoading() && picker->listModel()->rowCount() > 0;
+            });
+        findAction(*menu, QStringLiteral("Select tracked branch"))->trigger();
+        QVERIFY(waitLoaded(dlg));
+        QCOMPARE(configValue(*m_repo, QStringLiteral("branch.main.remote")), QStringLiteral("origin"));
+        QCOMPARE(configValue(*m_repo, QStringLiteral("branch.main.merge")), QStringLiteral("refs/heads/topic"));
+    }
+
+    void editDescription()
+    {
+        BrowseRefsDlg dlg(m_repo->path());
+        QVERIFY(waitLoaded(dlg));
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/heads/other"), true));
+        const std::unique_ptr<QMenu> menu = dlg.createListContextMenu();
+        QString shown;
+        whenModal<QInputDialog>([&shown](QInputDialog *input) {
+            shown = input->textValue();
+            input->setTextValue(QStringLiteral("New description"));
+            input->accept();
+        });
+        findAction(*menu, QStringLiteral("Edit description"))->trigger();
+        QCOMPARE(shown, QStringLiteral("Other\nwork"));
+        QVERIFY(waitLoaded(dlg));
+        QCOMPARE(configValue(*m_repo, QStringLiteral("branch.other.description")), QStringLiteral("New description"));
+    }
+
+    void fetchFromPreselectsTheRemote()
+    {
+        m_repo->run({QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("up"), m_upstream->path()});
+        m_repo->run({QStringLiteral("fetch"), QStringLiteral("--quiet"), QStringLiteral("up")});
+        BrowseRefsDlg dlg(m_repo->path());
+        QVERIFY(waitLoaded(dlg));
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/remotes/up/topic"), true));
+        const std::unique_ptr<QMenu> menu = dlg.createListContextMenu();
+        QString remote;
+        whenModal<PullFetchDlg>([&remote](PullFetchDlg *fetch) {
+            remote = fetch->options().remoteUrl;
+            fetch->reject();
+        });
+        QAction *fetchFrom = findAction(*menu, QStringLiteral("Fetch from \"up\""));
+        QVERIFY(fetchFrom);
+        fetchFrom->trigger();
+        QCOMPARE(remote, QStringLiteral("up"));
+        // Refreshed afterwards
+        QVERIFY(waitLoaded(dlg));
+    }
 
     void showLogNamesTheRef()
     {
@@ -423,6 +653,10 @@ private:
                               QStringLiteral("--range"),
                               QStringLiteral("refs/heads/topic")}));
     }
+
+private:
+    std::unique_ptr<TestRepo> m_upstream;
+    std::unique_ptr<TestRepo> m_repo;
 };
 
 QTEST_MAIN(BrowseRefsDlgTest)

@@ -652,6 +652,44 @@ void AppUtils::launchAlternativeEditor(const QString& file, QWidget *parent)
     job->start();
 }
 
+QStringList AppUtils::unifiedDiffArguments(const QString& rev1, const QString& rev2, int diffContext)
+{
+    QStringList arguments{QStringLiteral("diff-tree"), QStringLiteral("-r"), QStringLiteral("-p")};
+    if (diffContext >= 0) {
+        arguments.append(QStringLiteral("--unified=%1").arg(diffContext));
+    }
+    arguments << QStringLiteral("--stat") << QStringLiteral("--end-of-options") << rev1 << rev2 << QStringLiteral("--");
+    return arguments;
+}
+
+bool AppUtils::startShowUnifiedDiff(const Git& git, const QString& rev1, const QString& rev2, QWidget *parent)
+{
+    bool isNumber = false;
+    const int configContext = git.configValue(QStringLiteral("diff.context")).toInt(&isNumber);
+    const int diffContext = isNumber ? configContext : -1;
+    // GetTempFile; kept after we exit, for the editor started without waiting for it to read
+    QTemporaryFile file(QDir::temp().filePath(QStringLiteral("kortoisegit-XXXXXX.diff")));
+    file.setAutoRemove(false);
+    if (!file.open()) {
+        KMessageBox::error(parent, i18n("Could not create temp file."), QString(), noNotify);
+        return false;
+    }
+    try {
+        file.write(git.run(unifiedDiffArguments(rev1, rev2, diffContext), RunMode::ReadOnly));
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        file.remove();
+        KMessageBox::error(parent, i18n("Could not get unified diff.") + QLatin1Char('\n') + e.error().message, QString(), noNotify);
+        return false;
+    }
+    file.close();
+    file.setPermissions(QFile::ReadOwner | QFile::ReadGroup | QFile::ReadOther);
+    launchAlternativeEditor(file.fileName(), parent);
+    return true;
+}
+
 bool AppUtils::isTGitRebaseActive(const QString& workingTree, QWidget *parent)
 {
     const QString adminDir = GitAdminDir::worktreeAdminDirPath(workingTree);

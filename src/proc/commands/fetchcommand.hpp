@@ -93,14 +93,14 @@ public:
      */
     static bool doFetch(const QString& repository, const PullFetchOptions& options, FetchRebase runRebase, QWidget *parent = nullptr);
 
-private:
     /**
      * Ported from CAppUtils::Fetch.
      * @param repository The working tree's root or the bare repository.
      * @param remoteName The remote to preselect, from --remote; empty for the dialog's own choice.
+     * @param parent Parent of the dialogs.
      * @returns True if git fetch succeeded.
      */
-    [[nodiscard]] static bool fetch(const QString& repository, const QString& remoteName);
+    static bool fetch(const QString& repository, const QString& remoteName, QWidget *parent = nullptr);
 };
 
 } // namespace kgt
