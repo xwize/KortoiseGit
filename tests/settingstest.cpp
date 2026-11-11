@@ -5,9 +5,12 @@
 #include "commands/pushcommand.hpp"
 #include "commands/settingscommand.hpp"
 #include "pushdlg.hpp"
+#include "settings/settinggitconfig.hpp"
 #include "settings/settinggitremote.hpp"
 #include "settings/settingsprogsdiff.hpp"
 #include "testrepo.hpp"
+
+#include <KMessageBox>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -137,6 +140,68 @@ private Q_SLOTS:
         std::ignore = git.run(PushCommand::pushArguments(options));
         QCOMPARE(Git(server.path()).hash(QStringLiteral("main")), git.hash(QStringLiteral("HEAD")));
         QCOMPARE(git.configValue(QStringLiteral("branch.main.remote")), QStringLiteral("origin"));
+    }
+
+    void gitConfigLineEndingsAndQuotePath()
+    {
+        const TestRepo repo;
+        const Git git(repo.path());
+        git.setConfigValue(QStringLiteral("core.autocrlf"), QStringLiteral("Input"), ConfigLevel::Local);
+        // A number is a boolean too, as git and git_config_get_bool read it
+        git.setConfigValue(QStringLiteral("core.safecrlf"), QStringLiteral("2"), ConfigLevel::Local);
+        git.setConfigValue(QStringLiteral("core.quotepath"), QStringLiteral("0"), ConfigLevel::Local);
+
+        SettingGitConfig page(repo.path());
+        auto *autoCrLf = page.findChild<QComboBox *>(QStringLiteral("autoCrLf"));
+        auto *safeCrLf = page.findChild<QComboBox *>(QStringLiteral("safeCrLf"));
+        auto *quotePath = page.findChild<QCheckBox *>(QStringLiteral("quotePath"));
+        QVERIFY(autoCrLf != nullptr && safeCrLf != nullptr && quotePath != nullptr);
+
+        // Effective: read-only, showing what git uses
+        page.setConfigSource(SettingGitConfig::ConfigSource::Effective);
+        QVERIFY(!autoCrLf->isEnabled() && !safeCrLf->isEnabled() && !quotePath->isEnabled());
+        QCOMPARE(autoCrLf->currentText(), QStringLiteral("input"));
+
+        // Local: the text decides between input and false, a true number reads as true
+        page.setConfigSource(SettingGitConfig::ConfigSource::Local);
+        QVERIFY(autoCrLf->isEnabled() && safeCrLf->isEnabled() && quotePath->isEnabled());
+        QCOMPARE(autoCrLf->currentText(), QStringLiteral("input"));
+        QCOMPARE(safeCrLf->currentText(), QStringLiteral("true"));
+        QCOMPARE(quotePath->checkState(), Qt::Unchecked);
+
+        // Global has none of them: empty, and QuotePath partially checked
+        page.setConfigSource(SettingGitConfig::ConfigSource::Global);
+        QCOMPARE(autoCrLf->currentText(), QString());
+        QCOMPARE(safeCrLf->currentText(), QString());
+        QCOMPARE(quotePath->checkState(), Qt::PartiallyChecked);
+
+        // Saving to Local: an empty entry and a partially checked QuotePath remove their keys
+        page.setConfigSource(SettingGitConfig::ConfigSource::Local);
+        autoCrLf->setCurrentIndex(0);
+        Q_EMIT autoCrLf->activated(0);
+        safeCrLf->setCurrentIndex(3);
+        Q_EMIT safeCrLf->activated(3);
+        quotePath->click(); // Unchecked -> partially checked
+        QCOMPARE(quotePath->checkState(), Qt::PartiallyChecked);
+        QVERIFY(page.apply());
+        QVERIFY(!git.configValueAt(QStringLiteral("core.autocrlf"), ConfigLevel::Local));
+        QCOMPARE(git.configValueAt(QStringLiteral("core.safecrlf"), ConfigLevel::Local), QStringLiteral("warn"));
+        QVERIFY(!git.configValueAt(QStringLiteral("core.quotepath"), ConfigLevel::Local));
+
+        // Effective QuotePath falls back to git's default, quoting
+        page.setConfigSource(SettingGitConfig::ConfigSource::Effective);
+        QCOMPARE(quotePath->checkState(), Qt::Checked);
+
+        page.setConfigSource(SettingGitConfig::ConfigSource::Local);
+        autoCrLf->setCurrentIndex(2);
+        Q_EMIT autoCrLf->activated(2);
+        quotePath->click(); // -> checked
+        QVERIFY(page.apply());
+        QCOMPARE(git.configValueAt(QStringLiteral("core.autocrlf"), ConfigLevel::Local), QStringLiteral("true"));
+        QCOMPARE(git.configValueAt(QStringLiteral("core.quotepath"), ConfigLevel::Local), QStringLiteral("true"));
+        // The page's first showing would otherwise open the hierarchical-config hint
+        KMessageBox::saveDontShowAgainContinue(QStringLiteral("HintHierarchicalConfig"));
+        screenshot(page, QStringLiteral("settings-gitconfig.png"));
     }
 
     void pagesOutsideRepository()

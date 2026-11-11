@@ -290,6 +290,28 @@ std::optional<QString> Git::configValueAt(const QString& name, ConfigLevel level
     }
 }
 
+ConfigBool Git::configBoolAt(const QString& name, ConfigLevel level) const
+{
+    if (!configValueAt(name, level)) {
+        return ConfigBool::NotSet;
+    }
+    QStringList arguments{QStringLiteral("config")};
+    if (level != ConfigLevel::Effective) {
+        arguments.append(configLevelSwitch(level));
+    }
+    arguments << QStringLiteral("--type=bool") << QStringLiteral("--get") << name;
+    try {
+        const QByteArray value = run(arguments, RunMode::ReadOnly).trimmed();
+        return value == "true" ? ConfigBool::True : ConfigBool::False;
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        // It is set, so the failure is "bad boolean config value"
+        return ConfigBool::NotBoolean;
+    }
+}
+
 bool Git::isConfigTrue(const QString& value)
 {
     const QString lower = value.toLower();

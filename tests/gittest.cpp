@@ -164,6 +164,30 @@ private Q_SLOTS:
         QVERIFY(!call->isFinished());
     }
 
+    void configBoolAtReadsAsGitDoes()
+    {
+        const TestRepo repo;
+        // Appended by hand: git config can't write a key with no value
+        QFile config(QDir(repo.path()).filePath(QStringLiteral(".git/config")));
+        QVERIFY(config.open(QIODevice::Append));
+        config.write("[kgt]\n\tyes = Yes\n\toff = off\n\tempty =\n\tnumber = 2\n\tzero = 0\n\tbig = 1k\n\tbare\n\tinput = input\n");
+        config.close();
+        const Git git(repo.path());
+        const auto read = [&git](const char *key) {
+            return git.configBoolAt(QStringLiteral("kgt.") + QLatin1String(key), ConfigLevel::Local);
+        };
+        QCOMPARE(read("yes"), ConfigBool::True);
+        QCOMPARE(read("off"), ConfigBool::False);
+        QCOMPARE(read("empty"), ConfigBool::False);
+        QCOMPARE(read("number"), ConfigBool::True);
+        QCOMPARE(read("zero"), ConfigBool::False);
+        QCOMPARE(read("big"), ConfigBool::True);
+        QCOMPARE(read("bare"), ConfigBool::True);
+        QCOMPARE(read("input"), ConfigBool::NotBoolean);
+        QCOMPARE(read("missing"), ConfigBool::NotSet);
+        QCOMPARE(git.configBoolAt(QStringLiteral("kgt.yes"), ConfigLevel::Global), ConfigBool::NotSet);
+    }
+
     void findsWorkingTreeRoot()
     {
         const QTemporaryDir repo;
