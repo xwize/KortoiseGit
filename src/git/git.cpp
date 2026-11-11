@@ -374,6 +374,19 @@ bool Git::isFastForward(const QString& from, const QString& target) const
     }
 }
 
+QString Git::commonAncestor(const QString& from, const QString& target) const
+{
+    const QStringList arguments{QStringLiteral("merge-base"), fixBranchName(from), fixBranchName(target)};
+    try {
+        return QString::fromLatin1(run(arguments, RunMode::ReadOnly)).trimmed();
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        return {};
+    }
+}
+
 QString Git::currentBranch() const
 {
     const QString branch = GitAdminDir::currentBranchFromFile(GitAdminDir::worktreeAdminDirPath(m_workingDirectory));

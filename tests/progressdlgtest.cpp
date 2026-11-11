@@ -3,6 +3,7 @@
 
 #include "progressdlg.hpp"
 #include "commands/pushcommand.hpp"
+#include "modalwatcher.hpp"
 #include "pushdlg.hpp"
 #include "testrepo.hpp"
 
@@ -13,6 +14,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QToolButton>
 
 #include <signal.h>
 
@@ -161,6 +163,63 @@ private Q_SLOTS:
         }));
         QCOMPARE(dlg.gitStatus(), 0);
         QVERIFY(dlg.logText().contains(QStringLiteral("ce013625030ba8dba906f756967f9e9ca394464a")));
+    }
+
+    void postCmdButtonRunsTheChosenFollowUp()
+    {
+        const TestRepo repo;
+        const auto run = [](const QStringList& arguments, ProgressDlg& dlg, int& seenStatus, QStringList& ran) {
+            dlg.addGitCmd(arguments);
+            dlg.setPostCmdCallback([&seenStatus, &ran](int status, PostCmdList& postCmdList) {
+                seenStatus = status;
+                postCmdList.append({QIcon(), QStringLiteral("&First"), [&ran] {
+                                        ran.append(QStringLiteral("first"));
+                                    }});
+                postCmdList.append({QIcon(), QStringLiteral("&Second"), [&ran] {
+                                        ran.append(QStringLiteral("second"));
+                                    }});
+            });
+            const QSignalSpy finished(&dlg, &ProgressDlg::commandsFinished);
+            dlg.start();
+            return QTest::qWaitFor([&finished] {
+                return !finished.isEmpty();
+            });
+        };
+
+        // The callback sees git's status; the first follow-up labels the button, all are in its menu
+        ProgressDlg dlg(repo.path());
+        QVERIFY(dlg.postCmdButton()->isHidden());
+        int status = -1;
+        QStringList ran;
+        QVERIFY(run({QStringLiteral("version")}, dlg, status, ran));
+        QCOMPARE(status, 0);
+        QVERIFY(!dlg.postCmdButton()->isHidden());
+        QCOMPARE(dlg.postCmdButton()->text(), QStringLiteral("&First"));
+        QCOMPARE(postCmdTexts(dlg), (QStringList{QStringLiteral("&First"), QStringLiteral("&Second")}));
+        // Choosing one runs it and closes the dialog as Close does
+        QVERIFY(triggerPostCmd(dlg, QStringLiteral("&Second")));
+        QCOMPARE(ran, QStringList{QStringLiteral("second")});
+        QCOMPARE(dlg.result(), int(QDialog::Accepted));
+        QVERIFY(dlg.isHidden());
+
+        // A failure reaches it too; clicking the button runs the first
+        ProgressDlg failed(repo.path());
+        ran.clear();
+        QVERIFY(run({QStringLiteral("no-such-command")}, failed, status, ran));
+        QVERIFY(status != 0);
+        failed.postCmdButton()->click();
+        QCOMPARE(ran, QStringList{QStringLiteral("first")});
+
+        // Nothing to offer: no button
+        ProgressDlg plain(repo.path());
+        plain.addGitCmd({QStringLiteral("version")});
+        plain.setPostCmdCallback([](int, PostCmdList&) { });
+        const QSignalSpy finished(&plain, &ProgressDlg::commandsFinished);
+        plain.start();
+        QVERIFY(QTest::qWaitFor([&finished] {
+            return !finished.isEmpty();
+        }));
+        QVERIFY(plain.postCmdButton()->isHidden());
     }
 
     void pushArguments()

@@ -42,6 +42,7 @@ struct PullFetchOptions {
     Qt::CheckState fetchTags = Qt::PartiallyChecked; // m_bFetchTags: --tags, --no-tags or git's default
     Qt::CheckState prune = Qt::PartiallyChecked; // m_bPrune: --prune, --no-prune or git's default
     std::optional<int> depth; // m_bDepth and m_nDepth: --depth, offered in a shallow repository only
+    bool unrelated = false; // bUnrelated: --allow-unrelated-histories, only for the post-command retry
 };
 
 /**

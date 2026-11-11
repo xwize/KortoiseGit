@@ -5,9 +5,8 @@
 
 /**
  * @file
- * Ported from TortoiseGit src/TortoiseProc/Commands/MergeCommand.cpp, CAppUtils::Merge and DoMerge. The
- * post-command buttons (Resolve, Commit, Merge unrelated histories, Stash, Stash Pop, Remove branch, Push) are left
- * out for now.
+ * Ported from TortoiseGit src/TortoiseProc/Commands/MergeCommand.cpp, CAppUtils::Merge and DoMerge. The git-svn
+ * dcommit follow-up is left out.
  */
 
 #include "commands/mergecommand.hpp"
@@ -17,10 +16,12 @@
 #include "progressdlg.hpp"
 #include "utils/runtimeerror.hpp"
 
+#include <KGuiItem>
 #include <KLocalizedString>
 #include <KMessageBox>
 
 #include <QDir>
+#include <QIcon>
 #include <QTemporaryFile>
 
 #include <tuple>
@@ -79,19 +80,24 @@ QStringList MergeCommand::mergeArguments(const MergeOptions& options, const QStr
     return arguments;
 }
 
-bool MergeCommand::merge(const QString& workingTree, const QString& initialRefName, QWidget *parent)
+bool MergeCommand::merge(const QString& workingTree, const QString& initialRefName, QWidget *parent, bool showStashPop)
 {
     if (AppUtils::isTGitRebaseActive(workingTree, parent)) {
         return false;
     }
 
-    const Git git(workingTree);
     MergeDlg dlg(Git(workingTree), initialRefName, parent);
     if (dlg.exec() != QDialog::Accepted) {
         return false;
     }
-    MergeOptions options = dlg.options();
-    options.version = git.fixBranchName(options.version);
+    return doMerge(workingTree, dlg.options(), showStashPop, parent);
+}
+
+bool MergeCommand::doMerge(const QString& workingTree, const MergeOptions& options, bool showStashPop, QWidget *parent)
+{
+    const Git git(workingTree);
+    MergeOptions fixed = options;
+    fixed.version = git.fixBranchName(options.version);
 
     // The message goes to git in a file, as SaveCommitUnicodeFile writes it; it must outlive the merge
     QTemporaryFile messageFile(QDir::temp().absoluteFilePath(QStringLiteral("kortoisegit-merge-XXXXXX.txt")));
@@ -103,15 +109,17 @@ bool MergeCommand::merge(const QString& workingTree, const QString& initialRefNa
     }
 
     ProgressDlg progress(workingTree, parent);
-    progress.addGitCmd(mergeArguments(options, messageFile.fileName()));
-    // DoMerge's m_PostCmdCallback: a failed merge may have left conflicts to resolve
-    QObject::connect(&progress, &ProgressDlg::commandsFinished, &progress, [&progress, &git] {
-        if (progress.gitStatus() == 0) {
+    progress.addGitCmd(mergeArguments(fixed, messageFile.fileName()));
+    // DoMerge's m_PostCmdCallback
+    progress.setPostCmdCallback([&](int status, PostCmdList& postCmdList) {
+        if (status == 0) {
+            addSuccessPostCmds(workingTree, options, showStashPop, parent, postCmdList);
             return;
         }
         try {
             if (git.hasWorkingTreeConflicts()) {
                 AppUtils::showMergeConflictsHint(&progress);
+                AppUtils::addConflictPostCmds(workingTree, postCmdList);
             }
         } catch (const RuntimeError& e) {
             if (e.error().category != ErrorCategory::Git) {
@@ -119,6 +127,19 @@ bool MergeCommand::merge(const QString& workingTree, const QString& initialRefNa
             }
             KMessageBox::error(&progress, i18n("Checking for conflicts failed.") + QLatin1Char('\n') + e.error().message, QString(), KMessageBox::Options());
         }
+
+        if (git.commonAncestor(QStringLiteral("HEAD"), fixed.version).isEmpty()) {
+            postCmdList.append(
+                {QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge unrelated history"), [&workingTree, &options, showStashPop, parent] {
+                     MergeOptions unrelated = options;
+                     unrelated.unrelated = true;
+                     std::ignore = doMerge(workingTree, unrelated, showStashPop, parent);
+                 }});
+        }
+        const StashSaveFollowUps stashFollowUps{.showPull = false, .pullShowPush = false, .showMerge = true, .mergeRev = fixed.version};
+        postCmdList.append({QIcon::fromTheme(QStringLiteral("vcs-stash")), i18n("Stash changes"), [&workingTree, stashFollowUps, parent] {
+                                std::ignore = AppUtils::stashSave(Git(workingTree), QString(), parent, stashFollowUps);
+                            }});
     });
 
     // Leaving the progress dialog with Abort while files are in conflict offers to abort the merge
@@ -127,6 +148,52 @@ bool MergeCommand::merge(const QString& workingTree, const QString& initialRefNa
         return false;
     }
     return progress.gitStatus() == 0;
+}
+
+void MergeCommand::removeBranch(const QString& workingTree, const QString& branch, QWidget *parent)
+{
+    // DoMerge's Remove branch: asks, then git branch -D
+    const QString message = i18n("Do you really want to delete \"%1\"?", branch);
+    const KGuiItem erase(i18n("&Delete"));
+    const KGuiItem stop(i18n("A&bort"));
+    if (KMessageBox::questionTwoActions(parent, message, QString(), erase, stop) != KMessageBox::PrimaryAction) {
+        return;
+    }
+    try {
+        std::ignore = Git(workingTree).run({QStringLiteral("branch"), QStringLiteral("-D"), QStringLiteral("--"), branch});
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        KMessageBox::error(parent, e.error().message, QString(), KMessageBox::Options());
+    }
+}
+
+void MergeCommand::addSuccessPostCmds(const QString& workingTree, const MergeOptions& options, bool showStashPop, QWidget *parent, PostCmdList& postCmdList)
+{
+    if (showStashPop) {
+        postCmdList.append({QIcon::fromTheme(QStringLiteral("vcs-stash-pop")), i18n("Stash Pop"), [workingTree, parent] {
+                                std::ignore = AppUtils::stashPop(workingTree, parent);
+                            }});
+    }
+
+    if (options.noCommit || options.squash) {
+        postCmdList.append(AppUtils::commitPostCmd(workingTree));
+        return;
+    }
+
+    // Do not ask to remove remote branches
+    if (options.isBranch && !options.version.startsWith(QLatin1String("remotes/"))) {
+        const QString version = options.version;
+        postCmdList.append({QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Remove &branch"), [workingTree, version, parent] {
+                                removeBranch(workingTree, version, parent);
+                            }});
+    }
+    if (options.isBranch) {
+        postCmdList.append({QIcon::fromTheme(QStringLiteral("vcs-push")), i18n("Pus&h..."), [workingTree, parent] {
+                                std::ignore = AppUtils::push(workingTree, QString(), parent);
+                            }});
+    }
 }
 
 } // namespace kgt

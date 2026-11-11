@@ -10,6 +10,7 @@
 #include "gitstatuslistmodel.hpp"
 #include "gitswitchdlg.hpp"
 #include "mergedlg.hpp"
+#include "modalwatcher.hpp"
 #include "progressdlg.hpp"
 #include "pushdlg.hpp"
 #include "rebasedlg.hpp"
@@ -525,35 +526,6 @@ bool withMenuOnSelection(const GitLogList *list, const MenuHandler& handle)
     return opened;
 }
 
-using ModalHandler = std::function<bool(QWidget *)>; // Deals with a modal window; returns whether it did
-
-/**
- * Hands every modal window that comes up to a handler until it is destroyed.
- */
-class ModalWatcher
-{
-public:
-    /**
-     * @param handle Called with the active modal window, over and over until it returns true for it.
-     */
-    explicit ModalWatcher(ModalHandler handle)
-        : m_handle(std::move(handle))
-    {
-        QObject::connect(&m_timer, &QTimer::timeout, &m_timer, [this] {
-            if (QWidget *modal = QApplication::activeModalWidget()) {
-                std::ignore = m_handle(modal);
-            }
-        });
-        m_timer.start(pollInterval);
-    }
-
-private:
-    static constexpr int pollInterval = 10;
-
-    ModalHandler m_handle;
-    QTimer m_timer;
-};
-
 /**
  * @param modal A modal window.
  * @returns Whether it was a progress dialog that had finished, now closed with Close.
@@ -563,22 +535,6 @@ bool closeFinishedProgress(QWidget *modal)
     auto *progress = qobject_cast<ProgressDlg *>(modal);
     if (progress && progress->isDone()) {
         progress->accept();
-        return true;
-    }
-    return false;
-}
-
-/**
- * @param modal A modal window.
- * @param button A standard button.
- * @returns Whether it was a message box with that button, now pressed.
- */
-bool pressButton(const QWidget *modal, QDialogButtonBox::StandardButton button)
-{
-    const auto *buttons = modal->findChild<QDialogButtonBox *>();
-    QPushButton *pushButton = buttons ? buttons->button(button) : nullptr;
-    if (pushButton) {
-        pushButton->click();
         return true;
     }
     return false;

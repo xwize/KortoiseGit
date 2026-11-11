@@ -6,6 +6,7 @@
 #include "commands/mergecommand.hpp"
 #include "mergeabortdlg.hpp"
 #include "mergedlg.hpp"
+#include "modalwatcher.hpp"
 #include "progressdlg.hpp"
 #include "testrepo.hpp"
 #include "utils/runtimeerror.hpp"
@@ -585,6 +586,73 @@ private Q_SLOTS:
         // Two commits to merge: an octopus, none to pick
         setup.repo.write(QStringLiteral(".git/FETCH_HEAD"), (feature + QStringLiteral("\t\ta\n") + main + QStringLiteral("\t\tb\n")).toLatin1());
         QVERIFY(setup.repo.git().derefFetchHead().isEmpty());
+    }
+
+    void mergeOffersDoMergesFollowUps()
+    {
+        const auto acceptMergeDlg = [](bool squash) {
+            return [squash](QWidget *modal) {
+                auto *dlg = qobject_cast<MergeDlg *>(modal);
+                if (!dlg) {
+                    return false;
+                }
+                if (!dlg->chooseVersion()->isLoading()) {
+                    checkBox(*dlg, QStringLiteral("&Squash"))->setChecked(squash);
+                    dlg->accept();
+                }
+                return true;
+            };
+        };
+        const QString removeBranch = QStringLiteral("Remove &branch");
+        const QString push = QStringLiteral("Pus&h...");
+        const QString commit = QStringLiteral("&Commit...");
+        const QString stash = QStringLiteral("Stash changes");
+
+        // A branch merged: Remove branch, which deletes it once confirmed, and Push
+        const MergeSetup setup;
+        {
+            const CommandDriver driver({removeBranch}, acceptMergeDlg(false));
+            QVERIFY(MergeCommand::merge(setup.repo.path(), QStringLiteral("feature")));
+            QCOMPARE(driver.offered(), QList<QStringList>{(QStringList{removeBranch, push})});
+        }
+        QVERIFY(setup.rev(QStringLiteral("refs/heads/feature")).isEmpty());
+
+        // A squash leaves a commit to make; a merge after stashing offers the stash back first
+        const MergeSetup squashed;
+        {
+            const CommandDriver driver({}, acceptMergeDlg(true));
+            QVERIFY(MergeCommand::merge(squashed.repo.path(), QStringLiteral("feature"), nullptr, true));
+            QCOMPARE(driver.offered(), QList<QStringList>{(QStringList{QStringLiteral("Stash Pop"), commit})});
+        }
+
+        // Conflicts: Resolve and Commit, then Stash changes
+        const MergeSetup conflicting;
+        conflicting.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("feature")});
+        conflicting.repo.write(QStringLiteral("a.txt"), "feature\n");
+        conflicting.repo.commitAll(QStringLiteral("feature changes a"));
+        conflicting.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        conflicting.divergeMain("main\n");
+        {
+            const CommandDriver driver({}, acceptMergeDlg(false));
+            QVERIFY(!MergeCommand::merge(conflicting.repo.path(), QStringLiteral("feature")));
+            QCOMPARE(driver.offered(), QList<QStringList>{(QStringList{QStringLiteral("Resolve"), commit, stash})});
+        }
+        QVERIFY(conflicting.repo.git().hasWorkingTreeConflicts());
+
+        // Nothing in common: Merge unrelated history retries with --allow-unrelated-histories
+        const MergeSetup unrelated;
+        unrelated.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("--orphan"), QStringLiteral("other")});
+        unrelated.repo.run({QStringLiteral("rm"), QStringLiteral("--quiet"), QStringLiteral("-rf"), QStringLiteral(".")});
+        unrelated.repo.write(QStringLiteral("other.txt"), "other\n");
+        unrelated.repo.commitAll(QStringLiteral("unrelated"));
+        unrelated.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        {
+            const QString retry = QStringLiteral("&Merge unrelated history");
+            const CommandDriver driver({retry}, acceptMergeDlg(false));
+            QVERIFY(!MergeCommand::merge(unrelated.repo.path(), QStringLiteral("other")));
+            QCOMPARE(driver.offered(), (QList<QStringList>{QStringList{retry, stash}, QStringList{removeBranch, push}}));
+        }
+        QCOMPARE(unrelated.parentCount(QStringLiteral("HEAD")), 2);
     }
 
     void screenshots()
