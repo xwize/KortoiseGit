@@ -22,6 +22,7 @@
 #include "rebasedlg.hpp"
 #include "resetdlg.hpp"
 #include "stashsave.hpp"
+#include "toolprocess.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KConfigGroup>
@@ -449,7 +450,7 @@ QString writeBaseVersion(const Git& git, const QString& path, const QTemporaryDi
 
 /**
  * The content conflict branch of CAppUtils::ConflictEdit, which opens TortoiseMerge. That has no equivalent here, so
- * git mergetool runs the user's merge tool, detached, and marks the file resolved itself. F5 shows the result.
+ * git mergetool runs the user's merge tool and marks the file resolved itself. F5 shows the result.
  * @param git Runs git at the working tree's root.
  * @param path The file, relative to the root.
  * @param parent Parent of the error message.
@@ -461,22 +462,12 @@ void startMergeTool(const Git& git, const QString& path, QWidget *parent)
     };
     const QString configuredTool = git.configValue(QStringLiteral("merge.tool"));
     const QStringList arguments = AppUtils::mergeToolArguments(configuredTool, isInstalled);
-    const auto showError = [parent](const QString& detail) {
-        KMessageBox::error(parent, i18n("Could not start external merge program!\n\n%1", detail), QString(), noNotify);
-    };
-    if (arguments.isEmpty()) {
-        showError(i18n("merge.tool is not set, and neither KDiff3 nor Meld is installed."));
+    const QString error = ToolProcess::configError(ToolMode::Merge, configuredTool, isInstalled);
+    if (!error.isEmpty()) {
+        KMessageBox::error(parent, ToolProcess::failureMessage(ToolMode::Merge, error), QString(), noNotify);
         return;
     }
-    QProcess process;
-    process.setProgram(QStringLiteral("git"));
-    process.setArguments(arguments + QStringList{QStringLiteral("--"), path});
-    process.setWorkingDirectory(git.workingDirectory());
-    // git asks "Was the merge successful?" if the tool left the file unchanged: end-of-file answers no and cleans up
-    process.setStandardInputFile(QProcess::nullDevice());
-    if (!process.startDetached()) {
-        showError(QStringLiteral("git mergetool"));
-    }
+    std::ignore = ToolProcess::launch(parent, ToolMode::Merge, git.workingDirectory(), arguments + QStringList{QStringLiteral("--"), path});
 }
 
 /**

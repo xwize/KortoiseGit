@@ -5,8 +5,12 @@
 #include "commands/prevdiffcommand.hpp"
 #include "gitdiff.hpp"
 #include "testrepo.hpp"
+#include "toolprocess.hpp"
+#include "utils/runtimeerror.hpp"
 
 #include <QFileInfo>
+#include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -59,6 +63,51 @@ void stageRename(const TestRepo& repo, const QString& path)
     repo.run({QStringLiteral("mv"), file(), path});
 }
 
+/**
+ * Leaves the repository in a merge with file in conflict.
+ * @param repo An empty repository.
+ */
+void startConflictedMerge(const TestRepo& repo)
+{
+    repo.write(file(), "base\n");
+    repo.commitAll(QStringLiteral("base"));
+    repo.run({QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("-b"), QStringLiteral("other")});
+    repo.write(file(), "other\n");
+    repo.commitAll(QStringLiteral("other"));
+    repo.run({QStringLiteral("checkout"), QStringLiteral("-q"), QStringLiteral("-")});
+    repo.write(file(), "ours\n");
+    repo.commitAll(QStringLiteral("ours"));
+    try {
+        repo.run({QStringLiteral("merge"), QStringLiteral("other")});
+    } catch (const RuntimeError&) { // NOLINT(bugprone-empty-catch): The conflict is the point
+    }
+}
+
+/**
+ * Runs git difftool or git mergetool to its end.
+ * @param mode Which one.
+ * @param repo Where.
+ * @param arguments The arguments after "git".
+ * @returns The messages ToolProcess::failed gave.
+ */
+QStringList runTool(ToolMode mode, const TestRepo& repo, const QStringList& arguments)
+{
+    ToolProcess tool(mode, repo.path(), arguments);
+    QSignalSpy failed(&tool, &ToolProcess::failed);
+    QSignalSpy finished(&tool, &ToolProcess::finished);
+    if (!tool.start()) {
+        return {QStringLiteral("not started")};
+    }
+    if (!finished.wait(10000)) {
+        return {QStringLiteral("still running")};
+    }
+    QStringList messages;
+    for (const QList<QVariant>& signal : std::as_const(failed)) {
+        messages.append(signal.constFirst().toString());
+    }
+    return messages;
+}
+
 } // namespace
 
 /**
@@ -106,6 +155,113 @@ private Q_SLOTS:
         const QStringList arguments = GitDiff::diffArguments(file(), file(), {}, rev);
         const QStringList expected = toolOption.isEmpty() ? arguments : difftool({toolOption, rev, QStringLiteral("--"), file()});
         QCOMPARE(GitDiff::withDefaultTool(arguments, diffTool, mergeTool, isInstalled), expected);
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void configErrorChecksTheTool_data()
+    {
+        QTest::addColumn<QString>("configuredTool");
+        QTest::addColumn<QStringList>("installed");
+        QTest::addColumn<bool>("usable");
+        const QStringList meld{QStringLiteral("meld")};
+        QTest::newRow("no tool at all") << QString() << QStringList() << false;
+        QTest::newRow("meld by default") << QString() << meld << true;
+        QTest::newRow("kdiff3 by default") << QString() << QStringList{QStringLiteral("kdiff3")} << true;
+        QTest::newRow("vimdiff") << QStringLiteral("vimdiff") << meld << false;
+        QTest::newRow("nvimdiff2") << QStringLiteral("nvimdiff2") << meld << false;
+        QTest::newRow("gvimdiff has a window") << QStringLiteral("gvimdiff") << QStringList() << true;
+        QTest::newRow("a missing tool is left to git") << QStringLiteral("kompare") << QStringList() << true;
+    }
+
+    void configErrorChecksTheTool()
+    {
+        QFETCH(const QString, configuredTool);
+        QFETCH(const QStringList, installed);
+        QFETCH(const bool, usable);
+        const auto isInstalled = [&installed](const QString& tool) {
+            return installed.contains(tool);
+        };
+        for (const ToolMode mode : {ToolMode::Diff, ToolMode::Merge}) {
+            QCOMPARE(ToolProcess::configError(mode, configuredTool, isInstalled).isEmpty(), usable);
+        }
+    }
+
+    void toolFailed()
+    {
+        const QString unresolved = QStringLiteral("Normal merge conflict for 'f':\nf seems unchanged.\nmerge of f failed");
+        const QString unavailable = QStringLiteral("error: 'kompare' can not be used to resolve merges");
+        QVERIFY(!ToolProcess::toolFailed(ToolMode::Diff, 0, {}));
+        QVERIFY(ToolProcess::toolFailed(ToolMode::Diff, 128, unavailable));
+        QVERIFY(!ToolProcess::toolFailed(ToolMode::Merge, 0, {}));
+        QVERIFY(!ToolProcess::toolFailed(ToolMode::Merge, 1, unresolved));
+        QVERIFY(ToolProcess::toolFailed(ToolMode::Merge, 1, unavailable));
+        const QString guessed = QStringLiteral("Normal merge conflict for 'f':\nHit return to start merge resolution tool (kdiff3):");
+        QVERIFY(ToolProcess::toolFailed(ToolMode::Merge, 1, guessed));
+    }
+
+    void unavailableDiffToolIsReported()
+    {
+        const TestRepo repo;
+        repo.write(file(), fileContent());
+        repo.commitAll(QStringLiteral("initial"));
+        repo.write(file(), "changed\n");
+
+        QStringList arguments = GitDiff::diffArguments(file(), file(), {}, QStringLiteral("HEAD"));
+        arguments.insert(arguments.indexOf(QStringLiteral("--no-prompt")) + 1, QStringLiteral("--tool=nosuch"));
+        const QStringList messages = runTool(ToolMode::Diff, repo, arguments);
+        QCOMPARE(messages.size(), 1);
+        QVERIFY2(messages.constFirst().contains(QStringLiteral("nosuch")), qPrintable(messages.constFirst()));
+    }
+
+    void diffToolThatRanIsNotReported()
+    {
+        const TestRepo repo;
+        repo.write(file(), fileContent());
+        repo.commitAll(QStringLiteral("initial"));
+        repo.write(file(), "changed\n");
+        repo.run({QStringLiteral("config"), QStringLiteral("difftool.quiet.cmd"), QStringLiteral("true")});
+
+        QStringList arguments = GitDiff::diffArguments(file(), file(), {}, QStringLiteral("HEAD"));
+        arguments.insert(arguments.indexOf(QStringLiteral("--no-prompt")) + 1, QStringLiteral("--tool=quiet"));
+        QCOMPARE(runTool(ToolMode::Diff, repo, arguments), QStringList());
+    }
+
+    void terminalToolEndsWithoutATerminal()
+    {
+        if (QStandardPaths::findExecutable(QStringLiteral("vim")).isEmpty()) {
+            QSKIP("Vim is not installed");
+        }
+        const TestRepo repo;
+        repo.write(file(), fileContent());
+        repo.commitAll(QStringLiteral("initial"));
+        repo.write(file(), "changed\n");
+
+        QStringList arguments = GitDiff::diffArguments(file(), file(), {}, QStringLiteral("HEAD"));
+        arguments.insert(arguments.indexOf(QStringLiteral("--no-prompt")) + 1, QStringLiteral("--tool=vimdiff"));
+        QVERIFY(!runTool(ToolMode::Diff, repo, arguments).contains(QStringLiteral("still running")));
+    }
+
+    void unavailableMergeToolIsReported()
+    {
+        const TestRepo repo;
+        startConflictedMerge(repo);
+        repo.run({QStringLiteral("config"), QStringLiteral("merge.tool"), QStringLiteral("nosuch")});
+
+        const QStringList arguments = AppUtils::mergeToolArguments(QStringLiteral("nosuch"), {}) + QStringList{QStringLiteral("--"), file()};
+        const QStringList messages = runTool(ToolMode::Merge, repo, arguments);
+        QCOMPARE(messages.size(), 1);
+        QVERIFY2(messages.constFirst().contains(QStringLiteral("nosuch")), qPrintable(messages.constFirst()));
+    }
+
+    void unresolvedMergeIsNotReported()
+    {
+        const TestRepo repo;
+        startConflictedMerge(repo);
+        repo.run({QStringLiteral("config"), QStringLiteral("merge.tool"), QStringLiteral("quiet")});
+        repo.run({QStringLiteral("config"), QStringLiteral("mergetool.quiet.cmd"), QStringLiteral("true")});
+
+        const QStringList arguments = AppUtils::mergeToolArguments(QStringLiteral("quiet"), {}) + QStringList{QStringLiteral("--"), file()};
+        QCOMPARE(runTool(ToolMode::Merge, repo, arguments), QStringList());
     }
 
     void diffArguments()
