@@ -11,6 +11,7 @@
 #include "commands/fetchcommand.hpp"
 #include "commands/mergecommand.hpp"
 #include "createbranchtagdlg.hpp"
+#include "deleteremotetagdlg.hpp"
 #include "gitdiff.hpp"
 #include "progressdlg.hpp"
 #include "reflogdlg.hpp"
@@ -210,6 +211,7 @@ void BrowseRefsDlg::createWidgets()
     m_refTree->setModel(m_treeModel);
     m_refTree->setHeaderHidden(true);
     m_refTree->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_refTree->setContextMenuPolicy(Qt::CustomContextMenu);
     m_listModel = new RefLeafListModel(this);
     m_listRefLeafs = new QTreeView(splitter);
     m_listRefLeafs->setModel(m_listModel);
@@ -256,6 +258,7 @@ void BrowseRefsDlg::createWidgets()
     // Queued: the rename runs git and may show a message box, which mustn't happen inside the editor's commit
     connect(m_listModel, &RefLeafListModel::nameEdited, this, &BrowseRefsDlg::onNameEdited, Qt::QueuedConnection);
     connect(m_listRefLeafs, &QWidget::customContextMenuRequested, this, &BrowseRefsDlg::onListContextMenu);
+    connect(m_refTree, &QWidget::customContextMenuRequested, this, &BrowseRefsDlg::onTreeContextMenu);
     connect(m_listRefLeafs, &QAbstractItemView::doubleClicked, this, &BrowseRefsDlg::onListDoubleClicked);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -990,6 +993,126 @@ void BrowseRefsDlg::onListContextMenu(const QPoint& pos)
     popupMenu->exec(m_listRefLeafs->viewport()->mapToGlobal(pos));
 }
 
+void BrowseRefsDlg::onTreeContextMenu(const QPoint& pos)
+{
+    // OnContextMenu_RefTreeCtrl: the node under the cursor is selected first; empty space leaves the selection
+    // alone and offers only Copy ref names
+    const ShadowTree *tree = nullptr;
+    const QModelIndex index = m_refTree->indexAt(pos);
+    if (index.isValid()) {
+        m_refTree->setCurrentIndex(index);
+        tree = selectedTreeNode();
+    }
+    const std::unique_ptr<QMenu> popupMenu = createTreeContextMenu(tree);
+    popupMenu->exec(m_refTree->viewport()->mapToGlobal(pos));
+}
+
+std::unique_ptr<QMenu> BrowseRefsDlg::createTreeContextMenu()
+{
+    return createTreeContextMenu(selectedTreeNode());
+}
+
+std::unique_ptr<QMenu> BrowseRefsDlg::createTreeContextMenu(const ShadowTree *tree)
+{
+    // ShowContextMenu with a tree node and no refs selected. Entries take names by value: a refresh finishing while
+    // the menu is open rebuilds the tree
+    auto popupMenu = std::make_unique<QMenu>(this);
+    const auto addEntry = [this, &popupMenu](const QString& iconName, const QString& text, auto handler) {
+        connect(popupMenu->addAction(QIcon::fromTheme(iconName), text), &QAction::triggered, this, handler);
+    };
+    if (tree && tree->isFrom("refs/remotes"_L1)) {
+        addEntry(QStringLiteral("configure"), i18n("Manage Remotes"), [this] {
+            manageRemotes();
+        });
+        // Only on a node under a known remote
+        if (const std::optional<RemoteBranch> split = splitRemoteBranchName(tree->refName(), m_remotes)) {
+            const QString remote = split->remote;
+            addEntry(QStringLiteral("vcs-pull"), i18n("Fetch from \"%1\"", remote), [this, remote] {
+                fetchFrom(remote);
+            });
+            addEntry(QStringLiteral("edit-delete"), i18n("Delete remote tags..."), [this, remote] {
+                deleteRemoteTags(remote);
+            });
+        }
+    }
+    if (tree && tree->isFrom("refs/heads"_L1)) {
+        addEntry(QStringLiteral("vcs-branch"), i18n("Create &Branch..."), [this] {
+            // eCmd_CreateBranch with no ref selected: based on HEAD
+            createBranch(QString());
+        });
+    }
+    if (tree && tree->isFrom("refs/tags"_L1)) {
+        addTreeTagEntries(*popupMenu);
+    }
+    // TortoiseGit adds no separator after the namespace's entries here. With no refs selected there is nothing to
+    // copy, as there
+    addEntry(QStringLiteral("edit-copy"), i18n("Copy ref names"), [] {
+        AppUtils::copyToClipboard(QString());
+    });
+    return popupMenu;
+}
+
+void BrowseRefsDlg::addTreeTagEntries(QMenu& popupMenu)
+{
+    // ShowContextMenu on refs/tags
+    connect(popupMenu.addAction(QIcon::fromTheme(QStringLiteral("tag")), i18n("Create &Tag...")), &QAction::triggered, this, &BrowseRefsDlg::createTag);
+    connect(popupMenu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Delete all tags")),
+            &QAction::triggered,
+            this,
+            &BrowseRefsDlg::deleteAllTags);
+    if (m_remotes.isEmpty()) {
+        return;
+    }
+    popupMenu.addSeparator();
+    for (const QString& remote : std::as_const(m_remotes)) {
+        connect(popupMenu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), i18n("Delete remote tags on \"%1\"...", remote)),
+                &QAction::triggered,
+                this,
+                [this, remote] {
+                    deleteRemoteTags(remote);
+                });
+    }
+}
+
+void BrowseRefsDlg::manageRemotes()
+{
+    // eCmd_ManageRemotes
+    AppUtils::launchRemoteSetting(m_git.workingDirectory(), this);
+    refresh();
+}
+
+void BrowseRefsDlg::createTag()
+{
+    // eCmd_CreateTag
+    CreateBranchTagParams params;
+    params.isTag = true;
+    AppUtils::createBranchTag(m_git.workingDirectory(), params, this);
+    refresh();
+}
+
+void BrowseRefsDlg::deleteAllTags()
+{
+    // eCmd_DeleteAllTags: selects every ref in the list, then deletes them as Delete tags does
+    m_listRefLeafs->selectAll();
+    QStringList refNames;
+    for (int row = 0; row < m_listModel->rowCount(); ++row) {
+        refNames.append(m_listModel->entry(row).tree->refName());
+    }
+    // TortoiseGit asks even with no tags; there is nothing to ask about
+    if (!refNames.isEmpty() && confirmDeleteRef(refNames)) {
+        std::ignore = doDeleteRefs(refNames);
+    }
+    refresh();
+}
+
+void BrowseRefsDlg::deleteRemoteTags(const QString& remote)
+{
+    // eCmd_DeleteRemoteTag. TortoiseGit doesn't refresh; it costs nothing and remote tags may have been fetched
+    DeleteRemoteTagDlg deleteRemoteTagDlg(m_git.workingDirectory(), remote, this);
+    deleteRemoteTagDlg.exec();
+    refresh();
+}
+
 void BrowseRefsDlg::onListDoubleClicked()
 {
     // OnNMDblclkListRefLeafs
@@ -1107,18 +1230,13 @@ bool BrowseRefsDlg::deleteRemoteRefs(const QString& remote, const QStringList& b
 {
     // TortoiseGit runs this behind a "Deleting remote refs..." progress window; ProgressDlg shows git's output too
     ProgressDlg progress(m_git.workingDirectory(), this);
-    progress.addGitCmd(deleteRemoteRefsArguments(remote, branches));
+    QStringList refs;
+    for (const QString& branch : branches) {
+        refs.append(headsPrefix + branch);
+    }
+    progress.addGitCmd(Git::deleteRemoteRefsArguments(remote, refs));
     progress.exec();
     return progress.gitStatus() == 0;
-}
-
-QStringList BrowseRefsDlg::deleteRemoteRefsArguments(const QString& remote, const QStringList& branches)
-{
-    QStringList arguments{QStringLiteral("push"), QStringLiteral("--progress"), QStringLiteral("--"), remote};
-    for (const QString& branch : branches) {
-        arguments.append(QStringLiteral(":refs/heads/") + branch);
-    }
-    return arguments;
 }
 
 std::optional<RemoteBranch> BrowseRefsDlg::splitRemoteBranchName(QString ref, const QStringList& remotes)

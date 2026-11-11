@@ -7,8 +7,8 @@
  * Ported from TortoiseGit src/TortoiseProc/BrowseRefsDlg.h (CBrowseRefsDlg): the "Browse references" dialog, also
  * used as a ref picker by other dialogs: the tree, the list with its columns, the filter, and the list's context menu
  * (log, reflog, compares, fetch, merge, switch, create branch, edit description, rename, tracked branch, deletes and
- * copying). Browse repository isn't there: there is no repository browser. The tree's own menu, Delete all tags and
- * Delete remote tags come later.
+ * copying), and the tree's menu (manage remotes, fetch, create branch or tag, delete all tags, delete remote tags).
+ * Browse repository isn't there: there is no repository browser.
  */
 
 #pragma once
@@ -177,19 +177,17 @@ public:
     [[nodiscard]] std::unique_ptr<QMenu> createListContextMenu();
 
     /**
+     * Builds the context menu for the selected tree node, as ShowContextMenu does with no refs selected.
+     * @returns The menu; its actions do their work when triggered.
+     */
+    [[nodiscard]] std::unique_ptr<QMenu> createTreeContextMenu();
+
+    /**
      * Ported from CBrowseRefsDlg::GetFullRefName.
      * @param partialRefName A name such as main or origin/main.
      * @returns The full name of the first ref ending in it, or an empty string.
      */
     [[nodiscard]] QString fullRefName(const QString& partialRefName) const;
-
-    /**
-     * The git command that deletes branches on a remote, CGit::DeleteRemoteRefs.
-     * @param remote The remote.
-     * @param branches The branch names on the remote.
-     * @returns The arguments after "git".
-     */
-    [[nodiscard]] static QStringList deleteRemoteRefsArguments(const QString& remote, const QStringList& branches);
 
     /**
      * @param refName A full ref name.
@@ -247,6 +245,13 @@ private:
     void setFilterCueText();
     void showFilterMenu();
     void onListContextMenu(const QPoint& pos);
+    void onTreeContextMenu(const QPoint& pos);
+    [[nodiscard]] std::unique_ptr<QMenu> createTreeContextMenu(const ShadowTree *tree);
+    void addTreeTagEntries(QMenu& popupMenu);
+    void manageRemotes();
+    void createTag();
+    void deleteAllTags();
+    void deleteRemoteTags(const QString& remote);
     void onListDoubleClicked();
     void showLog(const QString& refName) const;
     void deleteRefs(const QStringList& refNames);
