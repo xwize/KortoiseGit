@@ -24,7 +24,8 @@ RebaseCommand::RebaseCommand()
 
 bool RebaseCommand::execute()
 {
-    RebaseDlg dlg(Git::workingTreeRoot(paths().constFirst()), {.upstream = value(QStringLiteral("upstream")), .force = hasKey(QStringLiteral("force"))});
+    RebaseDlg dlg(Git::workingTreeRoot(paths().constFirst()),
+                  {.upstream = value(QStringLiteral("upstream")), .force = hasKey(QStringLiteral("force")), .autoStart = false, .preserveMerges = false});
     return dlg.exec() == QDialog::Accepted;
 }
 

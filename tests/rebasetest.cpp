@@ -157,7 +157,7 @@ struct RebaseSetup {
  */
 std::unique_ptr<RebaseDlg> openDlg(const TestRepo& repo, const QString& upstream = QStringLiteral("main"))
 {
-    auto dlg = std::make_unique<RebaseDlg>(repo.path(), RebaseOptions{.upstream = upstream, .force = false});
+    auto dlg = std::make_unique<RebaseDlg>(repo.path(), RebaseOptions{.upstream = upstream, .force = false, .autoStart = false, .preserveMerges = false});
     QSignalSpy fetched(dlg.get(), &RebaseDlg::logListFetched);
     if (!fetched.wait(timeout)) {
         return nullptr;
@@ -568,6 +568,58 @@ private Q_SLOTS:
         QVERIFY(dlg);
         QCOMPARE(dlg->commitList()->logModel()->rowCount(), 0);
         QVERIFY(!dlg->continueButton()->isEnabled());
+    }
+
+    void autoStart()
+    {
+        // m_bRebaseAutoStart: the dialog presses Start Rebase itself, and Done when it gets there
+        {
+            const RebaseSetup setup;
+            const QString mainHead = setup.rev(QStringLiteral("main"));
+            RebaseDlg dlg(setup.repo.path(), RebaseOptions{.upstream = QStringLiteral("main"), .force = false, .autoStart = true, .preserveMerges = false});
+            QSignalSpy finished(&dlg, &QDialog::finished);
+            QVERIFY(finished.wait(timeout));
+            QCOMPARE(dlg.result(), int(QDialog::Accepted));
+            QCOMPARE(setup.rev(QStringLiteral("feature~3")), mainHead);
+            QCOMPARE(setup.headBranch(), QStringLiteral("feature"));
+        }
+        // A fast-forward too
+        {
+            const RebaseSetup setup;
+            setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("old")});
+            RebaseDlg dlg(setup.repo.path(), RebaseOptions{.upstream = QStringLiteral("main"), .force = false, .autoStart = true, .preserveMerges = false});
+            QSignalSpy finished(&dlg, &QDialog::finished);
+            QVERIFY(finished.wait(timeout));
+            QCOMPARE(dlg.result(), int(QDialog::Accepted));
+            QCOMPARE(setup.rev(QStringLiteral("old")), setup.rev(QStringLiteral("main")));
+        }
+        // With nothing to rebase it presses Abort
+        {
+            const RebaseSetup setup;
+            setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
+            RebaseDlg dlg(setup.repo.path(), RebaseOptions{.upstream = QStringLiteral("main"), .force = false, .autoStart = true, .preserveMerges = false});
+            QSignalSpy finished(&dlg, &QDialog::finished);
+            QVERIFY(finished.wait(timeout));
+            QCOMPARE(dlg.result(), int(QDialog::Rejected));
+        }
+        // A conflict stops it, as it would any rebase
+        {
+            const RebaseSetup setup;
+            setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
+            setup.repo.write(QStringLiteral("f1.txt"), "main\n");
+            setup.repo.commitAll(QStringLiteral("clash"));
+            setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("feature")});
+            RebaseDlg dlg(setup.repo.path(), RebaseOptions{.upstream = QStringLiteral("main"), .force = false, .autoStart = true, .preserveMerges = false});
+            QSignalSpy finished(&dlg, &QDialog::finished);
+            QSignalSpy stopped(&dlg, &RebaseDlg::threadFinished);
+            QVERIFY(stopped.wait(timeout));
+            QCOMPARE(dlg.stage(), RebaseDlg::RebaseStage::Conflict);
+            QCOMPARE(finished.count(), 0);
+            const BoxAnswerer answerer(QMessageBox::Yes);
+            dlg.abortButton()->click();
+            QVERIFY(finished.count() > 0 || finished.wait(timeout));
+            QCOMPARE(dlg.result(), int(QDialog::Rejected));
+        }
     }
 
     void aFailedFinishIsNotDone()

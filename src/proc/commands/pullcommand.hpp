@@ -20,7 +20,8 @@ struct PullFetchOptions;
 
 /**
  * Pulls ("pull"): asks where from in PullFetchDlg, then runs git pull in ProgressDlg, as CAppUtils::Pull and
- * DoPull do. Several paths are pulled one after another, each of which must be a working tree's root.
+ * DoPull do; with "Launch Rebase After Fetch" it fetches and opens RebaseDlg instead. Several paths are pulled
+ * one after another, each of which must be a working tree's root.
  */
 class PullCommand : public Command
 {

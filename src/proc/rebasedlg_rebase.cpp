@@ -45,30 +45,6 @@ constexpr auto emptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 constexpr int squashDate = 0;
 
 /**
- * @param hash A full commit hash or anything else.
- * @returns Whether it is a full hexadecimal SHA-1 or SHA-256 hash, which needs no lookup (CGit::GetHash).
- */
-bool isFullHash(const QString& hash)
-{
-    if (hash.size() != 40 && hash.size() != 64) {
-        return false;
-    }
-    return std::ranges::all_of(hash, [](QChar digit) {
-        return (digit >= QLatin1Char('0') && digit <= QLatin1Char('9')) || (digit >= QLatin1Char('a') && digit <= QLatin1Char('f'));
-    });
-}
-
-/**
- * @param value A git configuration value.
- * @returns Whether git reads it as true.
- */
-bool isTrue(const QString& value)
-{
-    const QString lower = value.toLower();
-    return lower == QLatin1String("true") || lower == QLatin1String("yes") || lower == QLatin1String("on") || lower == QLatin1String("1");
-}
-
-/**
  * @param arguments Git's arguments.
  * @returns The command line for the log, as TortoiseGit writes it.
  */
@@ -110,8 +86,8 @@ RebaseDlg::ContinueResult RebaseDlg::continueRebase()
 
     m_abortRequested = false;
     if (m_isFastForward) {
-        std::ignore = fastForward();
-        return ContinueResult::Stop;
+        // An auto-started dialog presses Continue again once fast-forwarded, which closes it
+        return fastForward() && m_options.autoStart ? ContinueResult::Close : ContinueResult::Stop;
     }
 
     if (m_rebaseStage == RebaseStage::ChooseBranch) {
@@ -151,7 +127,7 @@ bool RebaseDlg::checkRebaseCondition()
     if (checkCleanWorkTree()) {
         return true;
     }
-    if (!isTrue(m_git.configValue(QStringLiteral("rebase.autostash")))) {
+    if (!Git::isConfigTrue(m_git.configValue(QStringLiteral("rebase.autostash")))) {
         const int choice =
             askUser(QMessageBox::Question, i18n("The current working tree is not clean.\nDo you want to stash the changes?"), {i18n("&Stash"), i18n("A&bort")});
         if (choice != 1) {
@@ -171,12 +147,12 @@ bool RebaseDlg::checkRebaseCondition()
 bool RebaseDlg::fastForward()
 {
     // OnBnClickedContinue's m_IsFastForward part
-    m_origBranchHash = hashOf(m_branch);
+    m_origBranchHash = m_git.hash(m_branch);
     if (m_origBranchHash.isEmpty()) {
         showError(i18n("Could not get hash of \"%1\".", m_branch));
         return false;
     }
-    m_origUpstreamHash = hashOf(m_upstream);
+    m_origUpstreamHash = m_git.hash(m_upstream);
     if (m_origUpstreamHash.isEmpty()) {
         showError(i18n("Could not get hash of \"%1\".", m_upstream));
         return false;
@@ -292,7 +268,7 @@ bool RebaseDlg::continueConflict()
         return true;
     }
     m_squashMessage.clear();
-    const QString head = hashOf(QStringLiteral("HEAD"));
+    const QString head = m_git.hash(QStringLiteral("HEAD"));
     if (head.isEmpty()) {
         showError(i18n("Could not get HEAD hash."));
         return false;
@@ -409,7 +385,7 @@ bool RebaseDlg::continueNotClean()
     if (!runGitCmdRetryOrAbort(amend)) {
         return false;
     }
-    const QString head = hashOf(QStringLiteral("HEAD"));
+    const QString head = m_git.hash(QStringLiteral("HEAD"));
     m_rewrittenCommitsMap.insert(currentRev().hash, head);
     for (const QString& hash : std::as_const(m_forRewrite)) {
         m_rewrittenCommitsMap.insert(hash, head);
@@ -478,7 +454,7 @@ bool RebaseDlg::continueEdit()
     }
     setActiveTab(LogTab);
     m_rebaseStage = RebaseStage::Continue;
-    const QString head = hashOf(QStringLiteral("HEAD"));
+    const QString head = m_git.hash(QStringLiteral("HEAD"));
     if (head.isEmpty()) {
         showError(i18n("Could not get HEAD hash."));
         return false;
@@ -539,7 +515,7 @@ bool RebaseDlg::startRebase()
     const QString headBranch = m_git.currentBranch();
     // GetCurrentBranch(true): HEAD when detached
     m_origHeadBranch = headBranch == QLatin1String("(no branch)") ? QStringLiteral("HEAD") : headBranch;
-    m_origHeadHash = hashOf(QStringLiteral("HEAD"));
+    m_origHeadHash = m_git.hash(QStringLiteral("HEAD"));
     if (m_origHeadHash.isEmpty()) {
         addLogString(i18n("No HEAD found"));
         return false;
@@ -549,12 +525,12 @@ bool RebaseDlg::startRebase()
         return false;
     }
     const QString upstream = m_onto.isEmpty() ? m_upstream : m_onto;
-    m_origUpstreamHash = hashOf(upstream);
+    m_origUpstreamHash = m_git.hash(upstream);
     if (m_origUpstreamHash.isEmpty()) {
         showError(i18n("Could not get hash of \"%1\".", upstream));
         return false;
     }
-    m_origBranchHash = hashOf(m_branch);
+    m_origBranchHash = m_git.hash(m_branch);
     if (m_origBranchHash.isEmpty()) {
         showError(i18n("Could not get hash of \"%1\".", m_branch));
         return false;
@@ -727,7 +703,7 @@ QStringList RebaseDlg::rewrittenParents(const GitRevLoglist& rev, const QString&
 int RebaseDlg::preserveMergesCommand(const GitRevLoglist& rev, unsigned int mode, const QString& noCommit, QStringList& command)
 {
     // DoRebase with m_bPreserveMerges: check out the rewritten parent first, and re-create merges with git merge
-    const QString currentHead = hashOf(QStringLiteral("HEAD"));
+    const QString currentHead = m_git.hash(QStringLiteral("HEAD"));
     if (currentHead.isEmpty()) {
         m_rebaseStage = RebaseStage::Error;
         showError(i18n("Could not get HEAD hash."));
@@ -791,7 +767,7 @@ int RebaseDlg::preserveMergesCommand(const GitRevLoglist& rev, unsigned int mode
         return -1;
     }
     // Do nothing if already up to date (git merge says so again)
-    if (hashOf(QStringLiteral("HEAD")) != currentHead) {
+    if (m_git.hash(QStringLiteral("HEAD")) != currentHead) {
         command = {QStringLiteral("commit"), QStringLiteral("--amend"), QStringLiteral("-C"), rev.hash};
     }
     return 0;
@@ -874,7 +850,7 @@ int RebaseDlg::handlePickSuccess(int row, const QString& hash, unsigned int mode
         if (noCommit) {
             m_forRewrite.append(hash);
         } else {
-            const QString head = hashOf(QStringLiteral("HEAD"));
+            const QString head = m_git.hash(QStringLiteral("HEAD"));
             if (head.isEmpty()) {
                 showError(i18n("Could not get HEAD hash."));
                 m_rebaseStage = RebaseStage::Error;
@@ -907,6 +883,7 @@ bool RebaseDlg::finishRebase()
     // FinishRebase
     if (!m_finishedRebase) {
         m_finishedRebase = moveBranchToRebasedCommits();
+        m_rebaseAutoEnd = m_finishedRebase && m_options.autoStart;
     }
     return m_finishedRebase;
 }
@@ -914,7 +891,7 @@ bool RebaseDlg::finishRebase()
 bool RebaseDlg::moveBranchToRebasedCommits()
 {
     rewriteNotes();
-    const QString head = hashOf(QStringLiteral("HEAD"));
+    const QString head = m_git.hash(QStringLiteral("HEAD"));
     if (head.isEmpty()) {
         showError(i18n("Could not get HEAD hash."));
         return false;
@@ -1128,20 +1105,6 @@ RebaseDlg::GitResult RebaseDlg::gitRun(const QStringList& arguments, const QByte
     }
 }
 
-QString RebaseDlg::hashOf(const QString& ref) const
-{
-    // CGit::GetHash, peeled to the commit
-    if (isFullHash(ref)) {
-        return ref;
-    }
-    if (ref.isEmpty()) {
-        return {};
-    }
-    const GitResult result = gitRun(
-        {QStringLiteral("rev-parse"), QStringLiteral("--verify"), QStringLiteral("--end-of-options"), m_git.fixBranchName(ref) + QStringLiteral("^{commit}")});
-    return result.ok ? result.output.trimmed() : QString();
-}
-
 std::optional<GitRevLoglist> RebaseDlg::getCommit(const QString& ref) const
 {
     // GitRev::GetCommit
@@ -1162,7 +1125,7 @@ std::optional<GitRevLoglist> RebaseDlg::getCommit(const QString& ref) const
 bool RebaseDlg::isFastForward(const QString& fromRef, const QString& toRef, QString *commonAncestor) const
 {
     // CGit::IsFastForward: whether "from" is an ancestor of "to"
-    const QString fromHash = hashOf(fromRef);
+    const QString fromHash = m_git.hash(fromRef);
     const GitResult base = gitRun({QStringLiteral("merge-base"), QStringLiteral("--"), m_git.fixBranchName(toRef), m_git.fixBranchName(fromRef)});
     if (!base.ok || fromHash.isEmpty()) {
         return false;

@@ -160,6 +160,7 @@ RebaseDlg::RebaseDlg(const QString& workingTree, const RebaseOptions& options, Q
 
     // OnInitDialog
     m_forceCheck->setChecked(m_options.force);
+    m_preserveMergesCheck->setChecked(m_options.preserveMerges);
     m_commitList->setWorkingTree(m_git.workingDirectory());
     m_commitList->logModel()->setRebaseMode(true);
     // Room for the REBASE header and the longest action name
@@ -295,6 +296,19 @@ void RebaseDlg::createWidgets()
         m_continueButton->setEnabled(false);
         Q_EMIT logListFetched();
     });
+    if (m_options.autoStart) {
+        // OnInitDialog's m_bRebaseAutoStart: press Continue once the commits are listed, if there is anything to do
+        connect(
+            this,
+            &RebaseDlg::logListFetched,
+            this,
+            [this] {
+                if (m_continueButton->isEnabled()) {
+                    onContinue();
+                }
+            },
+            static_cast<Qt::ConnectionType>(Qt::QueuedConnection | Qt::SingleShotConnection));
+    }
     connect(m_commitList, &GitLogList::selectedRevChanged, this, &RebaseDlg::onCommitSelectionChanged);
     connect(m_commitList, &GitLogList::filesLoaded, this, [this](int row) {
         if (row == m_commitList->selectedRow()) {
@@ -465,7 +479,7 @@ bool RebaseDlg::checkFetchLogListRefs(QString& branchHash, QString& upstreamHash
         m_commitList->showText(i18n("Please select branch"));
         return false;
     }
-    branchHash = hashOf(branch);
+    branchHash = m_git.hash(branch);
     if (branchHash.isEmpty()) {
         m_commitList->showText(i18n("Could not get hash of \"%1\".", branch));
         return false;
@@ -474,13 +488,14 @@ bool RebaseDlg::checkFetchLogListRefs(QString& branchHash, QString& upstreamHash
         m_commitList->showText(i18n("Please select upstream"));
         return false;
     }
-    upstreamHash = hashOf(upstream);
+    upstreamHash = m_git.hash(upstream);
     if (upstreamHash.isEmpty()) {
         m_commitList->showText(i18n("Could not get hash of \"%1\".", upstream));
         return false;
     }
     if (branchHash == upstreamHash) {
         m_commitList->showText(i18n("No need to rebase\n\"%1\" equals \"%2\"", branch, upstream));
+        autoAbort();
         return false;
     }
     return true;
@@ -516,6 +531,7 @@ void RebaseDlg::fetchLogList()
                  "are rebasing onto, please check below \"Force Rebase\" checkbox.",
                  branch));
         setContinueButtonText();
+        autoAbort();
         Q_EMIT logListFetched();
         return;
     }
@@ -524,6 +540,14 @@ void RebaseDlg::fetchLogList()
     const QString range = QStringLiteral("%1..%2").arg(m_git.fixBranchName(upstream), m_git.fixBranchName(branch));
     m_commitList->setRange(range, !m_preserveMergesCheck->isChecked());
     m_commitList->reload();
+}
+
+void RebaseDlg::autoAbort()
+{
+    // FetchLogList's m_bRebaseAutoStart: with nothing to rebase, an auto-started dialog presses Abort
+    if (m_options.autoStart) {
+        QMetaObject::invokeMethod(this, &RebaseDlg::onAbort, Qt::QueuedConnection);
+    }
 }
 
 void RebaseDlg::onLogListLoaded()
@@ -568,13 +592,13 @@ void RebaseDlg::preserveMergesDropCommits()
 {
     // FetchLogList's m_bPreserveMerges part: keep the commits that descend from the merge base
     GitLogListModel *model = m_commitList->logModel();
-    const QString head = hashOf(QStringLiteral("HEAD"));
+    const QString head = m_git.hash(QStringLiteral("HEAD"));
     if (head.isEmpty()) {
         addLogString(i18n("No HEAD found"));
         return;
     }
     const QString upstreamRef = m_onto.isEmpty() ? m_upstreamCtrl->currentText() : m_onto;
-    const QString upstreamHash = hashOf(upstreamRef);
+    const QString upstreamHash = m_git.hash(upstreamRef);
     if (upstreamHash.isEmpty()) {
         showError(i18n("Could not get hash of \"%1\".", upstreamRef));
         return;
@@ -814,13 +838,13 @@ void RebaseDlg::onOnto()
     m_onto = BrowseRefsDlg::pickRef(m_git.workingDirectory(), {.initialRef = m_onto, .pickRefKind = PickRefAll}, this);
     if (!m_onto.isEmpty()) {
         // Make sure that the user did not select upstream or the selected branch
-        const QString hash = hashOf(m_onto);
+        const QString hash = m_git.hash(m_onto);
         if (hash.isEmpty()) {
             showError(i18n("Could not get hash of \"%1\".", m_onto));
             m_onto.clear();
         } else {
             const auto sameAs = [this, &hash](const QString& ref) {
-                const QString refHash = hashOf(ref);
+                const QString refHash = m_git.hash(ref);
                 return refHash.isEmpty() || refHash == hash;
             };
             if (sameAs(m_upstreamCtrl->currentText()) || sameAs(m_branchCtrl->currentText())) {
@@ -1080,6 +1104,9 @@ void RebaseDlg::onRebaseUpdateUi()
 {
     // OnRebaseUpdateUI; TortoiseGit also finishes the rebase here, which the worker does itself
     updateCurrentStatus();
+    if (m_rebaseStage == RebaseStage::Done && m_rebaseAutoEnd.exchange(false)) {
+        QMetaObject::invokeMethod(this, &RebaseDlg::onContinue, Qt::QueuedConnection);
+    }
     if (m_currentRebaseIndex < 0 || m_currentRebaseIndex >= m_commitList->logModel()->rowCount()) {
         return;
     }
