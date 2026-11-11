@@ -1,10 +1,14 @@
 // SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "chooseversion.hpp"
 #include "commands/fetchcommand.hpp"
 #include "commands/pullcommand.hpp"
+#include "mergeabortdlg.hpp"
+#include "modalwatcher.hpp"
 #include "progressdlg.hpp"
 #include "pullfetchdlg.hpp"
+#include "resetdlg.hpp"
 #include "testrepo.hpp"
 
 #include <KMessageBox>
@@ -21,6 +25,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <optional>
 #include <tuple>
 
 namespace
@@ -125,6 +130,19 @@ void screenshot(QWidget& dlg, const QString& name)
     }
 }
 
+/**
+ * @param modal A modal window.
+ * @returns Whether it was PullFetchDlg, now accepted with what it starts with.
+ */
+bool acceptPullFetchDlg(QWidget *modal)
+{
+    auto *dlg = qobject_cast<PullFetchDlg *>(modal);
+    if (dlg) {
+        dlg->accept();
+    }
+    return dlg;
+}
+
 } // namespace
 
 /**
@@ -215,6 +233,83 @@ private Q_SLOTS:
         QVERIFY(progress.logText().contains(QStringLiteral("CONFLICT")));
         QVERIFY(setup.mine.git().hasWorkingTreeConflicts());
         QVERIFY(QFile::exists(setup.mine.filePath(QStringLiteral(".git/MERGE_HEAD"))));
+    }
+
+    void pullOffersDoPullsFollowUps()
+    {
+        const QString diff = QStringLiteral("Pulled Diff");
+        const QString log = QStringLiteral("Pulled Log");
+
+        // Pulled: the pulled diff and log, with Stash Pop first and Push last when asked for
+        const PullSetup setup;
+        setup.pushFromTheirs(QStringLiteral("b.txt"), "b\n");
+        {
+            const CommandDriver driver({}, acceptPullFetchDlg);
+            QVERIFY(PullCommand::pull(setup.mine.path()));
+            QCOMPARE(driver.offered(), QList<QStringList>{(QStringList{diff, log})});
+        }
+        setup.pushFromTheirs(QStringLiteral("c.txt"), "c\n");
+        {
+            const CommandDriver driver({}, acceptPullFetchDlg);
+            QVERIFY(PullCommand::pull(setup.mine.path(), {.showPush = true, .showStashPop = true}));
+            const QStringList expected{QStringLiteral("Stash Pop"), diff, log, QStringLiteral("Pus&h...")};
+            QCOMPARE(driver.offered(), QList<QStringList>{expected});
+        }
+
+        // Conflicts: Resolve and Commit only
+        const PullSetup conflicting;
+        conflicting.pushFromTheirs(QStringLiteral("a.txt"), "theirs\n");
+        conflicting.mine.write(QStringLiteral("a.txt"), "mine\n");
+        conflicting.mine.commitAll(QStringLiteral("mine"));
+        {
+            const CommandDriver driver({}, acceptPullFetchDlg);
+            QVERIFY(!PullCommand::pull(conflicting.mine.path()));
+            QCOMPARE(driver.offered(), QList<QStringList>{(QStringList{QStringLiteral("Resolve"), QStringLiteral("&Commit...")})});
+        }
+    }
+
+    void failedPullOffersRetries()
+    {
+        // Local changes in the way: Pull, Stash changes and Reset, which starts as a hard reset to the upstream
+        const PullSetup setup;
+        setup.pushFromTheirs(QStringLiteral("a.txt"), "theirs\n");
+        setup.mine.write(QStringLiteral("a.txt"), "uncommitted\n");
+        QString resetTo;
+        std::optional<ResetType> resetType;
+        const auto answer = [&resetTo, &resetType](QWidget *modal) {
+            if (auto *resetDlg = qobject_cast<ResetDlg *>(modal)) {
+                if (!resetDlg->chooseVersion()->isLoading()) {
+                    resetTo = resetDlg->chooseVersion()->versionName();
+                    resetType = resetDlg->resetType();
+                    resetDlg->reject();
+                }
+                return true;
+            }
+            return acceptPullFetchDlg(modal);
+        };
+        {
+            const CommandDriver driver({QStringLiteral("Reset")}, answer);
+            QVERIFY(!PullCommand::pull(setup.mine.path()));
+            const QStringList expected{QStringLiteral("&Pull..."), QStringLiteral("Stash changes"), QStringLiteral("Reset")};
+            QCOMPARE(driver.offered(), QList<QStringList>{expected});
+        }
+        QCOMPARE(resetTo, QStringLiteral("remotes/origin/main"));
+        QCOMPARE(resetType, ResetType::Hard);
+
+        // Unrelated histories: Merge unrelated history comes first and retries with --allow-unrelated-histories
+        const PullSetup unrelated;
+        std::ignore = unrelated.theirs.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("--orphan"), QStringLiteral("new")});
+        unrelated.pushFromTheirs(QStringLiteral("new.txt"), "new\n");
+        std::ignore = unrelated.theirs.run(
+            {QStringLiteral("push"), QStringLiteral("--quiet"), QStringLiteral("--force"), QStringLiteral("origin"), QStringLiteral("new:main")});
+        {
+            const QString retry = QStringLiteral("&Merge unrelated history");
+            const CommandDriver driver({retry}, acceptPullFetchDlg);
+            QVERIFY(!PullCommand::pull(unrelated.mine.path()));
+            QCOMPARE(driver.offered().size(), 2);
+            QCOMPARE(driver.offered().constFirst().constFirst(), retry);
+        }
+        QVERIFY(QFile::exists(unrelated.mine.filePath(QStringLiteral("new.txt"))));
     }
 
     void pullDefaultsFromUpstream()

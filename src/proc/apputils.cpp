@@ -8,6 +8,8 @@
 #include "apputils.hpp"
 
 #include "browserefsdlg.hpp"
+#include "commands/mergecommand.hpp"
+#include "commands/pullcommand.hpp"
 #include "commands/pushcommand.hpp"
 #include "createbranchtagdlg.hpp"
 #include "deleteconflictdlg.hpp"
@@ -754,9 +756,9 @@ bool AppUtils::reset(const QString& workingTree, ResetType type, const QString& 
     return progress.exec() == QDialog::Accepted && progress.gitStatus() == 0;
 }
 
-bool AppUtils::gitReset(const QString& workingTree, const QString& ref, QWidget *parent)
+bool AppUtils::gitReset(const QString& workingTree, const QString& ref, QWidget *parent, std::optional<ResetType> type)
 {
-    ResetDlg dlg(Git(workingTree), ref, parent);
+    ResetDlg dlg(Git(workingTree), ref, parent, type.value_or(ResetType::Mixed));
     if (dlg.exec() != QDialog::Accepted) {
         return false;
     }
@@ -786,16 +788,60 @@ QStringList AppUtils::stashSaveArguments(const StashSaveOptions& options)
     return arguments;
 }
 
-bool AppUtils::stashSave(const Git& git, const QString& message, QWidget *parent)
+bool AppUtils::stashSave(const Git& git, const QString& message, QWidget *parent, const StashSaveFollowUps& followUps)
 {
     StashSaveDlg dlg(git.workingDirectory(), parent);
     dlg.setMessage(message);
     if (dlg.exec() != QDialog::Accepted) {
         return false;
     }
-    ProgressDlg progress(git.workingDirectory(), parent);
+    const QString workingTree = git.workingDirectory();
+    const QString oldStash = git.hash(QStringLiteral("refs/stash"));
+    ProgressDlg progress(workingTree, parent);
     progress.addGitCmd(stashSaveArguments(dlg.options()));
+    // StashSave's m_PostCmdCallback
+    progress.setPostCmdCallback([&git, &followUps, &oldStash, workingTree, parent](int status, PostCmdList& postCmdList) {
+        if (status != 0) {
+            return;
+        }
+        if (followUps.showPull) {
+            postCmdList.append({QIcon::fromTheme(QStringLiteral("vcs-pull")), i18n("&Pull..."), [workingTree, parent, &followUps] {
+                                    std::ignore = PullCommand::pull(workingTree, {.showPush = followUps.pullShowPush, .showStashPop = true}, parent);
+                                }});
+        }
+        if (followUps.showMerge) {
+            postCmdList.append({QIcon::fromTheme(QStringLiteral("vcs-merge")), i18n("&Merge..."), [workingTree, parent, &followUps] {
+                                    std::ignore = MergeCommand::merge(workingTree, followUps.mergeRev, parent, true);
+                                }});
+        }
+        if (git.hash(QStringLiteral("refs/stash")) == oldStash) {
+            return;
+        }
+        const QIcon unshelve = QIcon::fromTheme(QStringLiteral("vcs-stash-pop"));
+        postCmdList.append({unshelve, i18n("Stash Pop"), [workingTree, parent] {
+                                std::ignore = stashPop(workingTree, parent);
+                            }});
+        postCmdList.append({unshelve, i18n("Stash Apply"), [&git, parent] {
+                                std::ignore = stashApply(git, QString(), parent);
+                            }});
+    });
     return progress.exec() == QDialog::Accepted && progress.gitStatus() == 0;
+}
+
+void AppUtils::addConflictPostCmds(const QString& workingTree, PostCmdList& postCmdList)
+{
+    // DoPull and DoMerge: /command:resolve and /command:commit on the working tree
+    postCmdList.append({QIcon::fromTheme(QStringLiteral("dialog-ok-apply")), i18n("Resolve"), [workingTree] {
+                            std::ignore = runTortoiseGitProc({QStringLiteral("--command"), QStringLiteral("resolve"), QStringLiteral("--path"), workingTree});
+                        }});
+    postCmdList.append(commitPostCmd(workingTree));
+}
+
+PostCmd AppUtils::commitPostCmd(const QString& workingTree)
+{
+    return {QIcon::fromTheme(QStringLiteral("vcs-commit")), i18n("&Commit..."), [workingTree] {
+                std::ignore = runTortoiseGitProc({QStringLiteral("--command"), QStringLiteral("commit"), QStringLiteral("--path"), workingTree});
+            }};
 }
 
 StashOutcome AppUtils::stashOutcome(int exitCode, const QString& output)

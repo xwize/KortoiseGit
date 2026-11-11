@@ -11,6 +11,7 @@
 #pragma once
 
 #include "commands/command.hpp"
+#include "progressdlg.hpp"
 
 #include <QStringList>
 
@@ -49,9 +50,40 @@ public:
      * @param workingTree The working tree's root.
      * @param initialRefName What MergeDlg selects first (m_initialRefName); empty for its default.
      * @param parent Parent of the dialogs.
+     * @param showStashPop Whether to offer Stash Pop after a successful merge, for a merge after stashing.
      * @returns True if git merge succeeded.
      */
-    static bool merge(const QString& workingTree, const QString& initialRefName = {}, QWidget *parent = nullptr);
+    static bool merge(const QString& workingTree, const QString& initialRefName = {}, QWidget *parent = nullptr, bool showStashPop = false);
+
+private:
+    /**
+     * Ported from DoMerge: runs git merge in ProgressDlg, which offers the follow-ups of its result.
+     * @param workingTree The working tree's root.
+     * @param options What to merge and how; options.version as chosen, not yet FixBranchName'd.
+     * @param showStashPop Whether to offer Stash Pop after a successful merge.
+     * @param parent Parent of the dialogs.
+     * @returns True if git merge succeeded.
+     */
+    static bool doMerge(const QString& workingTree, const MergeOptions& options, bool showStashPop, QWidget *parent);
+
+    /**
+     * The success half of DoMerge's m_PostCmdCallback: Stash Pop, then Commit after --no-commit or --squash, or
+     * else Remove branch and Push for a branch.
+     * @param workingTree The working tree's root.
+     * @param options What was merged.
+     * @param showStashPop Whether to offer Stash Pop.
+     * @param parent Parent of the dialogs.
+     * @param[in,out] postCmdList Where to add the follow-ups.
+     */
+    static void addSuccessPostCmds(const QString& workingTree, const MergeOptions& options, bool showStashPop, QWidget *parent, PostCmdList& postCmdList);
+
+    /**
+     * DoMerge's Remove branch follow-up: asks, then deletes the merged branch with git branch -D.
+     * @param workingTree The working tree's root.
+     * @param branch The branch, as chosen in MergeDlg.
+     * @param parent Parent of the messages.
+     */
+    static void removeBranch(const QString& workingTree, const QString& branch, QWidget *parent);
 };
 
 } // namespace kgt

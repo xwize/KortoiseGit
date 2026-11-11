@@ -13,12 +13,15 @@
 
 #include <KConfigGroup>
 
+#include "progressdlg.hpp"
+
 #include <QByteArray>
 #include <QIcon>
 #include <QString>
 #include <QStringList>
 
 #include <functional>
+#include <optional>
 
 class QWidget;
 
@@ -43,6 +46,17 @@ struct ConflictTitles {
     QString mineHash; // Set only for a rebase found through rebase-apply/onto
     QString theirsText; // Their side
     QString theirsHash; // Empty during a rebase
+};
+
+/**
+ * The follow-ups CAppUtils::StashSave offers besides Stash Pop and Stash Apply, for a stash started from a failed
+ * pull or merge.
+ */
+struct StashSaveFollowUps {
+    bool showPull = false; // showPull: offer Pull
+    bool pullShowPush = false; // pullShowPush: that pull offers Push
+    bool showMerge = false; // showMerge: offer Merge
+    QString mergeRev; // mergeRev: what that merge starts with
 };
 
 /**
@@ -220,9 +234,10 @@ public:
      * @param workingTree The working tree's root or the bare repository.
      * @param ref What the dialog starts at.
      * @param parent Parent of the dialogs.
+     * @param type The kind of reset the dialog starts with; ResetDlg's own default if not given.
      * @returns True if the reset succeeded.
      */
-    static bool gitReset(const QString& workingTree, const QString& ref, QWidget *parent = nullptr);
+    static bool gitReset(const QString& workingTree, const QString& ref, QWidget *parent = nullptr, std::optional<ResetType> type = std::nullopt);
 
     /**
      * Ported from CAppUtils::MergeAbort: asks how in MergeAbortDlg, then resets to HEAD.
@@ -240,14 +255,29 @@ public:
     [[nodiscard]] static QStringList stashSaveArguments(const StashSaveOptions& options);
 
     /**
-     * Ported from CAppUtils::StashSave, without its post-command buttons or CheckUserData: asks how in StashSaveDlg,
-     * then runs git stash push in ProgressDlg.
+     * Ported from CAppUtils::StashSave, without CheckUserData: asks how in StashSaveDlg, then runs git stash push in
+     * ProgressDlg, which offers Stash Pop and Stash Apply if refs/stash moved, and the follow-ups asked for.
      * @param git Runs git in the working tree's root.
      * @param message The message the dialog starts with.
      * @param parent Parent of the dialogs.
-     * @returns True if git succeeded and the progress dialog was closed with Close.
+     * @param followUps Pull or Merge to offer as well.
+     * @returns True if git succeeded and the progress dialog was closed with Close or a follow-up.
      */
-    static bool stashSave(const Git& git, const QString& message = {}, QWidget *parent = nullptr);
+    static bool stashSave(const Git& git, const QString& message = {}, QWidget *parent = nullptr, const StashSaveFollowUps& followUps = {});
+
+    /**
+     * The Resolve and Commit follow-ups DoPull and DoMerge offer when files are in conflict.
+     * @param workingTree The working tree's root.
+     * @param[in,out] postCmdList Where to add them.
+     */
+    static void addConflictPostCmds(const QString& workingTree, PostCmdList& postCmdList);
+
+    /**
+     * The Commit follow-up: a separate kortoisegitproc --command commit, as TortoiseGit runs /command:commit.
+     * @param workingTree The working tree's root.
+     * @returns The entry.
+     */
+    [[nodiscard]] static PostCmd commitPostCmd(const QString& workingTree);
 
     /**
      * The decision shared by CAppUtils::StashApply and StashPop.

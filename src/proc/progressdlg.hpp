@@ -14,6 +14,7 @@
 
 #include <QDialog>
 #include <QElapsedTimer>
+#include <QIcon>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -21,15 +22,40 @@
 
 #include <functional>
 #include <memory>
+#include <utility>
 
 class QLabel;
 class QPlainTextEdit;
 class QProcess;
 class QProgressBar;
 class QPushButton;
+class QToolButton;
 
 namespace kgt
 {
+
+/**
+ * A follow-up the dialog offers when its commands end, TortoiseGit's PostCmd: Resolve, Commit, Push and the like.
+ */
+struct PostCmd {
+    /**
+     * @param icon The entry's icon.
+     * @param label Translated, with an & for its mnemonic.
+     * @param action What choosing it does.
+     */
+    PostCmd(QIcon icon, QString label, std::function<void()> action)
+        : icon(std::move(icon))
+        , label(std::move(label))
+        , action(std::move(action))
+    {
+    }
+
+    QIcon icon; // The entry's icon
+    QString label; // Translated, with an & for its mnemonic
+    std::function<void()> action; // Runs after the dialog has hidden, before it closes
+};
+
+using PostCmdList = QList<PostCmd>; // TortoiseGit's PostCmdList
 
 /**
  * The "Git Command Progress" dialog. It starts its commands when first shown and streams git's merged stdout and
@@ -72,6 +98,30 @@ public:
      * @param callback Called when the commands end (see PostExecCallback). Must be set before they start.
      */
     void setPostExecCallback(PostExecCallback callback);
+
+    /**
+     * Called when the commands end, after the result is shown, with the OR-ed exit status and an empty list to fill
+     * with the follow-ups to offer. TortoiseGit's m_PostCmdCallback.
+     */
+    using PostCmdCallback = std::function<void(int status, PostCmdList& postCmdList)>;
+
+    /**
+     * @param callback Called when the commands end (see PostCmdCallback). Must be set before they start.
+     */
+    void setPostCmdCallback(PostCmdCallback callback);
+
+    /**
+     * @returns The button offering the follow-ups, TortoiseGit's m_ctrlPostCmd: the first is its label and every one
+     *          is in its menu. Hidden while there are none.
+     */
+    [[nodiscard]] QToolButton *postCmdButton() const;
+
+    /**
+     * Ported from CProgressDlg::OnBnClickedButton1: hides the dialog, runs a follow-up and closes the dialog with
+     * Close's result.
+     * @param index The follow-up's position in the list the callback filled.
+     */
+    void runPostCmd(qsizetype index);
 
     /**
      * Starts the commands, if they haven't been started. Showing the dialog does this; tests may call it directly.
@@ -175,14 +225,22 @@ private:
      */
     void killProcess();
 
+    /**
+     * Asks the callback for the follow-ups and shows them in the menu button.
+     */
+    void showPostCmds();
+
     QLabel *m_currentWork;
     QProgressBar *m_progress;
     QPlainTextEdit *m_log;
     QPushButton *m_closeButton;
     QPushButton *m_abortButton;
+    QToolButton *m_postCmdButton;
     QString m_workingDirectory;
     QList<GitCmd> m_gitCmdList;
     PostExecCallback m_postExecCallback;
+    PostCmdCallback m_postCmdCallback;
+    PostCmdList m_postCmdList;
     qsizetype m_nextCmd = 0; // Index in m_gitCmdList of the command to run next
     std::unique_ptr<QProcess> m_process; // The running command
     GitCliOutputParser m_parser;

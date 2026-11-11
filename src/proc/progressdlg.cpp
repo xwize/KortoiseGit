@@ -5,7 +5,8 @@
 /**
  * @file
  * Ported from TortoiseGit src/TortoiseProc/ProgressDlg.cpp and its IDD_GITPROGRESS resource. The animation, the
- * taskbar progress, the post-command buttons and the log file are left out for now. Git runs through QProcess
+ * taskbar progress and the log file are left out for now. CMenuButton becomes a QToolButton whose menu pops up from
+ * its arrow, and its Alt accelerators are the mnemonics of the button and the menu. Git runs through QProcess
  * on the UI thread's event loop instead of a worker thread.
  */
 
@@ -19,8 +20,10 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFontDatabase>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLocale>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QProgressBar>
@@ -29,6 +32,7 @@
 #include <QScrollBar>
 #include <QTextCharFormat>
 #include <QTextCursor>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <signal.h>
@@ -86,6 +90,7 @@ ProgressDlg::ProgressDlg(const QString& workingDirectory, QWidget *parent)
     , m_log(new QPlainTextEdit(this))
     , m_closeButton(new QPushButton(i18n("Close"), this))
     , m_abortButton(new QPushButton(i18n("Abort"), this))
+    , m_postCmdButton(new QToolButton(this))
     , m_workingDirectory(workingDirectory)
     , m_parser(sizeLimit)
 {
@@ -110,7 +115,16 @@ ProgressDlg::ProgressDlg(const QString& workingDirectory, QWidget *parent)
     m_abortButton->setEnabled(false);
     connect(m_closeButton, &QPushButton::clicked, this, &QDialog::accept);
     connect(m_abortButton, &QPushButton::clicked, this, &ProgressDlg::reject);
-    layout->addWidget(buttons);
+    // IDC_PROGRESS_BUTTON1, anchored bottom left and hidden until there is something to offer
+    m_postCmdButton->setPopupMode(QToolButton::MenuButtonPopup);
+    m_postCmdButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_postCmdButton->setMenu(new QMenu(m_postCmdButton));
+    m_postCmdButton->hide();
+    auto *buttonRow = new QHBoxLayout;
+    buttonRow->addWidget(m_postCmdButton);
+    buttonRow->addStretch();
+    buttonRow->addWidget(buttons);
+    layout->addLayout(buttonRow);
 
     m_refreshTimer.setInterval(refreshInterval);
     connect(&m_refreshTimer, &QTimer::timeout, this, &ProgressDlg::updateCmdOutput);
@@ -134,6 +148,54 @@ void ProgressDlg::setPostExecCallback(PostExecCallback callback)
 {
     Q_ASSERT(!m_started);
     m_postExecCallback = std::move(callback);
+}
+
+void ProgressDlg::setPostCmdCallback(PostCmdCallback callback)
+{
+    Q_ASSERT(!m_started);
+    m_postCmdCallback = std::move(callback);
+}
+
+QToolButton *ProgressDlg::postCmdButton() const
+{
+    return m_postCmdButton;
+}
+
+void ProgressDlg::runPostCmd(qsizetype index)
+{
+    Q_ASSERT(index >= 0 && index < m_postCmdList.size());
+    hide();
+    // A copy: the action may outlive anything that would touch the list
+    const std::function<void()> action = m_postCmdList.at(index).action;
+    action();
+    accept();
+}
+
+void ProgressDlg::showPostCmds()
+{
+    // MSG_PROGRESSDLG_END in CProgressDlg::OnProgressUpdateUI
+    if (!m_postCmdCallback) {
+        return;
+    }
+    m_postCmdCallback(m_gitStatus, m_postCmdList);
+    if (m_postCmdList.isEmpty()) {
+        return;
+    }
+    QMenu *menu = m_postCmdButton->menu();
+    for (qsizetype i = 0; i < m_postCmdList.size(); ++i) {
+        const PostCmd& entry = m_postCmdList.at(i);
+        const QAction *action = menu->addAction(entry.icon, entry.label);
+        connect(action, &QAction::triggered, this, [this, i] {
+            runPostCmd(i);
+        });
+    }
+    // The button runs the first; its text keeps the & that gives it an Alt mnemonic, as the accelerator table did
+    m_postCmdButton->setText(m_postCmdList.constFirst().label);
+    m_postCmdButton->setIcon(m_postCmdList.constFirst().icon);
+    connect(m_postCmdButton, &QToolButton::clicked, this, [this] {
+        runPostCmd(0);
+    });
+    m_postCmdButton->show();
 }
 
 void ProgressDlg::start()
@@ -328,6 +390,7 @@ void ProgressDlg::finish(int status)
     m_log->verticalScrollBar()->setValue(m_log->verticalScrollBar()->maximum());
     m_closeButton->setDefault(true);
     m_closeButton->setFocus();
+    showPostCmds();
     Q_EMIT commandsFinished();
 }
 

@@ -46,7 +46,7 @@ KConfigGroup windowSettings()
 namespace kgt
 {
 
-ResetDlg::ResetDlg(const Git& git, const QString& initialRefName, QWidget *parent)
+ResetDlg::ResetDlg(const Git& git, const QString& initialRefName, QWidget *parent, ResetType type)
     : QDialog(parent)
     , m_chooseVersion(new ChooseVersion(git, i18n("Reset active branch"), this))
     , m_soft(new QRadioButton(i18n("&Soft: Leave working tree and index untouched"), this))
@@ -83,7 +83,7 @@ ResetDlg::ResetDlg(const Git& git, const QString& initialRefName, QWidget *paren
     layout->addWidget(buttons);
 
     // OnInitDialog: a bare repository has no index or working tree to reset
-    QRadioButton *selectedType = m_mixed;
+    QRadioButton *selectedType = type == ResetType::Soft ? m_soft : (type == ResetType::Hard ? m_hard : m_mixed);
     if (GitAdminDir::isBareRepo(git.workingDirectory())) {
         selectedType = m_soft;
         m_mixed->setEnabled(false);
