@@ -262,6 +262,14 @@ public:
     [[nodiscard]] bool isFastForward(const QString& from, const QString& target) const;
 
     /**
+     * Ported from the common ancestor CGit::IsFastForward hands back.
+     * @param from A revision, or FETCH_HEAD.
+     * @param target A revision, or FETCH_HEAD.
+     * @returns Their merge base, or an empty string if they have none or either can't be resolved.
+     */
+    [[nodiscard]] QString commonAncestor(const QString& from, const QString& target) const;
+
+    /**
      * Ported from CGit::GetFullRefName.
      * @param shortRefName A ref such as main or origin/main.
      * @returns Its full name, such as refs/heads/main, or an empty string if it isn't a ref.

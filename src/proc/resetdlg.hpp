@@ -36,8 +36,9 @@ public:
      * @param git Runs git in the working tree's root or the bare repository.
      * @param initialRefName What to select once loaded (m_initialRefName): a branch, tag or commit.
      * @param parent Parent widget.
+     * @param type The reset selected first (m_ResetType), unless the repository is bare.
      */
-    ResetDlg(const Git& git, const QString& initialRefName, QWidget *parent = nullptr);
+    ResetDlg(const Git& git, const QString& initialRefName, QWidget *parent = nullptr, ResetType type = ResetType::Mixed);
 
     /**
      * @returns The chosen reset: Soft, Mixed or Hard.
