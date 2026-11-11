@@ -39,6 +39,8 @@ target_sources(kgtproc PRIVATE
     createbranchtagdlg.hpp
     deleteconflictdlg.cpp
     deleteconflictdlg.hpp
+    deleteremotetagdlg.cpp
+    deleteremotetagdlg.hpp
     filterhelper.cpp
     filterhelper.hpp
     commands/aboutcommand.cpp

@@ -364,6 +364,28 @@ public:
      */
     [[nodiscard]] static QStringList parseTagList(const QByteArray& output);
 
+    /**
+     * The git command CGit::GetRemoteRefs runs for a remote's tags only.
+     * @param remote The remote.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList remoteTagsArguments(const QString& remote);
+
+    /**
+     * Ported from CGit::GetRemoteRefs with only tags: parses git ls-remote -t's output and sorts it logically.
+     * @param output What remoteTagsArguments() printed.
+     * @returns The tags' short names; a peeled annotated tag is listed again with ^{} appended.
+     */
+    [[nodiscard]] static QStringList parseRemoteTags(const QByteArray& output);
+
+    /**
+     * The git command CGit::DeleteRemoteRefs runs.
+     * @param remote The remote.
+     * @param refs The refs on the remote, full names such as refs/tags/v1.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList deleteRemoteRefsArguments(const QString& remote, const QStringList& refs);
+
 private:
     QString m_workingDirectory;
     int m_runTimeoutMs = -1; // How long run() waits; negative for ever

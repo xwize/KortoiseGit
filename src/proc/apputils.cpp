@@ -198,7 +198,7 @@ bool deleteRemoteTrackingBranch(const Git& git, const QString& ref, QWidget *par
     const qsizetype slash = shortName.indexOf(QLatin1Char('/'));
     // TortoiseGit shows "Deleting remote refs..."; ProgressDlg shows git's output too, a failure included
     ProgressDlg progress(git.workingDirectory(), parent);
-    progress.addGitCmd(BrowseRefsDlg::deleteRemoteRefsArguments(shortName.left(slash), {shortName.mid(slash + 1)}));
+    progress.addGitCmd(Git::deleteRemoteRefsArguments(shortName.left(slash), {QLatin1String("refs/heads/") + shortName.mid(slash + 1)}));
     progress.exec();
     return true;
 }

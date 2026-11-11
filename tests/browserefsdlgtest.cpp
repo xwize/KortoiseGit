@@ -3,12 +3,15 @@
 
 #include "browserefsdlg.hpp"
 #include "apputils.hpp"
+#include "deleteremotetagdlg.hpp"
+#include "progressdlg.hpp"
 #include "pullfetchdlg.hpp"
 #include "testrepo.hpp"
 
 #include "utils/runtimeerror.hpp"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QFont>
 #include <QInputDialog>
@@ -23,6 +26,7 @@
 #include <QTimer>
 #include <QTreeView>
 
+#include <algorithm>
 #include <functional>
 #include <memory>
 
@@ -162,6 +166,38 @@ bool waitLoaded(const BrowseRefsDlg& dlg)
 {
     QSignalSpy spy(&dlg, &BrowseRefsDlg::refreshed);
     return spy.wait(waitTimeout);
+}
+
+/**
+ * Selects the second tag in the dialog, deletes it and closes the dialog once the list has been loaded again.
+ * @param tagDlg The dialog, its tags loaded.
+ */
+void deleteSecondTag(const DeleteRemoteTagDlg *tagDlg)
+{
+    tagDlg->tagList()->selectionModel()->select(tagDlg->tagList()->model()->index(1, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    QCOMPARE(tagDlg->selectAllBox()->checkState(), Qt::PartiallyChecked);
+    // The confirmation's buttons are Delete and Abort
+    whenModal<QDialog>(
+        [](QDialog *box) {
+            const auto *buttons = box->findChild<QDialogButtonBox *>();
+            QVERIFY(buttons);
+            const QList<QAbstractButton *> all = buttons->buttons();
+            const auto deleteButton = std::ranges::find(all, QStringLiteral("&Delete"), &QAbstractButton::text);
+            QVERIFY(deleteButton != all.end());
+            (*deleteButton)->click();
+        },
+        [](QDialog *box) {
+            return !qobject_cast<DeleteRemoteTagDlg *>(box) && !qobject_cast<ProgressDlg *>(box);
+        });
+    whenModal<ProgressDlg>(
+        [](ProgressDlg *progress) {
+            progress->accept();
+        },
+        [](const ProgressDlg *progress) {
+            return progress->isDone();
+        });
+    QObject::connect(tagDlg, &DeleteRemoteTagDlg::refreshed, tagDlg, &QDialog::reject);
+    tagDlg->deleteButton()->click();
 }
 
 } // namespace
@@ -372,7 +408,7 @@ private Q_SLOTS:
         QVERIFY(dlg.selectRef(QStringLiteral("refs/remotes/origin/topic"), true));
         menu = dlg.createListContextMenu();
         QVERIFY(findAction(*menu, QStringLiteral("Delete remote branch")));
-        QCOMPARE(BrowseRefsDlg::deleteRemoteRefsArguments(QStringLiteral("origin"), {QStringLiteral("topic"), QStringLiteral("a/b")}),
+        QCOMPARE(Git::deleteRemoteRefsArguments(QStringLiteral("origin"), {QStringLiteral("refs/heads/topic"), QStringLiteral("refs/heads/a/b")}),
                  (QStringList{QStringLiteral("push"),
                               QStringLiteral("--progress"),
                               QStringLiteral("--"),
@@ -637,6 +673,127 @@ private Q_SLOTS:
         QCOMPARE(remote, QStringLiteral("up"));
         // Refreshed afterwards
         QVERIFY(waitLoaded(dlg));
+    }
+
+    void treeMenu()
+    {
+        m_repo->run({QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("up"), m_upstream->path()});
+        BrowseRefsDlg dlg(m_repo->path());
+        QVERIFY(waitLoaded(dlg));
+
+        // Right-clicking a node selects it
+        const auto *treeModel = qobject_cast<QStandardItemModel *>(dlg.refTree()->model());
+        const QStandardItem *tagsItem = treeModel->item(0)->child(2);
+        QCOMPARE(tagsItem->text(), QStringLiteral("tags"));
+        dlg.show();
+        dlg.refTree()->scrollTo(tagsItem->index());
+        const QRect rect = dlg.refTree()->visualRect(tagsItem->index());
+        QTimer::singleShot(0, [] {
+            if (auto *popup = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+                popup->close();
+            }
+        });
+        Q_EMIT dlg.refTree()->customContextMenuRequested(rect.center());
+        QCOMPARE(dlg.selectedRef(false, false), QStringLiteral("refs/tags"));
+
+        // Tags: Create Tag, Delete all tags and one Delete remote tags per remote
+        std::unique_ptr<QMenu> menu = dlg.createTreeContextMenu();
+        QCOMPARE(actionTexts(*menu),
+                 (QStringList{QStringLiteral("Create &Tag..."),
+                              QStringLiteral("Delete all tags"),
+                              QStringLiteral("Delete remote tags on \"origin\"..."),
+                              QStringLiteral("Delete remote tags on \"up\"..."),
+                              QStringLiteral("Copy ref names")}));
+
+        // Heads: Create Branch
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/heads"), true));
+        menu = dlg.createTreeContextMenu();
+        QCOMPARE(actionTexts(*menu), (QStringList{QStringLiteral("Create &Branch..."), QStringLiteral("Copy ref names")}));
+
+        // Remotes: Manage Remotes only, and on a remote also Fetch and Delete remote tags
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/remotes"), true));
+        menu = dlg.createTreeContextMenu();
+        QCOMPARE(actionTexts(*menu), (QStringList{QStringLiteral("Manage Remotes"), QStringLiteral("Copy ref names")}));
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/remotes/origin"), true));
+        menu = dlg.createTreeContextMenu();
+        QCOMPARE(actionTexts(*menu),
+                 (QStringList{QStringLiteral("Manage Remotes"),
+                              QStringLiteral("Fetch from \"origin\""),
+                              QStringLiteral("Delete remote tags..."),
+                              QStringLiteral("Copy ref names")}));
+
+        // The root: only Copy ref names
+        QVERIFY(dlg.selectRef(QStringLiteral("refs"), true));
+        menu = dlg.createTreeContextMenu();
+        QCOMPARE(actionTexts(*menu), QStringList{QStringLiteral("Copy ref names")});
+    }
+
+    void deleteAllTags()
+    {
+        BrowseRefsDlg dlg(m_repo->path());
+        QVERIFY(waitLoaded(dlg));
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/tags"), true));
+        const std::unique_ptr<QMenu> menu = dlg.createTreeContextMenu();
+        QString question;
+        answerYes(&question);
+        findAction(*menu, QStringLiteral("Delete all tags"))->trigger();
+        QVERIFY(question.contains(QStringLiteral("Do you really want to permanently delete the 2 selected refs?")));
+        QVERIFY(waitLoaded(dlg));
+        QVERIFY(!refExists(*m_repo, QStringLiteral("refs/tags/v1")));
+        QVERIFY(!refExists(*m_repo, QStringLiteral("refs/tags/v2")));
+        QVERIFY(refExists(*m_repo, QStringLiteral("refs/heads/main")));
+        // With no tags left, their tree node is gone
+        const auto *treeModel = qobject_cast<QStandardItemModel *>(dlg.refTree()->model());
+        const QStandardItem *root = treeModel->item(0);
+        for (int row = 0; row < root->rowCount(); ++row) {
+            QVERIFY(root->child(row)->text() != QStringLiteral("tags"));
+        }
+    }
+
+    void parseRemoteTags()
+    {
+        const QByteArray hash1(40, 'a');
+        const QByteArray hash2(40, 'b');
+        const QByteArray output =
+            hash1 + "\trefs/tags/v10\n" + hash1 + "\trefs/tags/v2\n" + hash1 + "\trefs/tags/v2^{}\n" + hash2 + "\trefs/heads/main\nwarning: something\n";
+        QCOMPARE(Git::parseRemoteTags(output), (QStringList{QStringLiteral("v2"), QStringLiteral("v2^{}"), QStringLiteral("v10")}));
+        QCOMPARE(Git::remoteTagsArguments(QStringLiteral("origin")),
+                 (QStringList{QStringLiteral("ls-remote"), QStringLiteral("-t"), QStringLiteral("--"), QStringLiteral("origin")}));
+    }
+
+    void deleteRemoteTags()
+    {
+        // A bare remote with an annotated and a lightweight tag
+        const TestRepo remote;
+        remote.run({QStringLiteral("init"), QStringLiteral("--quiet"), QStringLiteral("--bare"), remote.path() + QStringLiteral("/bare.git")});
+        const QString bare = remote.path() + QStringLiteral("/bare.git");
+        m_repo->run({QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("bare"), bare});
+        m_repo->run(
+            {QStringLiteral("push"), QStringLiteral("--quiet"), QStringLiteral("bare"), QStringLiteral("main"), QStringLiteral("v1"), QStringLiteral("v2")});
+
+        BrowseRefsDlg dlg(m_repo->path());
+        QVERIFY(waitLoaded(dlg));
+        QVERIFY(dlg.selectRef(QStringLiteral("refs/tags"), true));
+        const std::unique_ptr<QMenu> menu = dlg.createTreeContextMenu();
+        QStringList listed;
+        bool deleteEnabledBeforeSelecting = true;
+        whenModal<DeleteRemoteTagDlg>(
+            [&](DeleteRemoteTagDlg *tagDlg) {
+                listed = tagDlg->tags();
+                deleteEnabledBeforeSelecting = tagDlg->deleteButton()->isEnabled();
+                deleteSecondTag(tagDlg);
+            },
+            [](const DeleteRemoteTagDlg *tagDlg) {
+                return !tagDlg->isLoading();
+            });
+        findAction(*menu, QStringLiteral("Delete remote tags on \"bare\"..."))->trigger();
+        QCOMPARE(listed, (QStringList{QStringLiteral("v1"), QStringLiteral("v2")}));
+        QVERIFY(!deleteEnabledBeforeSelecting);
+        const QString remoteTags = QString::fromUtf8(m_repo->git().run(Git::remoteTagsArguments(QStringLiteral("bare"))));
+        QVERIFY(remoteTags.contains(QStringLiteral("refs/tags/v1")));
+        QVERIFY(!remoteTags.contains(QStringLiteral("refs/tags/v2")));
+        // Local tags are untouched
+        QVERIFY(refExists(*m_repo, QStringLiteral("refs/tags/v2")));
     }
 
     void showLogNamesTheRef()

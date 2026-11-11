@@ -644,4 +644,42 @@ QStringList Git::parseTagList(const QByteArray& output)
     return tags;
 }
 
+QStringList Git::remoteTagsArguments(const QString& remote)
+{
+    return {QStringLiteral("ls-remote"), QStringLiteral("-t"), QStringLiteral("--"), remote};
+}
+
+QStringList Git::parseRemoteTags(const QByteArray& output)
+{
+    // CGit::GetRemoteRefs: each line is an object name, a tab and a ref name
+    constexpr auto tagsPrefix = "refs/tags/"_L1;
+    QStringList tags;
+    for (const QByteArray& line : nonEmptyLines(output)) {
+        const qsizetype tab = line.indexOf('\t');
+        if (tab < 0 || !isHash(QByteArrayView(line).first(tab))) {
+            continue;
+        }
+        const QString ref = QString::fromUtf8(line.mid(tab + 1));
+        if (ref.startsWith(tagsPrefix) && ref.size() > tagsPrefix.size()) {
+            tags.append(ref.mid(tagsPrefix.size()));
+        }
+    }
+    // TortoiseGit's default order; SortTagsReversed isn't a setting here yet
+    const QCollator collator = logicalCollator();
+    std::ranges::sort(tags, [&collator](const QString& left, const QString& right) {
+        return collator.compare(left, right) < 0;
+    });
+    return tags;
+}
+
+QStringList Git::deleteRemoteRefsArguments(const QString& remote, const QStringList& refs)
+{
+    // --progress for ProgressDlg, which shows git's output while it runs
+    QStringList arguments{QStringLiteral("push"), QStringLiteral("--progress"), QStringLiteral("--"), remote};
+    for (const QString& ref : refs) {
+        arguments.append(QLatin1Char(':') + ref);
+    }
+    return arguments;
+}
+
 } // namespace kgt
