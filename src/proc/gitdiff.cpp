@@ -8,11 +8,10 @@
 #include "gitdiff.hpp"
 
 #include "git/git.hpp"
+#include "toolprocess.hpp"
 
-#include <KLocalizedString>
+#include <KMessageBox>
 
-#include <QMessageBox>
-#include <QProcess>
 #include <QStandardPaths>
 
 #include <algorithm>
@@ -36,21 +35,6 @@ QStringList difftool()
 QString blob(const QString& rev, const QString& path)
 {
     return rev + QLatin1Char(':') + path;
-}
-
-/**
- * @param invocation What to run.
- * @returns Its arguments, with the default diff tool added if the user's git settings don't name one.
- */
-QStringList argumentsWithTool(const kgt::DiffInvocation& invocation)
-{
-    const auto isInstalled = [](const QString& tool) {
-        return !QStandardPaths::findExecutable(tool).isEmpty();
-    };
-    const kgt::Git git(invocation.workingDirectory);
-    const QString diffTool = git.configValue(QStringLiteral("diff.tool"));
-    const QString mergeTool = git.configValue(QStringLiteral("merge.tool"));
-    return kgt::GitDiff::withDefaultTool(invocation.arguments, diffTool, mergeTool, isInstalled);
 }
 
 } // namespace
@@ -119,11 +103,20 @@ QStringList GitDiff::withDefaultTool(const QStringList& arguments, const QString
 
 bool GitDiff::start(QWidget *parent, const DiffInvocation& invocation)
 {
-    if (QProcess::startDetached(QStringLiteral("git"), argumentsWithTool(invocation), invocation.workingDirectory)) {
-        return true;
+    const auto isInstalled = [](const QString& tool) {
+        return !QStandardPaths::findExecutable(tool).isEmpty();
+    };
+    const Git git(invocation.workingDirectory);
+    const QString diffTool = git.configValue(QStringLiteral("diff.tool"));
+    const QString mergeTool = git.configValue(QStringLiteral("merge.tool"));
+    // git difftool falls back to merge.tool when diff.tool isn't set
+    const QString error = ToolProcess::configError(ToolMode::Diff, diffTool.isEmpty() ? mergeTool : diffTool, isInstalled);
+    if (!error.isEmpty()) {
+        KMessageBox::error(parent, ToolProcess::failureMessage(ToolMode::Diff, error), QString(), KMessageBox::Options());
+        return false;
     }
-    QMessageBox::warning(parent, i18n("KortoiseGit"), i18n("Could not start git difftool."));
-    return false;
+    const QStringList arguments = withDefaultTool(invocation.arguments, diffTool, mergeTool, isInstalled);
+    return ToolProcess::launch(parent, ToolMode::Diff, invocation.workingDirectory, arguments);
 }
 
 } // namespace kgt
