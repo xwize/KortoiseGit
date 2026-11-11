@@ -7,18 +7,22 @@
  * Ported from TortoiseGit src/TortoiseProc/GitLogListBase.cpp (CGitLogListBase::OnContextMenu) and
  * GitLogListAction.cpp (CGitLogListBase::ContextMenuAction): the log's right-click menu. Entries are added in
  * OnContextMenu's order, each section ending with its separators, so the entries not ported yet can slot in. Also
- * CGitLogListBase::CopySelectionToClipBoard, which waits for what TortoiseGit reads synchronously.
+ * CGitLogListBase::CopySelectionToClipBoard, which waits for what TortoiseGit reads synchronously, and
+ * CGitLogList::RevertSelectedCommits.
  */
 
 #include "gitloglist.hpp"
 
 #include "apputils.hpp"
+#include "commands/mergecommand.hpp"
+#include "commitdlg.hpp"
 #include "createbranchtagdlg.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 #include "git/gitcall.hpp"
 #include "gitdiff.hpp"
 #include "gitstatuslistmodel.hpp"
+#include "rebasedlg.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KLocalizedString>
@@ -26,14 +30,20 @@
 
 #include <QContextMenuEvent>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QMenu>
+#include <QMessageBox>
+#include <QProgressDialog>
+#include <QPushButton>
 
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <memory>
+#include <optional>
 #include <tuple>
 #include <utility>
 
@@ -186,6 +196,50 @@ QString fullCommitText(const GitRevLoglist& rev, const QHash<QString, QString>& 
     return text + QLatin1Char('\n');
 }
 
+/**
+ * Ported from CGit::GitRevert: reverts a commit into the index and working tree, without committing.
+ * @param git Runs git in the working tree.
+ * @param parent The parent number to revert against for a merge (-m), or 0.
+ * @param hash The commit.
+ * @returns Nothing, or the message of git's failure.
+ */
+std::optional<QString> gitRevert(const Git& git, int parent, const QString& hash)
+{
+    QStringList arguments{QStringLiteral("revert"), QStringLiteral("--no-edit"), QStringLiteral("--no-commit")};
+    if (parent != 0) {
+        arguments << QStringLiteral("-m") << QString::number(parent);
+    }
+    arguments.append(hash);
+    try {
+        std::ignore = git.run(arguments);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Git) {
+            throw;
+        }
+        return e.error().message;
+    }
+    return std::nullopt;
+}
+
+/**
+ * Reports a failed revert as CGitLogList::RevertSelectedCommits does.
+ * @param parent Parent of the message.
+ * @param failure git's message.
+ * @param single Whether it was the only commit to revert: then there is nothing to skip to.
+ * @returns Whether to go on with the next commit (Skip) rather than stop (Abort).
+ */
+bool continueAfterFailedRevert(QWidget *parent, const QString& failure, bool single)
+{
+    const QString message = i18n("Failed revert") + QLatin1Char('\n') + failure;
+    if (single) {
+        KMessageBox::error(parent, message, QString(), KMessageBox::Options());
+        return true;
+    }
+    const KGuiItem skip(i18n("&Skip"));
+    const KGuiItem abort(i18n("A&bort"));
+    return KMessageBox::warningTwoActions(parent, message, QString(), skip, abort) == KMessageBox::PrimaryAction;
+}
+
 } // namespace
 
 namespace kgt
@@ -207,6 +261,11 @@ void GitLogList::showLogMenu(QContextMenuEvent *event)
     if (rows.size() == 1) {
         const int row = rows.constFirst();
         const GitRevLoglist& rev = m_model->rev(row);
+        const QString headHash = Git(m_workingTree).hash(QStringLiteral("HEAD"));
+        if (headHash.isEmpty()) {
+            KMessageBox::error(this, i18n("Could not get HEAD hash."), QString(), KMessageBox::Options());
+            return;
+        }
         const QStringList refs = sortedRefNames(rev);
         const std::optional<GitRef> label = fromKeyboard ? std::nullopt : refLabelAt(row, event->pos());
         target = LogMenuTarget{
@@ -216,8 +275,16 @@ void GitLogList::showLogMenu(QContextMenuEvent *event)
             .isStash = isOnStash(row),
             .row = row,
             .parents = parentHashes(rev),
+            .isHead = rev.hash == headHash,
         };
         addSingleCommitEntries(menu, *target);
+    } else if (!GitAdminDir::isBareRepo(m_workingTree) && !isMergeActive()) { // m_hasWC
+        const QIcon icon = QIcon::fromTheme(QStringLiteral("edit-undo"));
+        menu.addAction(icon, i18n("&Revert changes by these commits"), this, [this] {
+            revertRev(0);
+        });
+        // The Combine, Cherry-pick and Create Patch section that follows in OnContextMenu ends with this separator
+        menu.addSeparator();
     }
     addClipboardEntries(menu, target);
     menu.exec(anchor);
@@ -246,23 +313,41 @@ void GitLogList::addSingleCommitEntries(QMenu& menu, const LogMenuTarget& target
 {
     addCompareEntries(menu, target);
 
-    // m_hasWC: CLogDlg sets it for anything but a bare repository
-    if (!target.isStash && !GitAdminDir::isBareRepo(m_workingTree)) {
-        const QString text = i18n("R&eset \"%1\" to this...", menuText(Git(m_workingTree).currentBranch()));
-        menu.addAction(QIcon::fromTheme(QStringLiteral("edit-reset")), text, this, [this, target] {
-            showingGitErrors(this, [this, &target] {
-                resetToCommit(target);
+    const bool hasWC = !GitAdminDir::isBareRepo(m_workingTree); // m_hasWC: CLogDlg sets it for anything but a bare repository
+    const bool mergeActive = isMergeActive();
+    const QString currentBranch = menuText(Git(m_workingTree).currentBranch());
+    const auto addEntry = [this, &menu, &target](const QString& iconName, const QString& text, void (GitLogList::*handler)(const LogMenuTarget&)) {
+        menu.addAction(QIcon::fromTheme(iconName), text, this, [this, target, handler] {
+            showingGitErrors(this, [this, &target, handler] {
+                (this->*handler)(target);
             });
         });
+    };
+
+    if (!target.isHead && hasWC && !mergeActive && !target.isStash) {
+        addEntry(QStringLiteral("vcs-merge"), i18n("&Merge to \"%1\"...", currentBranch), &GitLogList::mergeRev);
+    }
+
+    if (hasWC && !target.isStash) {
+        addEntry(QStringLiteral("edit-reset"), i18n("R&eset \"%1\" to this...", currentBranch), &GitLogList::resetToCommit);
+        addSwitchBranchEntry(menu, target);
+    }
+
+    if (!target.isHead && hasWC && !target.isStash) {
+        addEntry(QStringLiteral("vcs-branch"), i18n("Sw&itch/Checkout to this..."), &GitLogList::switchToRev);
     }
 
     if (!target.isStash) {
-        const QIcon icon = QIcon::fromTheme(QStringLiteral("tag"));
-        menu.addAction(icon, i18n("Create &Tag at this version..."), this, [this, target] {
-            showingGitErrors(this, [this, &target] {
-                createTag(target);
-            });
-        });
+        addEntry(QStringLiteral("vcs-branch"), i18n("Create Br&anch at this version..."), &GitLogList::createBranch);
+        addEntry(QStringLiteral("tag"), i18n("Create &Tag at this version..."), &GitLogList::createTag);
+    }
+
+    if (!target.isHead && hasWC && !mergeActive && !target.isStash) {
+        addEntry(QStringLiteral("vcs-rebase"), i18n("Rebase \"%1\" onto this...(&G)", currentBranch), &GitLogList::rebaseToVersion);
+    }
+
+    if (hasWC && !mergeActive && !target.isStash) {
+        addRevertEntry(menu, target);
     }
     menu.addSeparator();
 
@@ -271,6 +356,66 @@ void GitLogList::addSingleCommitEntries(QMenu& menu, const LogMenuTarget& target
     if (hasPush || hasDelete) {
         menu.addSeparator();
     }
+}
+
+void GitLogList::addSwitchBranchEntry(QMenu& menu, const LogMenuTarget& target)
+{
+    // The Switch Branch express menu of CGitLogListBase::OnContextMenu: the local branches on the commit but the
+    // current one, or only the right-clicked one
+    const QString headsPrefix = QStringLiteral("refs/heads/");
+    const QString currentBranch = headsPrefix + Git(m_workingTree).currentBranch();
+    QStringList branches;
+    const QStringList candidates = target.label ? QStringList{target.label->fullName()} : target.refs;
+    for (const QString& ref : candidates) {
+        if (ref.startsWith(headsPrefix) && ref != currentBranch) {
+            branches.append(ref.mid(headsPrefix.size()));
+        }
+    }
+
+    const QIcon icon = QIcon::fromTheme(QStringLiteral("vcs-branch"));
+    const QString text = i18n("&Switch/Checkout to");
+    const auto switchTo = [this](const QString& branch) {
+        return [this, branch] {
+            showingGitErrors(this, [this, &branch] {
+                switchBranch(branch);
+            });
+        };
+    };
+    if (branches.size() == 1) {
+        const QString& branch = branches.constFirst();
+        menu.addAction(icon, text + QStringLiteral(" \"") + menuText(branch) + QLatin1Char('"'), this, switchTo(branch));
+    } else if (branches.size() > 1) {
+        QMenu *submenu = menu.addMenu(icon, text);
+        for (const QString& branch : std::as_const(branches)) {
+            submenu->addAction(menuText(branch), this, switchTo(branch));
+        }
+    }
+}
+
+void GitLogList::addRevertEntry(QMenu& menu, const LogMenuTarget& target)
+{
+    // ID_REVERTREV of CGitLogListBase::OnContextMenu: a merge reverts against the parent chosen in a submenu
+    const QIcon icon = QIcon::fromTheme(QStringLiteral("edit-undo"));
+    const QString text = i18n("&Revert change by this commit");
+    if (target.parents.size() == 1) {
+        menu.addAction(icon, text, this, [this] {
+            revertRev(0);
+        });
+    } else if (target.parents.size() > 1) {
+        QMenu *submenu = menu.addMenu(icon, text);
+        for (qsizetype i = 0; i < target.parents.size(); ++i) {
+            const int parent = static_cast<int>(i) + 1;
+            submenu->addAction(parentInfo(parent, target.parents.at(i)), this, [this, parent] {
+                revertRev(parent);
+            });
+        }
+    }
+}
+
+bool GitLogList::isMergeActive() const
+{
+    // CTGitPath::IsMergeActive
+    return QFileInfo::exists(QDir(GitAdminDir::worktreeAdminDirPath(m_workingTree)).filePath(QStringLiteral("MERGE_HEAD")));
 }
 
 void GitLogList::addCompareEntries(QMenu& menu, const LogMenuTarget& target)
@@ -652,6 +797,178 @@ void GitLogList::createTag(const LogMenuTarget& target)
     params.isTag = true;
     AppUtils::createBranchTag(m_workingTree, params, this);
     reloadHashMap();
+}
+
+void GitLogList::createBranch(const LogMenuTarget& target)
+{
+    // ID_CREATE_BRANCH: a right-clicked remote branch, else a remote branch on the commit to enable tracking, else
+    // the commit
+    QString ref = target.hash;
+    if (target.label && target.label->type == GitRef::Type::RemoteBranch) {
+        ref = target.label->fullName();
+    } else if (const QString remoteBranch = firstWithPrefix(target.refs, QStringLiteral("refs/remotes/")); !remoteBranch.isEmpty()) {
+        ref = remoteBranch;
+    }
+    CreateBranchTagParams params;
+    params.initialRefName = ref;
+    AppUtils::createBranchTag(m_workingTree, params, this);
+    reloadHashMap();
+}
+
+void GitLogList::switchToRev(const LogMenuTarget& target)
+{
+    // ID_SWITCHTOREV: the right-clicked ref, else a remote branch on the commit to recommend a good branch name and
+    // tracking, else the commit
+    QString ref = target.hash;
+    if (target.label) {
+        ref = target.label->fullName();
+    } else if (const QString remoteBranch = firstWithPrefix(target.refs, QStringLiteral("refs/remotes/")); !remoteBranch.isEmpty()) {
+        ref = remoteBranch;
+    }
+    AppUtils::switchTo(m_workingTree, ref, this);
+    reloadHashMap();
+}
+
+void GitLogList::switchBranch(const QString& branch)
+{
+    // ID_SWITCHBRANCH: CAppUtils::PerformSwitch without asking
+    SwitchOptions options;
+    options.ref = branch;
+    AppUtils::performSwitch(m_workingTree, options, this);
+    reloadHashMap();
+}
+
+void GitLogList::mergeRev(const LogMenuTarget& target)
+{
+    // ID_MERGEREV: the right-clicked ref, else the commit's first ref, else the commit
+    QString ref = target.hash;
+    if (target.label) {
+        ref = target.label->fullName();
+    } else if (!target.refs.isEmpty()) {
+        ref = target.refs.constFirst();
+    }
+    if (MergeCommand::merge(m_workingTree, ref, this)) {
+        reload();
+    }
+}
+
+void GitLogList::rebaseToVersion(const LogMenuTarget& target)
+{
+    // ID_REBASE_TO_VERSION
+    if (isBusy()) {
+        KMessageBox::information(this, i18n("This operation cannot be started while the log dialog is still loading commits."));
+        return;
+    }
+    // Try to guess a branch, optimally a local branch
+    QString upstream = target.refs.isEmpty() ? target.hash : target.refs.constFirst();
+    if (const QString branch = firstWithPrefix(target.refs, QStringLiteral("refs/heads/")); !branch.isEmpty()) {
+        upstream = Git::stripRefName(branch);
+    }
+    RebaseOptions options;
+    options.upstream = upstream;
+    RebaseDlg dlg(m_workingTree, options, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        reload();
+    }
+}
+
+void GitLogList::revertRev(int parent)
+{
+    // ID_REVERTREV
+    if (!revertSelectedCommits(parent)) {
+        return;
+    }
+    QMessageBox box(QMessageBox::Question,
+                    i18n("KortoiseGit"),
+                    i18n("Revision(s) reverted. All changes are integrated into your working tree now."),
+                    QMessageBox::NoButton,
+                    this);
+    QPushButton *okButton = box.addButton(QMessageBox::Ok);
+    okButton->setText(i18n("&OK"));
+    const QPushButton *commit = box.addButton(i18n("Commit"), QMessageBox::ActionRole);
+    box.setDefaultButton(okButton);
+    box.setEscapeButton(okButton);
+    box.exec();
+    if (box.clickedButton() == commit) {
+        openCommitDlg();
+    }
+    reload();
+}
+
+bool GitLogList::revertSelectedCommits(int parent)
+{
+    // CGitLogList::RevertSelectedCommits. Each git revert runs while the progress dialog waits, as TortoiseGit's do
+    const QString question = i18n("Revert the selected commit(s)?");
+    if (QMessageBox::question(this, i18n("KortoiseGit"), question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+        return false;
+    }
+
+    const QList<int> rows = selectedRows();
+    std::unique_ptr<QProgressDialog> progress;
+    if (rows.size() > 1) {
+        progress = std::make_unique<QProgressDialog>(QString(), i18n("Cancel"), 0, static_cast<int>(rows.size()), this);
+        progress->setWindowTitle(i18n("Revert commit"));
+        progress->setWindowModality(Qt::WindowModal);
+        progress->setMinimumDuration(0);
+    }
+
+    const Git git(m_workingTree);
+    const QString mergeMsgPath = QDir(GitAdminDir::worktreeAdminDirPath(m_workingTree)).filePath(QStringLiteral("MERGE_MSG"));
+    QString mergeMsg;
+    bool reverted = false;
+    for (qsizetype i = 0; i < rows.size(); ++i) {
+        const GitRevLoglist& rev = m_model->rev(rows.at(i));
+        if (progress) {
+            progress->setLabelText(i18n("Revert commit %1", rev.hash) + QLatin1Char('\n') + rev.subject);
+            progress->setValue(static_cast<int>(i));
+        }
+
+        if (const std::optional<QString> failure = gitRevert(git, parent, rev.hash)) {
+            if (!continueAfterFailedRevert(this, *failure, rows.size() == 1)) {
+                // As TortoiseGit does, an abort leaves MERGE_MSG as git last wrote it
+                return reverted;
+            }
+        } else {
+            if (!mergeMsg.isEmpty()) {
+                mergeMsg += QLatin1Char('\n');
+            }
+            // CGit::LoadTextFile: git revert wrote this commit's message, replacing the last one's
+            QFile file(mergeMsgPath);
+            if (file.open(QIODevice::ReadOnly)) {
+                mergeMsg += QString::fromUtf8(file.readAll());
+            }
+            reverted = true;
+        }
+
+        if (progress && progress->wasCanceled()) {
+            break;
+        }
+    }
+    if (progress) {
+        progress->setValue(progress->maximum());
+    }
+    if (!mergeMsg.isEmpty()) {
+        // CStringUtils::WriteStringToTextFile: the messages of every commit reverted
+        QFile file(mergeMsgPath);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(mergeMsg.toUtf8()) < 0) {
+            KMessageBox::error(this, file.errorString(), QString(), KMessageBox::Options());
+        }
+    }
+    return reverted;
+}
+
+void GitLogList::openCommitDlg()
+{
+    // CAppUtils::Commit, for the log's path (m_Path)
+    QStringList paths;
+    for (const QString& path : std::as_const(m_pathFilter)) {
+        paths.append(QDir(m_workingTree).filePath(path));
+    }
+    if (paths.isEmpty()) {
+        paths.append(m_workingTree);
+    }
+    CommitDlg dlg(paths, QString(), this);
+    dlg.exec();
 }
 
 void GitLogList::push(const LogMenuTarget& target)

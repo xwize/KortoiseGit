@@ -3,31 +3,41 @@
 
 #include "logdlg.hpp"
 #include "chooseversion.hpp"
+#include "commitdlg.hpp"
+#include "createbranchtagdlg.hpp"
 #include "gitloglist.hpp"
 #include "gitstatuslistctrl.hpp"
 #include "gitstatuslistmodel.hpp"
+#include "gitswitchdlg.hpp"
+#include "mergedlg.hpp"
 #include "progressdlg.hpp"
 #include "pushdlg.hpp"
+#include "rebasedlg.hpp"
 #include "resetdlg.hpp"
 #include "testrepo.hpp"
 
 #include <KConfigGroup>
 #include <KSharedConfig>
 
+#include <QAbstractButton>
 #include <QApplication>
 #include <QBrush>
 #include <QClipboard>
+#include <QComboBox>
 #include <QContextMenuEvent>
 #include <QDateEdit>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSignalSpy>
@@ -42,6 +52,7 @@
 #include <initializer_list>
 #include <optional>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace
@@ -411,6 +422,157 @@ bool withMenuOn(GitLogList *list, int row, const MenuHandler& handle, std::optio
     QContextMenuEvent event(QContextMenuEvent::Mouse, pos, list->viewport()->mapToGlobal(pos));
     QApplication::sendEvent(list->viewport(), &event);
     return opened;
+}
+
+/**
+ * Right-clicks the selection, whatever it is, hands the open menu to @p handle and closes the menu.
+ * @param list The list.
+ * @param handle Called with the open menu.
+ * @returns Whether a menu opened.
+ */
+bool withMenuOnSelection(const GitLogList *list, const MenuHandler& handle)
+{
+    bool opened = false;
+    QTimer::singleShot(0, list, [&opened, &handle] {
+        auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        if (menu) {
+            opened = true;
+            handle(menu);
+            menu->close();
+        }
+    });
+    QContextMenuEvent event(QContextMenuEvent::Mouse, QPoint(5, 5), list->viewport()->mapToGlobal(QPoint(5, 5)));
+    QApplication::sendEvent(list->viewport(), &event);
+    return opened;
+}
+
+using ModalHandler = std::function<bool(QWidget *)>; // Deals with a modal window; returns whether it did
+
+/**
+ * Hands every modal window that comes up to a handler until it is destroyed.
+ */
+class ModalWatcher
+{
+public:
+    /**
+     * @param handle Called with the active modal window, over and over until it returns true for it.
+     */
+    explicit ModalWatcher(ModalHandler handle)
+        : m_handle(std::move(handle))
+    {
+        QObject::connect(&m_timer, &QTimer::timeout, &m_timer, [this] {
+            if (QWidget *modal = QApplication::activeModalWidget()) {
+                std::ignore = m_handle(modal);
+            }
+        });
+        m_timer.start(pollInterval);
+    }
+
+private:
+    static constexpr int pollInterval = 10;
+
+    ModalHandler m_handle;
+    QTimer m_timer;
+};
+
+/**
+ * @param modal A modal window.
+ * @returns Whether it was a progress dialog that had finished, now closed with Close.
+ */
+bool closeFinishedProgress(QWidget *modal)
+{
+    auto *progress = qobject_cast<ProgressDlg *>(modal);
+    if (progress && progress->isDone()) {
+        progress->accept();
+        return true;
+    }
+    return false;
+}
+
+/**
+ * @param modal A modal window.
+ * @param button A standard button.
+ * @returns Whether it was a message box with that button, now pressed.
+ */
+bool pressButton(const QWidget *modal, QDialogButtonBox::StandardButton button)
+{
+    const auto *buttons = modal->findChild<QDialogButtonBox *>();
+    QPushButton *pushButton = buttons ? buttons->button(button) : nullptr;
+    if (pushButton) {
+        pushButton->click();
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Reads what a dialog opened from the log's menu starts with, once it has loaded, and cancels it.
+ * @param modal A modal window.
+ * @param chosen Set to the version it preselects: the upstream for RebaseDlg.
+ * @returns Whether it was such a dialog, now cancelled.
+ */
+bool readPreselection(QWidget *modal, QString& chosen)
+{
+    if (auto *rebaseDlg = qobject_cast<RebaseDlg *>(modal)) {
+        if (rebaseDlg->isLoading()) {
+            return false;
+        }
+        chosen = rebaseDlg->upstreamCombo()->currentText();
+        rebaseDlg->reject();
+        return true;
+    }
+    const ChooseVersion *version = nullptr;
+    if (const auto *switchDlg = qobject_cast<GitSwitchDlg *>(modal)) {
+        version = switchDlg->chooseVersion();
+    } else if (const auto *branchDlg = qobject_cast<CreateBranchTagDlg *>(modal)) {
+        version = branchDlg->chooseVersion();
+    } else if (const auto *mergeDlg = qobject_cast<MergeDlg *>(modal)) {
+        version = mergeDlg->chooseVersion();
+    }
+    if (!version || version->isLoading()) {
+        return false;
+    }
+    chosen = version->versionName();
+    qobject_cast<QDialog *>(modal)->reject();
+    return true;
+}
+
+/**
+ * Answers the boxes reverting commits brings up: Yes to the question and Commit to the result, then reads the
+ * commit dialog that opens and cancels it.
+ * @param modal A modal window.
+ * @param message Set to the commit dialog's message.
+ * @returns Whether it was one of those.
+ */
+bool revertThenCommit(QWidget *modal, QString& message)
+{
+    if (const auto *box = qobject_cast<QMessageBox *>(modal)) {
+        const QList<QAbstractButton *> buttons = box->buttons();
+        const auto commit = std::ranges::find_if(buttons, [](const QAbstractButton *button) {
+            return button->text() == QLatin1String("Commit");
+        });
+        if (commit != buttons.cend()) {
+            (*commit)->click();
+            return true;
+        }
+        return pressButton(modal, QDialogButtonBox::Yes);
+    }
+    if (auto *commitDlg = qobject_cast<CommitDlg *>(modal)) {
+        message = commitDlg->messageEdit()->toPlainText();
+        commitDlg->reject();
+        return true;
+    }
+    return false;
+}
+
+/**
+ * @param repo A repository.
+ * @returns The contents of its MERGE_MSG.
+ */
+QString mergeMsg(const TestRepo& repo)
+{
+    QFile file(repo.filePath(QStringLiteral(".git/MERGE_MSG")));
+    return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
 }
 
 /**
@@ -1318,8 +1480,13 @@ private Q_SLOTS:
         GitLogList *list = dlg.logList();
         const QString compare = QStringLiteral("Compare with &working tree");
         const QString previous = QStringLiteral("&Compare with previous revision");
+        const QString merge = QStringLiteral("&Merge to \"main\"...");
         const QString reset = QStringLiteral("R&eset \"main\" to this...");
+        const QString switchTo = QStringLiteral("Sw&itch/Checkout to this...");
+        const QString createBranch = QStringLiteral("Create Br&anch at this version...");
         const QString createTag = QStringLiteral("Create &Tag at this version...");
+        const QString rebase = QStringLiteral("Rebase \"main\" onto this...(&G)");
+        const QString revert = QStringLiteral("&Revert change by this commit");
         const QString push = QStringLiteral("Pus&h...");
         const QString sep = QStringLiteral("-");
         const QString copy = QStringLiteral("Copy to clipboard");
@@ -1329,27 +1496,234 @@ private Q_SLOTS:
             texts = entryTexts(menu);
         };
         // The current branch is never offered, and is what makes HEAD pushable
+        // HEAD can't be merged, switched to or rebased onto
         QVERIFY(withMenuOn(list, 0, collect));
-        QCOMPARE(texts, (QStringList{compare, previous, sep, reset, createTag, sep, push, sep, copy}));
+        QCOMPARE(texts, (QStringList{compare, previous, sep, reset, createBranch, createTag, revert, sep, push, sep, copy}));
         QVERIFY(withMenuOn(list, 1, collect));
         const QString deleteTag = QStringLiteral("&Delete refs/tags/v1");
-        QCOMPARE(texts, (QStringList{compare, previous, sep, reset, createTag, sep, push, deleteTag, sep, copy}));
-        // No refs: nothing to push or delete. A root commit has nothing to compare with
+        QCOMPARE(texts,
+                 (QStringList{compare, previous, sep, merge, reset, switchTo, createBranch, createTag, rebase, revert, sep, push, deleteTag, sep, copy}));
+        // No refs: nothing to push or delete. A root commit has nothing to compare with or revert
         QVERIFY(withMenuOn(list, 2, collect));
-        QCOMPARE(texts, (QStringList{compare, sep, reset, createTag, sep, copy}));
+        QCOMPARE(texts, (QStringList{compare, sep, merge, reset, switchTo, createBranch, createTag, rebase, sep, copy}));
 
-        // Only Copy to clipboard is for several commits
+        // Several commits can be reverted together
+        const QString revertAll = QStringLiteral("&Revert changes by these commits");
         list->setCurrentIndex(list->logModel()->index(0, 0));
         list->selectAll();
-        QTimer::singleShot(0, list, [&collect] {
-            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
-            QVERIFY(menu);
-            collect(menu);
-            menu->close();
-        });
-        QContextMenuEvent event(QContextMenuEvent::Mouse, QPoint(5, 5), list->viewport()->mapToGlobal(QPoint(5, 5)));
-        QApplication::sendEvent(list->viewport(), &event);
+        QVERIFY(withMenuOnSelection(list, collect));
+        QCOMPARE(texts, (QStringList{revertAll, sep, copy}));
+
+        // While a merge is being concluded, nothing that merges, rebases or reverts
+        QFile mergeHead(repo.filePath(QStringLiteral(".git/MERGE_HEAD")));
+        QVERIFY(mergeHead.open(QIODevice::WriteOnly));
+        mergeHead.write(list->logModel()->rev(1).hash.toLatin1() + '\n');
+        mergeHead.close();
+        QVERIFY(withMenuOnSelection(list, collect));
         QCOMPARE(texts, (QStringList{copy}));
+        QVERIFY(withMenuOn(list, 1, collect));
+        QCOMPARE(texts, (QStringList{compare, previous, sep, reset, switchTo, createBranch, createTag, sep, push, deleteTag, sep, copy}));
+    }
+
+    void switchBranchOffersTheOtherLocalBranches()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        repo.run({QStringLiteral("branch"), QStringLiteral("a")});
+        repo.run({QStringLiteral("branch"), QStringLiteral("b")});
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("Second"));
+        repo.run({QStringLiteral("branch"), QStringLiteral("c")});
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+        const QString text = QStringLiteral("&Switch/Checkout to");
+
+        QStringList texts;
+        // One branch other than the current one: a single entry
+        QVERIFY(withMenuOn(list, 0, [&texts](QMenu *menu) {
+            texts = entryTexts(menu);
+        }));
+        QVERIFY(texts.contains(text + QStringLiteral(" \"c\"")));
+        // Several: a submenu
+        QVERIFY(withMenuOn(list, 1, [&texts, &text](QMenu *menu) {
+            texts = entryTexts(entry(menu, text)->menu());
+        }));
+        QCOMPARE(texts, (QStringList{QStringLiteral("a"), QStringLiteral("b")}));
+
+        // On a label, only that branch; switching to it at once
+        const ModalWatcher watcher(closeFinishedProgress);
+        QVERIFY(withMenuOn(
+            list,
+            1,
+            [&text](QMenu *menu) {
+                entry(menu, text + QStringLiteral(" \"b\""))->trigger();
+            },
+            labelPoint(list, 1, QStringLiteral("b"))));
+        QCOMPARE(Git(repo.path()).currentBranch(), QStringLiteral("b"));
+        // The labels follow: b is now current, so main is offered on the commit above
+        QVERIFY(withMenuOn(list, 0, [&texts](QMenu *menu) {
+            texts = entryTexts(menu);
+        }));
+        QVERIFY(texts.contains(text));
+    }
+
+    void commitEntriesPreselectTheGuessedRef()
+    {
+        const RemoteSetup setup;
+        const TestRepo& repo = setup.repo;
+        repo.run({QStringLiteral("tag"), QStringLiteral("v1")});
+        repo.write(QStringLiteral("f.txt"), "3");
+        repo.commitAll(QStringLiteral("Third"));
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+        const QString hash = list->logModel()->rev(2).hash;
+
+        // Opens an entry and reads what the dialog it opens starts with, then cancels it
+        const auto preselected = [list](int row, const std::optional<QPoint>& position, const QString& text) {
+            QString chosen;
+            const ModalWatcher watcher([&chosen](QWidget *modal) {
+                return readPreselection(modal, chosen);
+            });
+            const bool opened = withMenuOn(
+                list,
+                row,
+                [&text](QMenu *menu) {
+                    entry(menu, text)->trigger();
+                },
+                position);
+            return opened ? chosen : QStringLiteral("(no menu)");
+        };
+
+        const QString switchTo = QStringLiteral("Sw&itch/Checkout to this...");
+        const QString createBranch = QStringLiteral("Create Br&anch at this version...");
+        const QString merge = QStringLiteral("&Merge to \"main\"...");
+        const QString rebase = QStringLiteral("Rebase \"main\" onto this...(&G)");
+        const std::optional<QPoint> featureLabel = labelPoint(list, 1, QStringLiteral("feature"));
+        const std::optional<QPoint> tagLabel = labelPoint(list, 1, QStringLiteral("v1"));
+        QVERIFY(featureLabel && tagLabel);
+
+        // Switch and Create Branch: the label, else a remote branch, else the commit. Create Branch takes only a
+        // remote branch's label
+        const QString remote = QStringLiteral("remotes/origin/feature"); // As ChooseVersion names it
+        QCOMPARE(preselected(1, std::nullopt, switchTo), remote);
+        QCOMPARE(preselected(1, featureLabel, switchTo), QStringLiteral("feature"));
+        QCOMPARE(preselected(2, std::nullopt, switchTo), hash);
+        QCOMPARE(preselected(1, std::nullopt, createBranch), remote);
+        QCOMPARE(preselected(1, tagLabel, createBranch), remote);
+        QCOMPARE(preselected(2, std::nullopt, createBranch), hash);
+        // Merge: the label, else the first ref, else the commit
+        QCOMPARE(preselected(1, std::nullopt, merge), QStringLiteral("feature"));
+        QCOMPARE(preselected(1, tagLabel, merge), QStringLiteral("v1"));
+        QCOMPARE(preselected(2, std::nullopt, merge), hash);
+        // Rebase: a local branch, else the first ref, else the commit
+        QCOMPARE(preselected(1, std::nullopt, rebase), QStringLiteral("feature"));
+        QCOMPARE(preselected(2, std::nullopt, rebase), hash);
+    }
+
+    void revertsAMergeAgainstTheChosenParent()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("base.txt"), "base\n");
+        repo.commitAll(QStringLiteral("Base"));
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("side")});
+        repo.write(QStringLiteral("side.txt"), "side\n");
+        repo.commitAll(QStringLiteral("Side"));
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        repo.write(QStringLiteral("main.txt"), "main\n");
+        repo.commitAll(QStringLiteral("Main"));
+        repo.run({QStringLiteral("merge"), QStringLiteral("--quiet"), QStringLiteral("--no-edit"), QStringLiteral("side")});
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+
+        // Yes to the question, OK to the result
+        const BoxAnswerer answerer({QDialogButtonBox::Yes, QDialogButtonBox::Ok});
+        qsizetype parents = 0;
+        QVERIFY(withMenuOn(dlg.logList(), 0, [&parents](QMenu *menu) {
+            const QMenu *submenu = entry(menu, QStringLiteral("&Revert change by this commit"))->menu();
+            parents = submenu->actions().size();
+            submenu->actions().constFirst()->trigger(); // Parent 1, main: undoes what side brought
+        }));
+        QCOMPARE(parents, 2);
+        QVERIFY(!QFileInfo::exists(repo.filePath(QStringLiteral("side.txt"))));
+        QVERIFY(QFileInfo::exists(repo.filePath(QStringLiteral("main.txt"))));
+        QVERIFY(mergeMsg(repo).startsWith(QStringLiteral("Revert \"Merge branch 'side'\"")));
+        QVERIFY(waitForReload(dlg));
+    }
+
+    void revertsSeveralCommitsWithOneMessage()
+    {
+        const TestRepo repo;
+        for (int i = 1; i <= 3; ++i) {
+            repo.write(QStringLiteral("f%1.txt").arg(i), "x");
+            repo.commitAll(QStringLiteral("C%1").arg(i));
+        }
+        repo.write(QStringLiteral("f1.txt"), "changed");
+        repo.commitAll(QStringLiteral("C4"));
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+        const GitLogListModel *model = list->logModel();
+        const auto select = [list, model](std::initializer_list<int> rows) {
+            list->clearSelection();
+            for (const int row : rows) {
+                list->selectionModel()->select(model->index(row, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+            }
+        };
+        const auto revertSelection = [list] {
+            return withMenuOnSelection(list, [](QMenu *menu) {
+                entry(menu, QStringLiteral("&Revert changes by these commits"))->trigger();
+            });
+        };
+        const QString revertC2 = QStringLiteral("Revert \"C2\"\n\nThis reverts commit %1.\n").arg(model->rev(2).hash);
+        const QString revertC3 = QStringLiteral("Revert \"C3\"\n\nThis reverts commit %1.\n").arg(model->rev(1).hash);
+
+        // C3 and C2, newest first; Commit opens the commit dialog with both messages
+        select({1, 2});
+        QString message;
+        const ModalWatcher committer([&message](QWidget *modal) {
+            return revertThenCommit(modal, message);
+        });
+        QVERIFY(revertSelection());
+        QCOMPARE(mergeMsg(repo), revertC3 + QLatin1Char('\n') + revertC2);
+        QVERIFY(message.contains(QStringLiteral("Revert \"C3\"")) && message.contains(QStringLiteral("Revert \"C2\"")));
+        QVERIFY(!QFileInfo::exists(repo.filePath(QStringLiteral("f2.txt"))));
+        QVERIFY(!QFileInfo::exists(repo.filePath(QStringLiteral("f3.txt"))));
+        QVERIFY(waitForReload(dlg));
+    }
+
+    void revertSkipsACommitThatFails()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("C1"));
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("C2"));
+        repo.write(QStringLiteral("g.txt"), "x");
+        repo.commitAll(QStringLiteral("C3"));
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        GitLogList *list = dlg.logList();
+        const GitLogListModel *model = list->logModel();
+        list->setCurrentIndex(model->index(0, 0));
+        list->selectionModel()->select(model->index(2, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        const QString revertC3 = QStringLiteral("Revert \"C3\"\n\nThis reverts commit %1.\n").arg(model->rev(0).hash);
+
+        // Yes; Skip C1, whose file has changed since; OK
+        const BoxAnswerer answerer({QDialogButtonBox::Yes, QDialogButtonBox::Yes, QDialogButtonBox::Ok});
+        QVERIFY(withMenuOnSelection(list, [](QMenu *menu) {
+            entry(menu, QStringLiteral("&Revert changes by these commits"))->trigger();
+        }));
+        QVERIFY(!QFileInfo::exists(repo.filePath(QStringLiteral("g.txt"))));
+        QCOMPARE(mergeMsg(repo), revertC3);
+        QVERIFY(waitForReload(dlg));
     }
 
     void aMergeComparesWithTheChosenParent()
