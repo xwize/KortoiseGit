@@ -31,6 +31,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QStandardPaths>
+#include <QStyle>
 #include <QTemporaryFile>
 #include <QVBoxLayout>
 
@@ -141,6 +142,23 @@ QCheckBox *inheritCheckBox(QWidget *parent)
     return box;
 }
 
+/**
+ * Ported from the core.autocrlf and core.safecrlf parts of CSettingGitConfig::LoadDataImpl.
+ * @param value The key's value at the level shown, if it is set there.
+ * @param combo AutoCrLf's or SafeCrLf's list: "", false, true and then @p other.
+ * @param other "input" or "warn".
+ */
+void loadCrLf(const std::optional<QString>& value, QComboBox *combo, QLatin1String other)
+{
+    if (!value) {
+        combo->setCurrentIndex(0);
+    } else if (Git::isConfigTrue(*value)) {
+        combo->setCurrentIndex(2);
+    } else {
+        combo->setCurrentIndex(value->toLower().trimmed() == other ? 3 : 1);
+    }
+}
+
 } // namespace
 
 namespace kgt
@@ -160,6 +178,9 @@ SettingGitConfig::SettingGitConfig(const QString& repository, QWidget *parent)
     , m_inheritEmail(inheritCheckBox(this))
     , m_userSigningKey(new QLineEdit(this))
     , m_inheritSigningKey(inheritCheckBox(this))
+    , m_autoCrLf(new QComboBox(this))
+    , m_safeCrLf(new QComboBox(this))
+    , m_quotePath(new QCheckBox(i18n("QuotePath"), this))
     , m_prune(new QCheckBox(i18n("Prune"), this))
     , m_saveTo(new QComboBox(this))
 {
@@ -195,9 +216,35 @@ SettingGitConfig::SettingGitConfig(const QString& repository, QWidget *parent)
     userLayout->setColumnStretch(1, 1);
     layout->addWidget(userGroup);
 
+    // CSettingGitConfig::OnInitDialog: the empty entry means "not set at this level"
+    auto *crLfGroup = new QGroupBox(i18n("Auto CrLf convert"), this);
+    auto *crLfLayout = new QHBoxLayout(crLfGroup);
+    const auto addCrLf = [crLfGroup, crLfLayout](const QString& label, QComboBox *combo, const QString& other) {
+        combo->addItems({QString(), QStringLiteral("false"), QStringLiteral("true"), other});
+        auto *text = new QLabel(label, crLfGroup);
+        text->setBuddy(combo);
+        crLfLayout->addWidget(text);
+        crLfLayout->addWidget(combo);
+    };
+    m_autoCrLf->setObjectName(QStringLiteral("autoCrLf"));
+    m_safeCrLf->setObjectName(QStringLiteral("safeCrLf"));
+    addCrLf(i18n("Auto&CrLf:"), m_autoCrLf, QStringLiteral("input"));
+    crLfLayout->addSpacing(style()->pixelMetric(QStyle::PM_LayoutHorizontalSpacing) * 2);
+    addCrLf(i18n("Sa&feCrLf:"), m_safeCrLf, QStringLiteral("warn"));
+    crLfLayout->addStretch();
+    layout->addWidget(crLfGroup);
+
+    m_quotePath->setObjectName(QStringLiteral("quotePath"));
+    m_quotePath->setTristate(true);
+    m_prune->setObjectName(QStringLiteral("prune"));
     m_prune->setTristate(true);
     m_prune->setToolTip(i18n("This option represents \"%1\" git config setting.", QStringLiteral("fetch.prune")));
-    layout->addWidget(m_prune);
+    auto *checkLayout = new QGridLayout;
+    checkLayout->addWidget(m_quotePath, 0, 0);
+    checkLayout->addWidget(m_prune, 0, 1);
+    checkLayout->setColumnStretch(0, 1);
+    checkLayout->setColumnStretch(1, 1);
+    layout->addLayout(checkLayout);
 
     auto *saveToLayout = new QHBoxLayout;
     auto *saveToLabel = new QLabel(i18n("Save to:"), this);
@@ -254,10 +301,12 @@ SettingGitConfig::SettingGitConfig(const QString& repository, QWidget *parent)
     for (const QLineEdit *edit : {m_userName, m_userEmail, m_userSigningKey}) {
         connect(edit, &QLineEdit::textEdited, this, &SettingGitConfig::onChange);
     }
-    for (const QCheckBox *box : {m_inheritUserName, m_inheritEmail, m_inheritSigningKey, m_prune}) {
+    for (const QCheckBox *box : {m_inheritUserName, m_inheritEmail, m_inheritSigningKey, m_quotePath, m_prune}) {
         connect(box, &QCheckBox::clicked, this, &SettingGitConfig::onChange);
     }
-    connect(m_saveTo, &QComboBox::activated, this, &SettingGitConfig::onChange);
+    for (const QComboBox *combo : {m_autoCrLf, m_safeCrLf, m_saveTo}) {
+        connect(combo, &QComboBox::activated, this, &SettingGitConfig::onChange);
+    }
     const auto connectSource = [this](QRadioButton *radio, ConfigSource source) {
         connect(radio, &QRadioButton::clicked, this, [this, source] {
             setConfigSource(source);
@@ -291,12 +340,20 @@ bool SettingGitConfig::apply()
         return false;
     }
     // CSettingGitConfig::SafeDataImpl
+    const auto boolValue = [](Qt::CheckState state) {
+        return state == Qt::Checked ? QStringLiteral("true") : QStringLiteral("false");
+    };
+    const Qt::CheckState quotePath = m_quotePath->checkState();
     const Qt::CheckState prune = m_prune->checkState();
-    const QString pruneValue = prune == Qt::Checked ? QStringLiteral("true") : QStringLiteral("false");
+    const QString autoCrLf = m_autoCrLf->currentText();
+    const QString safeCrLf = m_safeCrLf->currentText();
     if (!save(destination, QStringLiteral("user.name"), m_userName->text(), m_inheritUserName->isChecked())
         || !save(destination, QStringLiteral("user.email"), m_userEmail->text(), m_inheritEmail->isChecked())
         || !save(destination, QStringLiteral("user.signingkey"), m_userSigningKey->text(), m_inheritSigningKey->isChecked())
-        || !save(destination, QStringLiteral("fetch.prune"), pruneValue, prune == Qt::PartiallyChecked)) {
+        || !save(destination, QStringLiteral("core.quotepath"), boolValue(quotePath), quotePath == Qt::PartiallyChecked)
+        || !save(destination, QStringLiteral("fetch.prune"), boolValue(prune), prune == Qt::PartiallyChecked)
+        || !save(destination, QStringLiteral("core.autocrlf"), autoCrLf, autoCrLf.isEmpty())
+        || !save(destination, QStringLiteral("core.safecrlf"), safeCrLf, safeCrLf.isEmpty())) {
         return false;
     }
     m_needSave = false;
@@ -366,12 +423,23 @@ void SettingGitConfig::loadData()
         load(QStringLiteral("user.email"), m_userEmail, m_inheritEmail);
     }
 
+    loadCrLf(m_git.configValueAt(QStringLiteral("core.autocrlf"), level), m_autoCrLf, QLatin1String("input"));
+
+    if (const std::optional<QString> quotePath = m_git.configValueAt(QStringLiteral("core.quotepath"), level)) {
+        m_quotePath->setCheckState(Git::isConfigTrue(*quotePath) ? Qt::Checked : Qt::Unchecked);
+    } else {
+        // Not set: git quotes by default
+        m_quotePath->setCheckState(m_configSource == ConfigSource::Effective ? Qt::Checked : Qt::PartiallyChecked);
+    }
+
     if (const std::optional<QString> prune = m_git.configValueAt(QStringLiteral("fetch.prune"), level)) {
         m_prune->setCheckState(Git::isConfigTrue(*prune) ? Qt::Checked : Qt::Unchecked);
     } else {
         // Not set: git's default for the effective value, "not stored here" for a level
         m_prune->setCheckState(m_configSource == ConfigSource::Effective ? Qt::Unchecked : Qt::PartiallyChecked);
     }
+
+    loadCrLf(m_git.configValueAt(QStringLiteral("core.safecrlf"), level), m_safeCrLf, QLatin1String("warn"));
 
     m_needSave = false;
     setModified(false);
@@ -384,7 +452,10 @@ void SettingGitConfig::enDisableControls()
     m_userName->setReadOnly(effective);
     m_userEmail->setReadOnly(effective);
     m_userSigningKey->setReadOnly(effective);
+    m_autoCrLf->setEnabled(!effective);
+    m_quotePath->setEnabled(!effective);
     m_prune->setEnabled(!effective);
+    m_safeCrLf->setEnabled(!effective);
     m_saveTo->setEnabled(!effective);
     m_inheritUserName->setEnabled(!effective);
     m_inheritEmail->setEnabled(!effective);

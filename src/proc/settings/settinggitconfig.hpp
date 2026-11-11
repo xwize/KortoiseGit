@@ -23,11 +23,12 @@ namespace kgt
 {
 
 /**
- * The Settings dialog's "Git" page: the user's name, e-mail and signing key and fetch.prune, shown for one
+ * The Settings dialog's "Git" page: the user's name, e-mail and signing key, line endings (core.autocrlf and
+ * core.safecrlf), core.quotepath and fetch.prune, shown for one
  * configuration level at a time (CGitSettings' config source) and saved to the repository's or the user's
  * configuration, and buttons that open the configuration files in an editor.
  *
- * Left out: AutoCrLf, SafeCrLf and QuotePath, which nothing here depends on, and the project level (.tgitconfig).
+ * Left out: the project level (.tgitconfig).
  */
 class SettingGitConfig : public SettingsPropPage
 {
@@ -136,6 +137,9 @@ private:
     QCheckBox *m_inheritEmail;
     QLineEdit *m_userSigningKey;
     QCheckBox *m_inheritSigningKey;
+    QComboBox *m_autoCrLf; // m_cAutoCrLf
+    QComboBox *m_safeCrLf; // m_cSafeCrLf
+    QCheckBox *m_quotePath; // m_bQuotePath
     QCheckBox *m_prune;
     QComboBox *m_saveTo; // m_cSaveTo; each item's data is its ConfigLevel
 };
