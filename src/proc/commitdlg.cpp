@@ -7,8 +7,8 @@
  * @file
  * Ported from TortoiseGit src/TortoiseProc/CommitDlg.cpp: OnInitDialog (the layout), StatusThread (what the list
  * shows and checks), OnUpdateOKButton, OnBnClickedShowunversioned, OnBnClickedCommitAmend, OnCheck (All and None),
- * and OnOK with PrepareIndexForCommitWithoutStagingSupport. TortoiseGit's progress dialog for git commit becomes an error message
- * inside the dialog.
+ * OnOK with PrepareIndexForCommitWithoutStagingSupport, and GetCommitTemplate with CGit::LoadTextFile for the starting
+ * message. TortoiseGit's progress dialog for git commit becomes an error message inside the dialog.
  */
 
 #include "commitdlg.hpp"
@@ -29,6 +29,7 @@
 #include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QGroupBox>
@@ -44,6 +45,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <optional>
 #include <tuple>
 #include <utility>
 
@@ -216,12 +218,66 @@ bool isHeadRootCommit(const QString& root)
     }
 }
 
+/**
+ * Ported from CGit::LoadTextFile: the text of a commit message file, with CRLF turned into LF and ending in exactly one
+ * newline.
+ * @param fileName The file.
+ * @returns Its text, or nothing if it doesn't exist.
+ * @throws RuntimeError (category Io) if it exists but can't be read.
+ */
+std::optional<QString> loadTextFile(const QString& fileName)
+{
+    if (!QFileInfo::exists(fileName)) {
+        return std::nullopt;
+    }
+    QFile file(fileName);
+    if (!file.open(QIODevice::ReadOnly)) {
+        throw RuntimeError({.category = ErrorCategory::Io, .message = i18n("Could not open %1", fileName)});
+    }
+    QString text = QString::fromUtf8(file.readAll());
+    text.replace("\r\n"_L1, "\n"_L1);
+    while (text.endsWith(QLatin1Char('\n'))) {
+        text.chop(1);
+    }
+    return text + QLatin1Char('\n');
+}
+
+/**
+ * Ported from GetCommitTemplate: the file commit.template names, with a leading ~/ meaning the home directory.
+ * TortoiseGit's rewriting of /d/... into a Windows drive path isn't needed here.
+ * @param root The working tree root.
+ * @returns The template's text, or an empty string if none is set.
+ * @throws RuntimeError (category Io) if the template is set but can't be loaded.
+ */
+QString commitTemplate(const QString& root)
+{
+    QString fileName = Git(root).configValue(QStringLiteral("commit.template"));
+    if (fileName.isEmpty()) {
+        return {};
+    }
+    if (fileName.startsWith("~/"_L1)) {
+        fileName = QDir::homePath() + fileName.mid(1);
+    }
+    std::optional<QString> text;
+    try {
+        text = loadTextFile(fileName);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Io) {
+            throw;
+        }
+    }
+    if (!text) {
+        throw RuntimeError({.category = ErrorCategory::Io, .message = i18n("Could not open and load commit.template file: %1", fileName)});
+    }
+    return *text;
+}
+
 } // namespace
 
 namespace kgt
 {
 
-CommitDlg::CommitDlg(const QStringList& paths, QWidget *parent)
+CommitDlg::CommitDlg(const QStringList& paths, const QString& logMessage, QWidget *parent)
     : QDialog(parent)
 {
     Q_ASSERT(!paths.isEmpty());
@@ -236,11 +292,49 @@ CommitDlg::CommitDlg(const QStringList& paths, QWidget *parent)
     m_fileList->setPathFilter(TGitPath::relativePaths(m_workingTree, paths));
     m_fileList->setIncludeStaged(true);
     onShowUnversionedToggled(m_showUnversioned->isChecked());
+    loadInitialMessage(logMessage);
     refresh();
     m_message->setFocus();
 }
 
 CommitDlg::~CommitDlg() = default;
+
+void CommitDlg::loadInitialMessage(const QString& logMessage)
+{
+    // OnInitDialog: a message passed in is kept. Otherwise the message starts as commit.template, and SQUASH_MSG and
+    // MERGE_MSG from the working tree's own admin directory follow it. CGit::LoadTextFile appends, so all that exist are
+    // joined in that order, as git commit itself puts SQUASH_MSG before MERGE_MSG.
+    if (!logMessage.isEmpty()) {
+        m_message->setPlainText(logMessage);
+        return;
+    }
+    QString message;
+    QStringList errors;
+    try {
+        message = commitTemplate(m_workingTree);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Io) {
+            throw;
+        }
+        errors.append(e.error().message);
+    }
+    const QDir adminDir(GitAdminDir::worktreeAdminDirPath(m_workingTree));
+    for (const QString& name : {QStringLiteral("SQUASH_MSG"), QStringLiteral("MERGE_MSG")}) {
+        try {
+            message += loadTextFile(adminDir.filePath(name)).value_or(QString());
+        } catch (const RuntimeError& e) {
+            if (e.error().category != ErrorCategory::Io) {
+                throw;
+            }
+            errors.append(e.error().message);
+        }
+    }
+    m_message->setPlainText(message);
+    if (!errors.isEmpty()) {
+        m_errorView->setText(errors.join(QLatin1Char('\n')));
+        m_errorView->show();
+    }
+}
 
 CommitPlan CommitDlg::planCommit(const GitStatusListModel& model, bool amendAgainstParent)
 {
