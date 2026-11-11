@@ -19,6 +19,7 @@
 #include "mergeabortdlg.hpp"
 #include "progressdlg.hpp"
 #include "pushdlg.hpp"
+#include "rebasedlg.hpp"
 #include "resetdlg.hpp"
 #include "stashsave.hpp"
 #include "utils/runtimeerror.hpp"
@@ -952,6 +953,12 @@ bool AppUtils::push(const QString& workingTree, const QString& selectLocalBranch
     progress.addGitCmd(PushCommand::pushArguments(dlg.options()));
     progress.exec();
     return progress.gitStatus() == 0;
+}
+
+bool AppUtils::rebaseAfterFetch(const QString& workingTree, const RebaseOptions& options, QWidget *parent)
+{
+    RebaseDlg dlg(workingTree, options, parent);
+    return dlg.exec() == QDialog::Accepted;
 }
 
 bool AppUtils::deleteRef(const Git& git, const QString& ref, QWidget *parent)

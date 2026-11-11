@@ -7,6 +7,7 @@
 #include "pullfetchdlg.hpp"
 #include "testrepo.hpp"
 
+#include <KMessageBox>
 #include <KSharedConfig>
 
 #include <QCheckBox>
@@ -14,6 +15,7 @@
 #include <QDir>
 #include <QLabel>
 #include <QPixmap>
+#include <QRadioButton>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -257,8 +259,8 @@ private Q_SLOTS:
         QCheckBox *prune = checkBox(dlg, QStringLiteral("Prune"));
         const QCheckBox *rebase = checkBox(dlg, QStringLiteral("&Launch Rebase After Fetch"));
         QVERIFY(noFF && ffOnly && tags && prune && rebase);
-        // Not offered until the rebase after a fetch is ported
-        QVERIFY(rebase->isHidden());
+        QVERIFY(!rebase->isHidden());
+        QVERIFY(!rebase->isChecked());
         QCOMPARE(tags->checkState(), Qt::PartiallyChecked);
         QCOMPARE(prune->checkState(), Qt::PartiallyChecked);
         // remote.origin.tagopt isn't set
@@ -386,6 +388,215 @@ private Q_SLOTS:
         for (const QComboBox *combo : pullDlg.findChildren<QComboBox *>()) {
             QVERIFY(combo->findText(QStringLiteral("- all -")) < 0);
         }
+    }
+
+    void rebaseOptionStates()
+    {
+        const PullSetup setup;
+        const QString label = QStringLiteral("&Launch Rebase After Fetch");
+        {
+            PullFetchDlg dlg(setup.mine.path(), false);
+            QCheckBox *rebase = checkBox(dlg, label);
+            QVERIFY(rebase);
+            QVERIFY(!rebase->isHidden());
+            QVERIFY(rebase->isEnabled());
+            QVERIFY(!rebase->isChecked());
+            QVERIFY(!dlg.options().rebase);
+
+            // An arbitrary URL has no remote tracking branch to rebase onto
+            rebase->setChecked(true);
+            QVERIFY(dlg.options().rebase);
+            auto *other = dlg.findChild<QRadioButton *>();
+            for (QRadioButton *radio : dlg.findChildren<QRadioButton *>()) {
+                if (radio->text() == QStringLiteral("Arbitrary &URL:")) {
+                    other = radio;
+                }
+            }
+            QVERIFY(other);
+            other->setChecked(true);
+            QVERIFY(!rebase->isEnabled());
+            QVERIFY(!rebase->isChecked());
+            QVERIFY(!dlg.options().rebase);
+            for (QRadioButton *radio : dlg.findChildren<QRadioButton *>()) {
+                if (radio != other) {
+                    radio->setChecked(true);
+                }
+            }
+            QVERIFY(rebase->isEnabled());
+            QVERIFY(!rebase->isChecked());
+
+            // Remembered per repository and mode
+            rebase->setChecked(true);
+            dlg.accept();
+        }
+        QVERIFY(PullFetchDlg(setup.mine.path(), false).options().rebase);
+        QVERIFY(!PullFetchDlg(setup.mine.path(), true).options().rebase);
+
+        // A bare repository has nothing to rebase
+        const PullFetchDlg bare(setup.remoteDir.path(), false);
+        QVERIFY(!checkBox(bare, label)->isEnabled());
+        QVERIFY(!bare.options().rebase);
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void rebaseFromConfig_data()
+    {
+        QTest::addColumn<QString>("pullRebase");
+        QTest::addColumn<QString>("branchRebase");
+        QTest::addColumn<bool>("isPull");
+        QTest::addColumn<bool>("detached");
+        QTest::addColumn<bool>("rebase");
+        QTest::addColumn<bool>("preserveMerges");
+
+        QTest::newRow("unset") << QString() << QString() << true << false << false << false;
+        QTest::newRow("pull.rebase") << QStringLiteral("true") << QString() << true << false << true << false;
+        QTest::newRow("pull.rebase off") << QStringLiteral("false") << QString() << true << false << false << false;
+        QTest::newRow("pull.rebase merges") << QStringLiteral("merges") << QString() << true << false << true << true;
+        QTest::newRow("pull.rebase interactive") << QStringLiteral("interactive") << QString() << true << false << false << false;
+        QTest::newRow("branch.main.rebase") << QString() << QStringLiteral("true") << true << false << true << false;
+        QTest::newRow("branch.main.rebase merges") << QStringLiteral("false") << QStringLiteral("merges") << true << false << true << true;
+        QTest::newRow("branch overrides pull") << QStringLiteral("true") << QStringLiteral("false") << true << false << false << false;
+        QTest::newRow("fetch ignores it") << QStringLiteral("true") << QString() << false << false << false << false;
+        QTest::newRow("detached HEAD") << QStringLiteral("true") << QString() << true << true << false << false;
+    }
+
+    void rebaseFromConfig()
+    {
+        QFETCH(const QString, pullRebase);
+        QFETCH(const QString, branchRebase);
+        QFETCH(const bool, isPull);
+        QFETCH(const bool, detached);
+        QFETCH(const bool, rebase);
+        QFETCH(const bool, preserveMerges);
+
+        const PullSetup setup;
+        if (!pullRebase.isEmpty()) {
+            setup.mine.run({QStringLiteral("config"), QStringLiteral("pull.rebase"), pullRebase});
+        }
+        if (!branchRebase.isEmpty()) {
+            setup.mine.run({QStringLiteral("config"), QStringLiteral("branch.main.rebase"), branchRebase});
+        }
+        if (detached) {
+            setup.mine.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("--detach")});
+        }
+
+        const PullFetchDlg dlg(setup.mine.path(), isPull);
+        const PullFetchOptions options = dlg.options();
+        QCOMPARE(options.rebase, rebase);
+        QCOMPARE(options.rebaseActivatedInConfigForPull, rebase);
+        QCOMPARE(options.rebasePreserveMerges, preserveMerges);
+
+        // Coming back from an arbitrary URL restores what the configuration asks for
+        for (const bool remote : {false, true}) {
+            for (QRadioButton *radio : dlg.findChildren<QRadioButton *>()) {
+                if ((radio->text() == QStringLiteral("&Remote:")) == remote) {
+                    radio->setChecked(true);
+                }
+            }
+        }
+        QCOMPARE(dlg.options().rebase, rebase);
+    }
+
+    void rebaseUpstream()
+    {
+        const PullSetup setup;
+        const Git& git = setup.mine.git();
+        const QString originMain = PullSetup::rev(git, QStringLiteral("refs/remotes/origin/main"));
+        QVERIFY(!originMain.isEmpty());
+
+        // The dialog leaves the tracked branch unnamed: the current branch's upstream
+        PullFetchOptions options = PullFetchDlg(setup.mine.path(), true).options();
+        QVERIFY(options.remoteBranchName.isEmpty());
+        FetchedUpstream fetched = FetchCommand::rebaseUpstream(git, options);
+        QCOMPARE(fetched.upstream, QStringLiteral("remotes/origin/main"));
+        QCOMPARE(fetched.oldHash, originMain);
+
+        // A named branch: its remote tracking branch, which may not exist yet
+        options.remoteBranchName = QStringLiteral("other");
+        fetched = FetchCommand::rebaseUpstream(git, options);
+        QCOMPARE(fetched.upstream, QStringLiteral("remotes/origin/other"));
+        QVERIFY(fetched.oldHash.isEmpty());
+
+        // A URL, or every remote: whatever was fetched
+        options.remoteUrl = setup.remoteDir.path();
+        QCOMPARE(FetchCommand::rebaseUpstream(git, options).upstream, QStringLiteral("FETCH_HEAD"));
+        options.remoteUrl = QStringLiteral("origin");
+        options.remoteBranchName.clear();
+        options.allRemotes = true;
+        QCOMPARE(FetchCommand::rebaseUpstream(git, options).upstream, QStringLiteral("FETCH_HEAD"));
+        options.allRemotes = false;
+
+        // The current branch tracks another remote, or nothing: RebaseDlg is left to choose
+        setup.mine.run({QStringLiteral("remote"), QStringLiteral("add"), QStringLiteral("second"), setup.remoteDir.path()});
+        options.remoteUrl = QStringLiteral("second");
+        QVERIFY(FetchCommand::rebaseUpstream(git, options).upstream.isEmpty());
+        options.remoteUrl = QStringLiteral("origin");
+        setup.mine.run({QStringLiteral("config"), QStringLiteral("--unset"), QStringLiteral("branch.main.merge")});
+        fetched = FetchCommand::rebaseUpstream(git, options);
+        QVERIFY(fetched.upstream.isEmpty());
+        QVERIFY(fetched.oldHash.isEmpty());
+    }
+
+    void pullRebaseFromConfigStartsByItself()
+    {
+        const PullSetup setup;
+        const Git& git = setup.mine.git();
+        setup.mine.run({QStringLiteral("config"), QStringLiteral("pull.rebase"), QStringLiteral("true")});
+        setup.mine.write(QStringLiteral("mine.txt"), "mine\n");
+        setup.mine.commitAll(QStringLiteral("mine"));
+        setup.pushFromTheirs(QStringLiteral("b.txt"), "b\n");
+
+        // CAppUtils::Pull: the configuration turns the pull into a fetch and a rebase that starts by itself
+        const PullFetchOptions options = PullFetchDlg(setup.mine.path(), true).options();
+        QVERIFY(options.rebase);
+        QVERIFY(options.rebaseActivatedInConfigForPull);
+        const FetchedUpstream fetched = FetchCommand::rebaseUpstream(git, options);
+        QCOMPARE(fetched.upstream, QStringLiteral("remotes/origin/main"));
+        ProgressDlg progress(setup.mine.path());
+        QVERIFY(runProgress(progress, FetchCommand::fetchArguments(options)));
+        QCOMPARE(progress.gitStatus(), 0);
+
+        // RebaseDlg starts, rebases and closes without being asked to
+        FetchCommand::rebaseFetched(git, fetched, FetchRebase::AutoStart, options.rebasePreserveMerges);
+        const QString theirHead = PullSetup::rev(setup.remote, QStringLiteral("main"));
+        QCOMPARE(PullSetup::rev(git, QStringLiteral("HEAD~1")), theirHead);
+        QCOMPARE(QString::fromUtf8(git.run({QStringLiteral("log"), QStringLiteral("--format=%s"), QStringLiteral("-1")})).trimmed(), QStringLiteral("mine"));
+        QCOMPARE(QString::fromUtf8(git.run({QStringLiteral("symbolic-ref"), QStringLiteral("--short"), QStringLiteral("HEAD")})).trimmed(),
+                 QStringLiteral("main"));
+        QVERIFY(QFile::exists(setup.mine.filePath(QStringLiteral("b.txt"))));
+
+        // Up to date now: the dialog closes itself again
+        const QString head = PullSetup::rev(git, QStringLiteral("HEAD"));
+        FetchCommand::rebaseFetched(git, FetchCommand::rebaseUpstream(git, options), FetchRebase::AutoStart, false);
+        QCOMPARE(PullSetup::rev(git, QStringLiteral("HEAD")), head);
+    }
+
+    void rebaseAfterFetchAsksFirst()
+    {
+        const PullSetup setup;
+        const Git& git = setup.mine.git();
+        const PullFetchOptions options = PullFetchDlg(setup.mine.path(), false).options();
+        const QString head = PullSetup::rev(git, QStringLiteral("HEAD"));
+        // The answers a user ticked "Don't ask again" on
+        KMessageBox::saveDontShowAgainTwoActions(QStringLiteral("OpenRebaseRemoteBranchEqualsHEAD"), KMessageBox::SecondaryAction);
+        KMessageBox::saveDontShowAgainTwoActions(QStringLiteral("OpenRebaseRemoteBranchFastForwards"), KMessageBox::PrimaryAction);
+
+        // Nothing fetched: "Open rebase anyway?" answered No opens nothing
+        FetchedUpstream fetched = FetchCommand::rebaseUpstream(git, options);
+        setup.mine.run({QStringLiteral("fetch"), QStringLiteral("--quiet"), QStringLiteral("origin")});
+        FetchCommand::rebaseFetched(git, fetched, FetchRebase::Open, false);
+        QCOMPARE(PullSetup::rev(git, QStringLiteral("HEAD")), head);
+
+        // The fetched branch fast-forwards: Merge runs git merge --ff-only
+        setup.pushFromTheirs(QStringLiteral("b.txt"), "b\n");
+        fetched = FetchCommand::rebaseUpstream(git, options);
+        QCOMPARE(fetched.oldHash, head);
+        setup.mine.run({QStringLiteral("fetch"), QStringLiteral("--quiet"), QStringLiteral("origin")});
+        FetchCommand::rebaseFetched(git, fetched, FetchRebase::Open, false);
+        QCOMPARE(PullSetup::rev(git, QStringLiteral("HEAD")), PullSetup::rev(setup.remote, QStringLiteral("main")));
+        QVERIFY(QFile::exists(setup.mine.filePath(QStringLiteral("b.txt"))));
+
+        KMessageBox::enableAllMessages();
     }
 };
 

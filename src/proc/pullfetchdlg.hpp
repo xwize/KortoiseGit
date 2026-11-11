@@ -32,7 +32,9 @@ struct PullFetchOptions {
     QString remoteUrl; // m_RemoteURL: a remote's name or a URL
     QString remoteBranchName; // m_RemoteBranchName: empty for the remote's configured refspecs
     bool allRemotes = false; // m_bAllRemotes: fetch from every remote ("- all -")
-    bool rebase = false; // m_bRebase: fetch, then rebase; not offered yet
+    bool rebase = false; // m_bRebase: fetch, then open RebaseDlg
+    bool rebaseActivatedInConfigForPull = false; // m_bRebaseActivatedInConfigForPull: branch.<name>.rebase or pull.rebase asks for it
+    bool rebasePreserveMerges = false; // m_bRebasePreserveMerges: that setting is "merges"
     bool noFF = false; // m_bNoFF: --no-ff
     bool ffOnly = false; // m_bFFonly: --ff-only
     bool squash = false; // m_bSquash: --squash
@@ -48,7 +50,7 @@ struct PullFetchOptions {
  * and leaves the remote branch to the remote's refspecs.
  *
  * Left out for now: the "..." remote ref browser (SelectRemoteRefDlg), Manage Remotes, the PuTTY key, Help and a
- * submodule's default branch. "Launch Rebase After Fetch" is not offered yet.
+ * submodule's default branch.
  */
 class PullFetchDlg : public QDialog
 {
@@ -96,12 +98,20 @@ private:
     void updateFastForwardStates();
 
     /**
+     * Ported from CPullFetchDlg::OnInitDialog's check of branch.<name>.rebase and pull.rebase: with either set, a
+     * plain "git pull" would rebase, so the pull becomes a fetch followed by RebaseDlg.
+     */
+    void checkRebaseConfig();
+
+    /**
      * @returns The settings group of this repository and mode, TortoiseGit's PullFetch\<dir>_<mode>.
      */
     [[nodiscard]] QString settingsGroup() const;
 
     Git m_git;
     bool m_isPull;
+    bool m_rebaseActivatedInConfigForPull = false; // m_bRebaseActivatedInConfigForPull
+    bool m_rebasePreserveMerges = false; // m_bRebasePreserveMerges
     QString m_configPullRemote; // m_configPullRemote: branch.<current>.remote
     QString m_configPullBranch; // m_configPullBranch: branch.<current>.merge, stripped
     QRadioButton *m_remoteRadio;

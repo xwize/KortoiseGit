@@ -53,6 +53,8 @@ class GitStatusListCtrl;
 struct RebaseOptions {
     QString upstream; // m_Upstream: the upstream to preselect; empty for the current branch's tracked branch
     bool force = false; // m_bForce: "Force Rebase" starts checked
+    bool autoStart = false; // m_bRebaseAutoStart: start at once and close when finished, or when there is nothing to do
+    bool preserveMerges = false; // m_bPreserveMerges: "Preserve merges" starts checked
 };
 
 /**
@@ -310,6 +312,7 @@ private:
     void cleanUpRebaseActiveFolder();
     void checkRestoreStash();
     void finishDialog();
+    void autoAbort();
     void startThread(std::function<void()> job);
     void onThreadFinished();
 
@@ -423,6 +426,7 @@ private:
     SquashFirstMetaData m_squashFirstMetaData;
     int m_currentRebaseIndex = -1;
     bool m_finishedRebase = false;
+    std::atomic<bool> m_rebaseAutoEnd = false; // m_bRebaseAutoEnd: an auto-started rebase finished and closes itself
     bool m_stashed = false;
     bool m_autoSkipFailedCommit = false;
     QString m_statusText; // m_sStatusText

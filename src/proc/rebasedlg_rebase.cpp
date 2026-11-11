@@ -59,16 +59,6 @@ bool isFullHash(const QString& hash)
 }
 
 /**
- * @param value A git configuration value.
- * @returns Whether git reads it as true.
- */
-bool isTrue(const QString& value)
-{
-    const QString lower = value.toLower();
-    return lower == QLatin1String("true") || lower == QLatin1String("yes") || lower == QLatin1String("on") || lower == QLatin1String("1");
-}
-
-/**
  * @param arguments Git's arguments.
  * @returns The command line for the log, as TortoiseGit writes it.
  */
@@ -110,8 +100,8 @@ RebaseDlg::ContinueResult RebaseDlg::continueRebase()
 
     m_abortRequested = false;
     if (m_isFastForward) {
-        std::ignore = fastForward();
-        return ContinueResult::Stop;
+        // An auto-started dialog presses Continue again once fast-forwarded, which closes it
+        return fastForward() && m_options.autoStart ? ContinueResult::Close : ContinueResult::Stop;
     }
 
     if (m_rebaseStage == RebaseStage::ChooseBranch) {
@@ -151,7 +141,7 @@ bool RebaseDlg::checkRebaseCondition()
     if (checkCleanWorkTree()) {
         return true;
     }
-    if (!isTrue(m_git.configValue(QStringLiteral("rebase.autostash")))) {
+    if (!Git::isConfigTrue(m_git.configValue(QStringLiteral("rebase.autostash")))) {
         const int choice =
             askUser(QMessageBox::Question, i18n("The current working tree is not clean.\nDo you want to stash the changes?"), {i18n("&Stash"), i18n("A&bort")});
         if (choice != 1) {
@@ -907,6 +897,7 @@ bool RebaseDlg::finishRebase()
     // FinishRebase
     if (!m_finishedRebase) {
         m_finishedRebase = moveBranchToRebasedCommits();
+        m_rebaseAutoEnd = m_finishedRebase && m_options.autoStart;
     }
     return m_finishedRebase;
 }

@@ -248,6 +248,12 @@ QString Git::configValue(const QString& name) const
     }
 }
 
+bool Git::isConfigTrue(const QString& value)
+{
+    const QString lower = value.toLower();
+    return lower == QLatin1String("true") || lower == QLatin1String("yes") || lower == QLatin1String("on") || lower == QLatin1String("1");
+}
+
 void Git::setConfigValue(const QString& name, const QString& value) const
 {
     // After --: a value may start with a dash

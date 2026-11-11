@@ -212,12 +212,10 @@ PullFetchDlg::PullFetchDlg(const QString& workingDirectory, bool isPull, QWidget
     // OnInitDialog
     const KConfigGroup settings = KSharedConfig::openConfig()->group(settingsGroup());
 
-    // TortoiseGit fetches and then opens RebaseDlg rather than running "git pull --rebase" (CAppUtils::Pull,
-    // RebaseAfterFetch), also when branch.<name>.rebase or pull.rebase asks for it. Until that is ported the option
-    // isn't offered, and its "rebase" setting is neither read nor written.
-    m_rebase->setChecked(false);
-    m_rebase->setEnabled(false);
-    m_rebase->hide();
+    m_rebase->setChecked(settings.readEntry("rebase", false));
+    checkRebaseConfig();
+    // A bare repository has no working tree to rebase
+    m_rebase->setEnabled(!GitAdminDir::isBareRepo(workingDirectory));
 
     m_remoteRadio->setChecked(true);
     m_other->setEnabled(false);
@@ -267,6 +265,8 @@ PullFetchOptions PullFetchDlg::options() const
         .remoteBranchName = {},
         .allRemotes = false,
         .rebase = m_rebase->isEnabled() && m_rebase->isChecked(),
+        .rebaseActivatedInConfigForPull = m_rebaseActivatedInConfigForPull,
+        .rebasePreserveMerges = m_rebasePreserveMerges,
         .noFF = m_noFF->isEnabled() && m_noFF->isChecked(),
         .ffOnly = m_ffOnly->isEnabled() && m_ffOnly->isChecked(),
         .squash = m_squash->isEnabled() && m_squash->isChecked(),
@@ -310,6 +310,7 @@ void PullFetchDlg::accept()
     remoteHistory.writeEntry(m_git.workingDirectory(), m_remote->currentText());
     saveHistory(m_remoteBranch, pullRemoteBranches);
     KConfigGroup settings = KSharedConfig::openConfig()->group(settingsGroup());
+    settings.writeEntry("rebase", m_rebase->isChecked());
     settings.writeEntry("ffonly", m_ffOnly->isChecked());
     settings.sync();
 
@@ -387,7 +388,9 @@ void PullFetchDlg::onSourceChanged()
     if (m_remoteRadio->isChecked()) {
         m_remote->setEnabled(true);
         m_other->setEnabled(false);
-        // TortoiseGit enables the rebase option here
+        // TortoiseGit enables the rebase option here even in a bare repository, which has nothing to rebase
+        m_rebase->setEnabled(!GitAdminDir::isBareRepo(m_git.workingDirectory()));
+        m_rebase->setChecked(m_rebaseActivatedInConfigForPull);
         if (!m_isPull) {
             m_remoteBranch->setEnabled(false);
         }
@@ -419,6 +422,7 @@ void PullFetchDlg::onSourceChanged()
     }
     m_remote->setEnabled(false);
     m_other->setEnabled(true);
+    m_rebase->setEnabled(false);
     m_rebase->setChecked(false);
     m_remoteBranch->setEnabled(true);
 }
@@ -436,6 +440,27 @@ void PullFetchDlg::updateFastForwardStates()
         m_noFF->setChecked(false);
     }
     m_noFF->setEnabled(!m_ffOnly->isChecked());
+}
+
+void PullFetchDlg::checkRebaseConfig()
+{
+    const QString currentBranch = m_git.currentBranch();
+    if (!m_isPull || currentBranch == QLatin1String("(no branch)")) {
+        return;
+    }
+    // branch.<name>.rebase overrides pull.rebase
+    QString value = m_git.configValue(QStringLiteral("branch.%1.rebase").arg(currentBranch));
+    if (value.isEmpty()) {
+        value = m_git.configValue(QStringLiteral("pull.rebase"));
+    }
+    // Like TortoiseGit, only a boolean or "merges" counts: "interactive" doesn't
+    m_rebasePreserveMerges = value == QLatin1String("merges");
+    if (!m_rebasePreserveMerges && !Git::isConfigTrue(value)) {
+        return;
+    }
+    // "git pull" would always rebase, even without --rebase: tick the option and let fetch and rebase do the rest
+    m_rebase->setChecked(true);
+    m_rebaseActivatedInConfigForPull = true;
 }
 
 QString PullFetchDlg::settingsGroup() const

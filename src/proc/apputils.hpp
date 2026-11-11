@@ -32,6 +32,7 @@ struct ConflictHashes;
 struct CreateBranchTagOptions;
 struct CreateBranchTagParams;
 struct GitSwitchOptions;
+struct RebaseOptions;
 struct StashSaveOptions;
 
 /**
@@ -303,6 +304,16 @@ public:
      * @returns True if the push ran and succeeded.
      */
     static bool push(const QString& workingTree, const QString& selectLocalBranch = {}, QWidget *parent = nullptr);
+
+    /**
+     * Ported from CAppUtils::RebaseAfterFetch, without the post-rebase buttons (Show log, Push, Send mail, Rebase),
+     * which RebaseDlg doesn't have yet: opens RebaseDlg.
+     * @param workingTree The working tree's root.
+     * @param options The upstream to rebase onto, and whether to start at once and preserve merges.
+     * @param parent Parent of the dialog.
+     * @returns True if the rebase finished.
+     */
+    static bool rebaseAfterFetch(const QString& workingTree, const RebaseOptions& options, QWidget *parent = nullptr);
 
     /**
      * Ported from CAppUtils::DeleteRef: asks, by the kind of ref, what to do and deletes it.

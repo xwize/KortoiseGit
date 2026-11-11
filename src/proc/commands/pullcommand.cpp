@@ -12,6 +12,7 @@
 #include "commands/pullcommand.hpp"
 
 #include "apputils.hpp"
+#include "commands/fetchcommand.hpp"
 #include "git/gitadmindir.hpp"
 #include "progressdlg.hpp"
 #include "pullfetchdlg.hpp"
@@ -97,9 +98,10 @@ bool PullCommand::pull(const QString& workingTree)
         return false;
     }
     const PullFetchOptions options = dlg.options();
-    // options.rebase would fetch and then open RebaseDlg (DoFetch with runRebase, RebaseAfterFetch); the dialog
-    // doesn't offer it yet
-    Q_ASSERT(!options.rebase);
+    // "git pull --rebase" is not supported, never and ever. So, adapting it to Fetch & Rebase.
+    if (options.rebase) {
+        return FetchCommand::doFetch(workingTree, options, options.rebaseActivatedInConfigForPull ? FetchRebase::AutoStart : FetchRebase::Open);
+    }
 
     const Git git(workingTree);
     try {

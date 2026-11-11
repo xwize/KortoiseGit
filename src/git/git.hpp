@@ -191,6 +191,12 @@ public:
     [[nodiscard]] QString configValue(const QString& name) const;
 
     /**
+     * @param value A git configuration value.
+     * @returns Whether git reads it as true.
+     */
+    [[nodiscard]] static bool isConfigTrue(const QString& value);
+
+    /**
      * Ported from CGit::SetConfigValue, for the repository's own configuration.
      * @param name A configuration key, such as branch.main.description.
      * @param value Its new value.
