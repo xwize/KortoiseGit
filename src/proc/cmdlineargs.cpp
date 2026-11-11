@@ -26,7 +26,7 @@ constexpr auto deletePathFileSwitch = "deletepathfile"_L1;
 constexpr auto rangeOption = "range"_L1;
 // TortoiseGit's /abort: MergeCommand aborts a merge instead of starting one
 constexpr auto abortSwitch = "abort"_L1;
-// TortoiseGit's /rev: SwitchCommand, BranchCommand and TagCommand preselect this ref
+// TortoiseGit's /rev: SwitchCommand, BranchCommand and TagCommand preselect this ref, LogCommand selects it
 constexpr auto revOption = "rev"_L1;
 // TortoiseGit's /name: BranchCommand and TagCommand fill in this name
 constexpr auto nameOption = "name"_L1;
@@ -36,7 +36,7 @@ constexpr auto forceSwitch = "force"_L1;
 constexpr auto upstreamOption = "upstream"_L1;
 // TortoiseGit's /path2: DiffCommand compares --path with this file
 constexpr auto path2Option = "path2"_L1;
-// TortoiseGit's /startrev and /endrev: DiffCommand compares these two revisions
+// TortoiseGit's /startrev and /endrev: DiffCommand compares these two revisions, LogCommand lists the range
 constexpr auto startRevOption = "startrev"_L1;
 constexpr auto endRevOption = "endrev"_L1;
 // TortoiseGit's /msg: StashSaveCommand starts the dialog with this message
@@ -90,13 +90,19 @@ void addCmdLineOptions(QCommandLineParser& parser)
     parser.addOption(QCommandLineOption(rangeOption, i18n("With --command log: the revisions to list."), i18nc("@info:shell", "range")));
     parser.addOption(QCommandLineOption(abortSwitch, i18n("With --command merge: abort the merge in progress.")));
     parser.addOption(
-        QCommandLineOption(revOption, i18n("With --command switch, branch or tag: the branch, tag or commit to preselect."), i18nc("@info:shell", "ref")));
+        QCommandLineOption(revOption,
+                           i18n("With --command switch, branch or tag: the branch, tag or commit to preselect. With --command log: the commit to select."),
+                           i18nc("@info:shell", "ref")));
     parser.addOption(QCommandLineOption(nameOption, i18n("With --command branch or tag: the new branch's or tag's name."), i18nc("@info:shell", "name")));
     parser.addOption(QCommandLineOption(forceSwitch, i18n("With --command rebase: check \"Force Rebase\".")));
     parser.addOption(QCommandLineOption(upstreamOption, i18n("With --command rebase: the upstream to preselect."), i18nc("@info:shell", "ref")));
     parser.addOption(QCommandLineOption(path2Option, i18n("With --command diff: a second file to compare with --path."), i18nc("@info:shell", "path")));
-    parser.addOption(QCommandLineOption(startRevOption, i18n("With --command diff: the revision to compare from."), i18nc("@info:shell", "ref")));
-    parser.addOption(QCommandLineOption(endRevOption, i18n("With --command diff: the revision to compare to."), i18nc("@info:shell", "ref")));
+    parser.addOption(QCommandLineOption(startRevOption,
+                                        i18n("With --command diff: the revision to compare from. With --command log: list the commits after it."),
+                                        i18nc("@info:shell", "ref")));
+    parser.addOption(QCommandLineOption(endRevOption,
+                                        i18n("With --command diff: the revision to compare to. With --command log: list the commits up to it."),
+                                        i18nc("@info:shell", "ref")));
     const QString msgHelp = i18n("With --command stashsave: the message to start with.");
     parser.addOption(QCommandLineOption(msgOption, msgHelp, i18nc("@info:shell", "message")));
     const QString logMsgHelp = i18n("With --command commit: the message to start with.");

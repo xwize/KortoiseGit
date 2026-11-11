@@ -28,6 +28,8 @@
 
 #include <KConfigGroup>
 #include <KGuiItem>
+#include <KIO/JobUiDelegateFactory>
+#include <KIO/OpenUrlJob>
 #include <KLocalizedString>
 #include <KMessageBox>
 #include <KSharedConfig>
@@ -45,6 +47,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -637,6 +640,14 @@ QString AppUtils::clipboardLink(QString clipboardText, const QString& skipGitPre
 bool AppUtils::runTortoiseGitProc(const QStringList& arguments)
 {
     return QProcess::startDetached(QCoreApplication::applicationFilePath(), arguments);
+}
+
+void AppUtils::launchAlternativeEditor(const QString& file, QWidget *parent)
+{
+    // KIO jobs delete themselves when they finish
+    auto *job = new KIO::OpenUrlJob(QUrl::fromLocalFile(file), QStringLiteral("text/plain"));
+    job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, parent));
+    job->start();
 }
 
 bool AppUtils::isTGitRebaseActive(const QString& workingTree, QWidget *parent)

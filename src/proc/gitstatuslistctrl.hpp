@@ -44,8 +44,9 @@ class RevertProgressCommand;
  * The changed-files list. The owning dialog sets the working tree and the show flags, places the Select all
  * checkbox and the counter label, calls reload() and acts on checkedEntries(). Double-clicking a file compares it
  * with HEAD in git difftool, or edits a conflicted one as Edit conflicts does; the context menu offers Edit conflicts,
- * Resolved, Resolve conflict using, Add, Compare with base, Revert..., Open, Open with..., Explore to and Delete;
- * F5 reloads, and the Delete key deletes.
+ * Resolved, Resolve conflict using, Add, Compare with base, Revert..., Open, Open with..., Explore to and Delete, and
+ * for a commit's files Revert to this revision, Show log, Save revision to... and View revision in alternative
+ * editor; F5 reloads, and the Delete key deletes.
  */
 class GitStatusListCtrl : public QTreeView
 {
@@ -148,6 +149,13 @@ public:
      * @returns The commit whose files are shown, or empty for the working tree.
      */
     [[nodiscard]] const QString& currentVersion() const;
+
+    /**
+     * Sets the branch the log dialog shows (CGitStatusListCtrl::m_sDisplayedBranch), which Show log limits the file's
+     * log to.
+     * @param branch The log's range, or empty when it shows HEAD's history.
+     */
+    void setDisplayedBranch(const QString& branch);
 
     /**
      * Shows the given entries instead of loading them (CGitStatusListCtrl::UpdateWithGitPathList), and ends the
@@ -273,7 +281,7 @@ Q_SIGNALS:
 
     /**
      * A revert from the context menu has finished, and the list is reloading. If it failed, the error has been
-     * shown.
+     * shown. Revert to this revision emits it too once it has reverted some files (RefreshParent).
      */
     void reverted();
 
@@ -306,6 +314,13 @@ private:
     void explore(const GitStatusListEntry& entry) const;
     void revertSelected();
     void onRevertFinished();
+    void revertSelectedItemToVersion();
+    void fileSaveAs(const GitStatusListEntry& entry);
+    void viewRevision(const GitStatusListEntry& entry);
+    void showLog(const GitStatusListEntry& entry) const;
+    void addRevisionEntries(QMenu& menu, const QList<GitStatusListEntry>& selected);
+    [[nodiscard]] bool isDirectory(const GitStatusListEntry& entry) const;
+    [[nodiscard]] bool writeRevision(const GitStatusListEntry& entry, const QString& file);
     void addConflictEntries(QMenu& menu, int selectedCount);
     void addResolveEntries(QMenu& menu);
     void editConflict(const GitStatusListEntry& entry);
@@ -348,6 +363,7 @@ private:
     QString m_busyString; // Shown in the empty list while busy
     QString m_currentVersion; // The commit whose files are listed; empty for the working tree
     QStringList m_parentVersions; // The parents of m_currentVersion; empty for a root commit
+    QString m_displayedBranch; // m_sDisplayedBranch: the log dialog's range, empty for HEAD
     bool m_isInitialRepo = false; // No commit yet (CGit::IsInitRepos): there is no HEAD to compare with
     bool m_hasIgnored = false; // Whether the last load listed ignored files
     bool m_includeStaged = false; // Whether staged changes outside m_pathFilter are listed too

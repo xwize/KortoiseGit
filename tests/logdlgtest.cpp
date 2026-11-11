@@ -14,6 +14,7 @@
 #include <KConfigGroup>
 #include <KSharedConfig>
 
+#include <QAbstractProxyModel>
 #include <QApplication>
 #include <QBrush>
 #include <QClipboard>
@@ -25,6 +26,7 @@
 #include <QImage>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPalette>
 #include <QPixmap>
@@ -102,6 +104,84 @@ bool waitForDateReload(const LogDlg& dlg)
 {
     QSignalSpy loaded(dlg.logList(), &GitLogList::loaded);
     return loaded.wait(timeout);
+}
+
+/**
+ * Selects some files of the changed-files list, the first holding the selection mark.
+ * @param files The list.
+ * @param paths The listed paths to select.
+ */
+void selectFiles(GitStatusListCtrl& files, const QStringList& paths)
+{
+    files.clearSelection();
+    const auto *proxy = qobject_cast<const QAbstractProxyModel *>(files.model());
+    const GitStatusListModel *model = files.statusModel();
+    for (const QString& path : paths) {
+        QModelIndex index;
+        for (int row = 0; row < model->rowCount(); ++row) {
+            if (model->entry(model->index(row, 0)) && model->entry(model->index(row, 0))->path == path) {
+                index = proxy->mapFromSource(model->index(row, 0));
+            }
+        }
+        QVERIFY(index.isValid());
+        files.selectionModel()->select(index, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        if (path == paths.constFirst()) {
+            files.selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
+        }
+    }
+}
+
+/**
+ * Opens the changed-files list's context menu and hands it to @p handle, then closes it.
+ * @param files The list.
+ * @param handle Called with the open menu.
+ */
+void withFilesMenu(GitStatusListCtrl& files, const std::function<void(QMenu *)>& handle)
+{
+    QTimer::singleShot(0, &files, [&handle] {
+        if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+            handle(menu);
+            menu->close();
+        }
+    });
+    const QPoint position = files.viewport()->rect().center();
+    QContextMenuEvent event(QContextMenuEvent::Mouse, position, files.viewport()->mapToGlobal(position));
+    QApplication::sendEvent(files.viewport(), &event);
+}
+
+/**
+ * @param files The changed-files list.
+ * @returns The texts of its context menu for the selected files, separators left out.
+ */
+QStringList filesMenuTexts(GitStatusListCtrl& files)
+{
+    QStringList texts;
+    withFilesMenu(files, [&texts](const QMenu *menu) {
+        for (const QAction *action : menu->actions()) {
+            if (!action->isSeparator()) {
+                texts.append(action->text());
+            }
+        }
+    });
+    return texts;
+}
+
+/**
+ * Clicks the default button of the next message box that opens.
+ * @param context Stops the wait when destroyed.
+ * @param text Set to the box's text.
+ */
+void acceptNextMessageBox(QObject *context, QString *text)
+{
+    QTimer::singleShot(10, context, [context, text] {
+        auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+        if (!box) {
+            acceptNextMessageBox(context, text);
+            return;
+        }
+        *text = box->text();
+        box->defaultButton() ? box->defaultButton()->click() : box->accept();
+    });
 }
 
 /**
@@ -1857,6 +1937,89 @@ private Q_SLOTS:
         expected += QStringLiteral("----\nRename: b.txt (from a.txt)\n\n");
         expected += commitHead(1) + QStringLiteral("Add\n\n----\nAdded: a.txt\n\n");
         QCOMPARE(QGuiApplication::clipboard()->text(), expected);
+    }
+
+    void changedFilesMenuOffersTheRevisionEntries()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "1\n");
+        repo.write(QStringLiteral("b.txt"), "b\n");
+        repo.write(QStringLiteral("dir/c.txt"), "c\n");
+        repo.commitAll(QStringLiteral("First"));
+        repo.write(QStringLiteral("a.txt"), "2\n");
+        repo.remove(QStringLiteral("b.txt"));
+        repo.commitAll(QStringLiteral("Second"));
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        selectRow(dlg, 0);
+        QVERIFY(waitForFiles(dlg));
+        GitStatusListCtrl *files = dlg.changedFileList();
+        const QString compare = QStringLiteral("Compare with b&ase");
+        const QString revert = QStringLiteral("R&evert to this revision");
+        const QString log = QStringLiteral("Show &log");
+        const QString save = QStringLiteral("Save revision &to...");
+        const QString view = QStringLiteral("View revision in alternative editor");
+
+        // CGitStatusListCtrl::OnContextMenuList's conditions
+        selectFiles(*files, {QStringLiteral("a.txt")});
+        QCOMPARE(filesMenuTexts(*files), (QStringList{compare, revert, log, save, view}));
+        selectFiles(*files, {QStringLiteral("b.txt")});
+        QCOMPARE(filesMenuTexts(*files), (QStringList{compare, log}));
+        // Several files: only Revert to this revision, decided by the focused one
+        selectFiles(*files, {QStringLiteral("a.txt"), QStringLiteral("b.txt")});
+        QCOMPARE(filesMenuTexts(*files), (QStringList{compare, revert}));
+        selectFiles(*files, {QStringLiteral("b.txt"), QStringLiteral("a.txt")});
+        QCOMPARE(filesMenuTexts(*files), (QStringList{compare}));
+    }
+
+    void revertToThisRevisionChecksOutTheFiles()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "1\n");
+        repo.write(QStringLiteral("b.txt"), "b1\n");
+        repo.commitAll(QStringLiteral("First"));
+        repo.write(QStringLiteral("a.txt"), "2\n");
+        repo.write(QStringLiteral("b.txt"), "b2\n");
+        repo.commitAll(QStringLiteral("Second"));
+        repo.write(QStringLiteral("a.txt"), "3\n");
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        selectRow(dlg, 1);
+        QVERIFY(waitForFiles(dlg));
+        GitStatusListCtrl *files = dlg.changedFileList();
+        selectFiles(*files, {QStringLiteral("a.txt"), QStringLiteral("b.txt")});
+        const QString hash = dlg.logList()->logModel()->rev(1).hash;
+        const QSignalSpy reverted(files, &GitStatusListCtrl::reverted);
+
+        QString message;
+        acceptNextMessageBox(&dlg, &message);
+        withFilesMenu(*files, [](const QMenu *menu) {
+            findAction(menu, QStringLiteral("Revert to this revision"))->trigger();
+        });
+        QVERIFY(QTest::qWaitFor(
+            [&message] {
+                return !message.isEmpty();
+            },
+            timeout));
+        QCOMPARE(message, QStringLiteral("2 files reverted to %1.").arg(hash));
+        QCOMPARE(reverted.size(), 1);
+        for (const auto& [path, content] : {std::pair{QStringLiteral("a.txt"), "1\n"}, std::pair{QStringLiteral("b.txt"), "b1\n"}}) {
+            QFile file(repo.filePath(path));
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            QCOMPARE(file.readAll(), QByteArray(content));
+        }
+    }
+
+    void highlightRevisionIsSelectedOnceListed()
+    {
+        const TestRepo repo;
+        makeHistory(repo);
+        LogDlg dlg({repo.path()});
+        dlg.setHighlightRevision(QStringLiteral("HEAD~2"));
+        QVERIFY(waitForLog(dlg));
+        QCOMPARE(dlg.logList()->selectedRow(), 2);
     }
 
     void selectModeReturnsTheCommit()

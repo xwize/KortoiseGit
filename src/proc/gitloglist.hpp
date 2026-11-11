@@ -196,6 +196,13 @@ public:
     void reload();
 
     /**
+     * Selects a commit once it is listed (m_lastSelectedHash), as the log dialog does for the revision it was asked to
+     * show.
+     * @param hash The commit's full hash.
+     */
+    void setLastSelectedHash(const QString& hash);
+
+    /**
      * @returns Whether a reload() is still running, the background work for its filter included.
      */
     [[nodiscard]] bool isBusy() const;

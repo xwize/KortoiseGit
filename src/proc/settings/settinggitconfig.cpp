@@ -11,12 +11,11 @@
 
 #include "settings/settinggitconfig.hpp"
 
+#include "apputils.hpp"
 #include "git/gitadmindir.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KGuiItem>
-#include <KIO/JobUiDelegateFactory>
-#include <KIO/OpenUrlJob>
 #include <KLocalizedString>
 #include <KMessageBox>
 
@@ -33,7 +32,6 @@
 #include <QRadioButton>
 #include <QStandardPaths>
 #include <QTemporaryFile>
-#include <QUrl>
 #include <QVBoxLayout>
 
 #include <tuple>
@@ -470,10 +468,7 @@ void SettingGitConfig::launchEditor(const QString& file, bool create)
         QDir().mkpath(QFileInfo(file).absolutePath());
         std::ignore = QFile(file).open(QIODevice::WriteOnly | QIODevice::Append);
     }
-    // KIO jobs delete themselves when they finish. Opened as plain text: a config file has no extension to tell by
-    auto *job = new KIO::OpenUrlJob(QUrl::fromLocalFile(file), QStringLiteral("text/plain"));
-    job->setUiDelegate(KIO::createDefaultJobUiDelegate(KJobUiDelegate::AutoHandlingEnabled, this));
-    job->start();
+    AppUtils::launchAlternativeEditor(file, this);
 }
 
 } // namespace kgt

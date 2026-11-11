@@ -652,6 +652,30 @@ private Q_SLOTS:
         QVERIFY(menuTexts(*ctrl).contains(deleteText));
     }
 
+    void revisionEntriesAreOnlyForACommit()
+    {
+        const TestRepo repo;
+        makeChanges(repo);
+        auto ctrl = makeShownList(repo);
+        QVERIFY(ctrl);
+        // CGitStatusListCtrl::OnContextMenuList offers these only with m_CurrentVersion set
+        const QStringList revisionEntries{QStringLiteral("R&evert to this revision"),
+                                          QStringLiteral("Show &log"),
+                                          QStringLiteral("Save revision &to..."),
+                                          QStringLiteral("View revision in alternative editor")};
+        QStringList offeredFor;
+        for (const GitStatusListEntry& entry : ctrl->statusModel()->allEntries()) {
+            select(*ctrl, {entry.path});
+            const QStringList texts = menuTexts(*ctrl);
+            if (std::ranges::any_of(revisionEntries, [&texts](const QString& text) {
+                    return texts.contains(text);
+                })) {
+                offeredFor.append(entry.path);
+            }
+        }
+        QCOMPARE(offeredFor, QStringList());
+    }
+
     void deletingAMissingFileNeedsNoPromptAndUpdatesTheIndex()
     {
         const TestRepo repo;

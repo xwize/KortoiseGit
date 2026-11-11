@@ -122,6 +122,8 @@ LogDlg::LogDlg(const QStringList& paths, const QString& range, QWidget *parent)
     m_logList->setWorkingTree(m_workingTree);
     m_logList->setPathFilter(m_pathFilter);
     m_logList->setRange(range);
+    // SetRange: Show log of a file keeps to the branch shown
+    m_changedFileList->setDisplayedBranch(range);
     refresh(false);
     m_logList->setFocus();
 }
@@ -199,6 +201,13 @@ QDateEdit *LogDlg::dateFrom() const
 QDateEdit *LogDlg::dateTo() const
 {
     return m_dateTo;
+}
+
+void LogDlg::setHighlightRevision(const QString& revision)
+{
+    if (const QString hash = Git(m_workingTree).hash(revision); !hash.isEmpty()) {
+        m_logList->setLastSelectedHash(hash);
+    }
 }
 
 void LogDlg::setSelect(bool select)

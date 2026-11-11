@@ -482,6 +482,15 @@ QString Git::derefFetchHead() const
     return QString::fromLatin1(hashToReturn);
 }
 
+void Git::getOneFile(const QString& refName, const QString& path, QIODevice& output) const
+{
+    // "^{}" dereferences a signed tag, as GetOneFile does. A submodule's entry is a commit, which cat-file refuses
+    const QByteArray content = run({QStringLiteral("cat-file"), QStringLiteral("--filters"), refName + QStringLiteral("^{}:") + path}, RunMode::ReadOnly);
+    if (output.write(content) != content.size()) {
+        throw RuntimeError({.category = ErrorCategory::Io, .message = QStringLiteral("Could not write file.")});
+    }
+}
+
 QString Git::fixBranchName(const QString& branchName) const
 {
     if (branchName == QLatin1String("FETCH_HEAD")) {

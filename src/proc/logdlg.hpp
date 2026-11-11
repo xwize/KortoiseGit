@@ -136,6 +136,13 @@ public:
     void setSelect(bool select);
 
     /**
+     * Selects a revision once it is listed (CLogDlg::SetParams' hightlightRevision, which OnInitDialog stores as
+     * m_lastSelectedHash). A revision that names no commit is ignored.
+     * @param revision A ref or a hash.
+     */
+    void setHighlightRevision(const QString& revision);
+
+    /**
      * @returns The commit picked with OK (CLogDlg::GetSelectedHash), or empty.
      */
     [[nodiscard]] const QString& selectedHash() const;
