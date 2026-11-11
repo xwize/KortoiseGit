@@ -91,7 +91,8 @@ public:
     withDefaultTool(const QStringList& arguments, const QString& diffTool, const QString& mergeTool, const AppUtils::IsInstalled& isInstalled);
 
     /**
-     * Starts git difftool without waiting for it, and tells the user if it can't be started.
+     * Starts git difftool without waiting for it, and tells the user if it has no tool it can run, can't be
+     * started or fails.
      * @param parent The parent of the error message; may be null.
      * @param invocation What to run.
      * @returns Whether it started.

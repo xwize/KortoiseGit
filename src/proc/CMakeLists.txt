@@ -165,6 +165,8 @@ target_sources(kgtproc PRIVATE
     shadowtree.hpp
     stashsave.cpp
     stashsave.hpp
+    toolprocess.cpp
+    toolprocess.hpp
 )
 
 target_include_directories(kgtproc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})

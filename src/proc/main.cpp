@@ -11,6 +11,7 @@
 #include "cmdlineargs.hpp"
 #include "commands/command.hpp"
 #include "kortoisegitproc_debug.hpp"
+#include "toolprocess.hpp"
 #include "utils/result.hpp"
 #include "utils/runtimeerror.hpp"
 #include "utils/version.hpp"
@@ -75,7 +76,10 @@ int run(const QCommandLineParser& parser)
         return exitFailure;
     }
     try {
-        return (*command)->execute() ? 0 : exitFailure;
+        const bool succeeded = (*command)->execute();
+        // A diff or merge tool still open would end with kortoisegitproc, and its failure would go unreported
+        ToolProcess::waitForAll();
+        return succeeded ? 0 : exitFailure;
     } catch (const RuntimeError& e) {
         qCCritical(KGT_PROC) << "Command" << parser.value(QStringLiteral("command")) << "failed:" << e.error().message;
         printError(e.error().message);
