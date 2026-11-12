@@ -6,6 +6,8 @@
 #include "gitstatuslistmodel.hpp"
 #include "historycombo.hpp"
 #include "historydlg.hpp"
+#include "modalwatcher.hpp"
+#include "progressdlg.hpp"
 #include "reghistory.hpp"
 #include "settings/setsaveddatapage.hpp"
 #include "testrepo.hpp"
@@ -24,6 +26,8 @@
 #include <QStandardPaths>
 #include <QTest>
 #include <QTimer>
+
+#include <memory>
 
 namespace
 {
@@ -333,6 +337,13 @@ private Q_SLOTS:
         KConfigGroup histories = HistoryCombo::allHistories();
         histories.deleteGroup();
         histories.sync();
+        drive({});
+    }
+
+    void cleanup()
+    {
+        m_driver.reset();
+        m_progressLog.clear();
     }
 
     void regHistoryIsCappedAndNewestFirst()
@@ -704,9 +715,12 @@ private Q_SLOTS:
         QVERIFY(accepted.isEmpty());
         QVERIFY(!dlg.isCommitting());
         QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Rejected"));
-        const auto *errorView = dlg.findChild<KMessageWidget *>();
-        QVERIFY(errorView && !errorView->isHidden());
-        QVERIFY2(errorView->text().contains(QStringLiteral("hook says no")), qPrintable(errorView->text()));
+        // ProgressDlg showed git's error, and offered no follow-ups
+        QVERIFY2(m_progressLog.contains(QStringLiteral("hook says no")), qPrintable(m_progressLog));
+        QCOMPARE(m_driver->offered(), QList<QStringList>{QStringList()});
+        QCOMPARE(dlg.postCmd(), PostCommitCmd::Nothing);
+        // OnOK keeps the message in the history however the commit went
+        QCOMPARE(storedMessages(), QStringList{QStringLiteral("Rejected")});
         QCOMPARE(QString::fromUtf8(repo.git().run({QStringLiteral("rev-parse"), QStringLiteral("HEAD")})), head);
         // The unchecked file that was added is staged again
         QVERIFY(stagedFiles(repo).contains(QStringLiteral("staged.txt")));
@@ -774,6 +788,9 @@ private Q_SLOTS:
         typeAndCommit(dlg, QStringLiteral("Rejected"));
         QVERIFY(failed.wait(timeout));
         QVERIFY(waitForList(dlg));
+        // ProgressDlg had the focus; F5 is a shortcut of the commit dialog's window
+        dlg.activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(&dlg));
 
         // CCommitDlg::OnOK doesn't unstage what it staged, so the file is still a change once the edit is undone
         QCOMPARE(stagedFiles(repo), QStringList{QStringLiteral("a.txt")});
@@ -1032,12 +1049,10 @@ private Q_SLOTS:
         QTimer::singleShot(0, [] {
             clickButton(QStringLiteral("Ignore"));
         });
+        QSignalSpy accepted(&dlg, &QDialog::accepted);
         dlg.commitButton()->click();
-        QVERIFY(QTest::qWaitFor(
-            [&repo, &head] {
-                return headHash(repo) != head;
-            },
-            timeout));
+        QVERIFY(accepted.wait(timeout));
+        QVERIFY(headHash(repo) != head);
     }
 
     void pathsGoToGitOnStdin()
@@ -1064,6 +1079,100 @@ private Q_SLOTS:
         QVERIFY(commitAndWait(dlg, QStringLiteral("Paths")));
         QCOMPARE(committedFiles(repo), (QStringList{QStringLiteral("changed.txt"), QStringLiteral("deleted.txt"), QStringLiteral("odd*.txt")}));
     }
+
+    void commitRunsInProgressDlgWithFollowUps()
+    {
+        const TestRepo repo;
+        commitTwoFiles(repo);
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QVERIFY(commitAndWait(dlg, QStringLiteral("Change a")));
+
+        // CCommitDlg::OnOK: m_bShowCommand = FALSE, and m_PostCmdCallback's entries after a success
+        QVERIFY2(!m_progressLog.contains(QStringLiteral("-F")), qPrintable(m_progressLog));
+        QVERIFY2(m_progressLog.contains(QStringLiteral("Change a")), qPrintable(m_progressLog));
+        const QStringList followUps{QStringLiteral("Pus&h..."), QStringLiteral("&Pull..."), QStringLiteral("&ReCommit"), QStringLiteral("Create &Tag...")};
+        QCOMPARE(m_driver->offered(), QList<QStringList>{followUps});
+        QCOMPARE(dlg.postCmd(), PostCommitCmd::Nothing);
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
+    void chosenFollowUpIsLeftForTheCommand_data()
+    {
+        QTest::addColumn<QString>("choice");
+        QTest::addColumn<PostCommitCmd>("postCmd");
+        QTest::newRow("push") << QStringLiteral("Pus&h...") << PostCommitCmd::Push;
+        QTest::newRow("pull") << QStringLiteral("&Pull...") << PostCommitCmd::Pull;
+        QTest::newRow("tag") << QStringLiteral("Create &Tag...") << PostCommitCmd::CreateTag;
+    }
+
+    void chosenFollowUpIsLeftForTheCommand()
+    {
+        QFETCH(const QString, choice);
+        QFETCH(const PostCommitCmd, postCmd);
+        const TestRepo repo;
+        commitTwoFiles(repo);
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+        drive({choice});
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QVERIFY(commitAndWait(dlg, QStringLiteral("Change a")));
+        QCOMPARE(dlg.postCmd(), postCmd);
+    }
+
+    void reCommitKeepsTheDialogOpen()
+    {
+        const TestRepo repo;
+        commitTwoFiles(repo);
+        repo.write(QStringLiteral("template.txt"), "Template\n");
+        repo.run({QStringLiteral("config"), QStringLiteral("commit.template"), repo.filePath(QStringLiteral("template.txt"))});
+        repo.write(QStringLiteral("a.txt"), "changed\n");
+        repo.write(QStringLiteral("b.txt"), "changed\n");
+        drive({QStringLiteral("&ReCommit")});
+        const CommitDlg dlg({repo.path()});
+        QVERIFY(waitForList(dlg));
+        QVERIFY(setChecked(dlg, QStringLiteral("b.txt"), false));
+        const QSignalSpy accepted(&dlg, &QDialog::accepted);
+        QSignalSpy recommitted(&dlg, &CommitDlg::recommitted);
+        typeAndCommit(dlg, QStringLiteral("Change a"));
+        QVERIFY(recommitted.wait(timeout));
+
+        // OnOK's ReCommit: the message is stored, the template replaces it and the list shows what is left
+        QVERIFY(accepted.isEmpty());
+        QCOMPARE(committedFiles(repo), QStringList{QStringLiteral("a.txt")});
+        QCOMPARE(storedMessages(), QStringList{QStringLiteral("Change a")});
+        QCOMPARE(dlg.messageEdit()->toPlainText(), QStringLiteral("Template\n"));
+        QVERIFY(waitForList(dlg));
+        QCOMPARE(listedPaths(dlg), (QStringList{QStringLiteral("b.txt"), QStringLiteral("template.txt")}));
+        // The list remembers that b.txt was unchecked, as m_mapFilenameToChecked does
+        QVERIFY(setChecked(dlg, QStringLiteral("b.txt"), true));
+        QVERIFY(commitAndWait(dlg, QStringLiteral("Change b")));
+        QCOMPARE(committedFiles(repo), QStringList{QStringLiteral("b.txt")});
+    }
+
+private:
+    /**
+     * Closes each ProgressDlg the commit brings up, choosing the given follow-ups in turn, and keeps its log.
+     * @param choices The follow-up to choose in each.
+     */
+    void drive(const QStringList& choices)
+    {
+        m_driver.reset();
+        m_driver = std::make_unique<CommandDriver>(choices, [this](QWidget *modal) {
+            const auto *progress = qobject_cast<ProgressDlg *>(modal);
+            if (!progress) {
+                return true; // The test answers its own boxes
+            }
+            if (progress->isDone()) {
+                m_progressLog = progress->logText();
+            }
+            return false;
+        });
+    }
+
+    std::unique_ptr<CommandDriver> m_driver;
+    QString m_progressLog; // The log of the last ProgressDlg that ended
 };
 
 QTEST_MAIN(CommitDlgTest)

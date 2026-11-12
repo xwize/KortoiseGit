@@ -372,6 +372,16 @@ public:
     [[nodiscard]] static QStringList createTagArguments(const CreateBranchTagOptions& options, const QString& messageFile);
 
     /**
+     * Ported from CAppUtils::Commit, without CheckUserData and the bug ID: shows CommitDlg, then runs the follow-up
+     * chosen in its progress dialog (Push, Pull or Create Tag).
+     * @param paths The absolute paths to commit, all in one working tree.
+     * @param logMessage The message to start with, or empty for the dialog's own.
+     * @param parent Parent of the dialogs.
+     * @returns True if a commit was made.
+     */
+    static bool commit(const QStringList& paths, const QString& logMessage = {}, QWidget *parent = nullptr);
+
+    /**
      * Ported from CAppUtils::Push: asks what to push in PushDlg and pushes it.
      * @param workingTree The working tree's root or the bare repository.
      * @param selectLocalBranch The local branch or ref to preselect; empty for the current branch.

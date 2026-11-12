@@ -15,7 +15,6 @@
 
 #include "apputils.hpp"
 #include "commands/mergecommand.hpp"
-#include "commitdlg.hpp"
 #include "createbranchtagdlg.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
@@ -1005,8 +1004,7 @@ void GitLogList::openCommitDlg()
     if (paths.isEmpty()) {
         paths.append(m_workingTree);
     }
-    CommitDlg dlg(paths, QString(), this);
-    dlg.exec();
+    std::ignore = AppUtils::commit(paths, QString(), this);
 }
 
 void GitLogList::push(const LogMenuTarget& target)

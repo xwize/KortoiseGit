@@ -47,7 +47,6 @@ struct CommitStep {
     QStringList arguments; // After "git"
     QByteArray input; // What git reads on stdin: the paths, which may not fit on a command line
     bool ignoreErrors = false; // A failure doesn't stop the commit (CMassiveGitTask's ignoreErrors)
-    bool afterCommit = false; // Follows git commit and runs even if git commit failed, but not if preparing the index did
 };
 
 /**
@@ -56,15 +55,28 @@ struct CommitStep {
  */
 struct CommitPlan {
     QList<CommitStep> prepareIndex; // Stages the checked files, and takes the unchecked ones out of the index
-    QList<CommitStep> restoreIndex; // Stages again the unchecked files that were added before (ReaddUnselectedAddedFilesAfterCommit)
+    QList<CommitStep> restoreIndex; // Stages again the unchecked files that were added before (ReaddUnselectedAddedFilesAfterCommit);
+                                    // runs even if git commit failed, but not if preparing the index did
     int checkedCount = 0; // How many files are committed
 };
 
 /**
+ * What to do once a commit has succeeded, chosen from ProgressDlg's follow-ups: TortoiseGit's Git_PostCommit_Cmd.
+ */
+enum class PostCommitCmd {
+    Nothing,
+    Push,
+    Pull,
+    ReCommit, // Handled by the dialog itself: it stays open for the next commit
+    CreateTag,
+};
+
+/**
  * The commit dialog: a message, the branch committed to, and the changed files with a checkbox each. Commit
- * stages the checked files, takes the unchecked ones out of the index, runs git commit with the message in a file,
- * and puts the unchecked files that were added back into the index. The dialog closes when the commit succeeds;
- * when git fails it shows the error and keeps the message.
+ * stages the checked files, takes the unchecked ones out of the index, runs git commit with the message in a file in
+ * ProgressDlg, and puts the unchecked files that were added back into the index. The dialog closes when the commit
+ * succeeds, and postCmd() then says which follow-up was chosen. When git commit fails, or Re-Commit is chosen, the
+ * dialog stays open.
  */
 class CommitDlg : public QDialog
 {
@@ -171,9 +183,20 @@ public:
      */
     void reject() override;
 
+    /**
+     * @returns The follow-up chosen after the last commit, TortoiseGit's m_PostCmd; for CommitCommand to run once the
+     *          dialog has closed.
+     */
+    [[nodiscard]] PostCommitCmd postCmd() const;
+
 Q_SIGNALS:
     /**
-     * A commit failed; the dialog stays open, showing the error.
+     * A commit succeeded and Re-Commit was chosen: the dialog stays open with the template as its message.
+     */
+    void recommitted();
+
+    /**
+     * A commit failed; the dialog stays open with the message.
      * @param error What went wrong.
      */
     void commitFailed(const kgt::Error& error);
@@ -195,7 +218,17 @@ private:
     void onShowUnversionedToggled(bool checked);
     void runNextStep();
     void onStepFinished();
+    /**
+     * Ported from CCommitDlg::OnOK: runs git commit in ProgressDlg, which offers the follow-ups, then the steps that
+     * restore the index.
+     */
+    void runCommit();
     void finishCommit();
+    /**
+     * Ported from CCommitDlg::OnOK, after Re-Commit: the message goes into the history, the template takes its
+     * place and the list is reloaded.
+     */
+    void prepareRecommit();
     void setBusy(bool busy);
     /**
      * Ported from CCommitDlg::ReloadHistoryEntries.
@@ -227,6 +260,11 @@ private:
     QPushButton *m_okButton = nullptr;
     KMessageWidget *m_errorView = nullptr;
     QList<CommitStep> m_steps; // The commit's steps still to run
+    QList<CommitStep> m_restoreSteps; // Run after git commit (mgtReAddAfterCommit, mgtReDelAfterCommit)
+    QStringList m_commitArguments; // git commit's, run in ProgressDlg
+    QString m_preText; // What the steps before git commit wrote, shown first in ProgressDlg (out)
+    std::optional<int> m_commitStatus; // git commit's exit status, once it has run (progress.m_GitStatus)
+    PostCommitCmd m_postCmd = PostCommitCmd::Nothing; // m_PostCmd
     std::unique_ptr<GitCall> m_stepCall; // The step running
     CommitStep m_runningStep;
     std::unique_ptr<QTemporaryFile> m_messageFile; // The message given to git commit -F

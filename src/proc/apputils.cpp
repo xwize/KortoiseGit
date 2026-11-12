@@ -11,6 +11,7 @@
 #include "commands/mergecommand.hpp"
 #include "commands/pullcommand.hpp"
 #include "commands/pushcommand.hpp"
+#include "commitdlg.hpp"
 #include "createbranchtagdlg.hpp"
 #include "deleteconflictdlg.hpp"
 #include "git/git.hpp"
@@ -1045,6 +1046,36 @@ QStringList AppUtils::createTagArguments(const CreateBranchTagOptions& options, 
     }
     arguments << QStringLiteral("--") << options.branchTagName << options.versionName;
     return arguments;
+}
+
+bool AppUtils::commit(const QStringList& paths, const QString& logMessage, QWidget *parent)
+{
+    // Re-Commit and a failed commit keep CommitDlg open, so it closes only after a commit or on Cancel
+    QString workingTree;
+    PostCommitCmd postCmd = PostCommitCmd::Nothing;
+    {
+        CommitDlg dlg(paths, logMessage, parent);
+        if (dlg.exec() != QDialog::Accepted) {
+            return false;
+        }
+        workingTree = Git::workingTreeRoot(paths.constFirst());
+        postCmd = dlg.postCmd();
+    }
+    switch (postCmd) {
+    case PostCommitCmd::Push:
+        std::ignore = push(workingTree, QString(), parent);
+        break;
+    case PostCommitCmd::CreateTag:
+        std::ignore = createBranchTag(workingTree, CreateBranchTagParams{.initialRefName = {}, .name = {}, .switchNewBranch = false, .isTag = true}, parent);
+        break;
+    case PostCommitCmd::Pull:
+        std::ignore = PullCommand::pull(workingTree, {.showPush = true}, parent);
+        break;
+    case PostCommitCmd::Nothing:
+    case PostCommitCmd::ReCommit:
+        break;
+    }
+    return true;
 }
 
 bool AppUtils::push(const QString& workingTree, const QString& selectLocalBranch, QWidget *parent)

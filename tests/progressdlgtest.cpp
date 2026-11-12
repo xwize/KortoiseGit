@@ -165,6 +165,24 @@ private Q_SLOTS:
         QVERIFY(dlg.logText().contains(QStringLiteral("ce013625030ba8dba906f756967f9e9ca394464a")));
     }
 
+    void preTextComesFirstAndTheCommandCanBeHidden()
+    {
+        // CCommitDlg::OnOK's m_bShowCommand = FALSE and m_PreText
+        const TestRepo repo;
+        ProgressDlg dlg(repo.path());
+        dlg.addGitCmd({QStringLiteral("hash-object"), QStringLiteral("--stdin")}, "hello\n");
+        dlg.setShowCommand(false);
+        dlg.setPreText(QStringLiteral("earlier output"));
+        const QSignalSpy finished(&dlg, &ProgressDlg::commandsFinished);
+        dlg.start();
+        QVERIFY(QTest::qWaitFor([&finished] {
+            return !finished.isEmpty();
+        }));
+        QCOMPARE(dlg.gitStatus(), 0);
+        QVERIFY2(dlg.logText().startsWith(QStringLiteral("earlier output\nce013625030ba8dba906f756967f9e9ca394464a\n")), qPrintable(dlg.logText()));
+        QVERIFY(!dlg.logText().contains(QStringLiteral("hash-object")));
+    }
+
     void postCmdButtonRunsTheChosenFollowUp()
     {
         const TestRepo repo;
