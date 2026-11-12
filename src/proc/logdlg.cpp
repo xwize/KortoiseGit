@@ -43,6 +43,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 
 namespace
@@ -63,15 +64,98 @@ constexpr qsizetype gitHashHexSize = 40; // GIT_HASH_SIZE * 2
 // ShortHashLengthForHyperLinkInLogMessage's default, CGit::GetShortHASHLength
 constexpr qsizetype shortHashLength = 8;
 
-bool isHexDigit(QChar ch)
+bool isHexDigit(QChar chr)
 {
-    return (ch >= QLatin1Char('0') && ch <= QLatin1Char('9')) || (ch >= QLatin1Char('a') && ch <= QLatin1Char('f'));
+    return (chr >= QLatin1Char('0') && chr <= QLatin1Char('9')) || (chr >= QLatin1Char('a') && chr <= QLatin1Char('f'));
 }
 
-bool isAsciiAlnum(QChar ch)
+bool isAsciiAlnum(QChar chr)
 {
-    return (ch >= QLatin1Char('A') && ch <= QLatin1Char('Z')) || (ch >= QLatin1Char('a') && ch <= QLatin1Char('z'))
-        || (ch >= QLatin1Char('0') && ch <= QLatin1Char('9'));
+    return (chr >= QLatin1Char('A') && chr <= QLatin1Char('Z')) || (chr >= QLatin1Char('a') && chr <= QLatin1Char('z'))
+        || (chr >= QLatin1Char('0') && chr <= QLatin1Char('9'));
+}
+
+/**
+ * @returns Whether FindGitHashPositions takes chr to start a word that can't be a hash: a capital, or a lowercase
+ * letter after 'g'.
+ */
+bool startsNonHashWord(QChar chr)
+{
+    return (chr >= QLatin1Char('A') && chr <= QLatin1Char('Z')) || (chr >= QLatin1Char('h') && chr <= QLatin1Char('z'));
+}
+
+/**
+ * @returns Whether FindGitHashPositions takes chr to start a possible hash: a hex digit, or git describe's 'g'.
+ */
+bool startsHash(QChar chr)
+{
+    return (chr >= QLatin1Char('a') && chr <= QLatin1Char('g')) || (chr >= QLatin1Char('0') && chr <= QLatin1Char('9'));
+}
+
+/**
+ * @returns The character at pos, or a null character past the end (CString's terminating '\0').
+ */
+QChar charAt(const QString& msg, qsizetype pos)
+{
+    return pos < msg.size() ? msg.at(pos) : QChar();
+}
+
+/**
+ * FindGitHashPositions skips these lines: their hashes aren't commits of this repository.
+ * @returns Whether a git-svn-id, Signed-off-by or Change-Id line starts at pos.
+ */
+bool startsWithHashTrailer(const QString& msg, qsizetype pos)
+{
+    const QStringView rest = QStringView(msg).mid(pos);
+    return rest.startsWith(QLatin1StringView("git-svn-id:")) || rest.startsWith(QLatin1StringView("Signed-off-by:"))
+        || rest.startsWith(QLatin1StringView("Change-Id:"));
+}
+
+/**
+ * FindGitHashPositions' skip of a trailer line starting at pos, which steps over the first 10 characters.
+ * @returns The position of the line's '\n', or the end of msg.
+ */
+qsizetype skipHashTrailer(const QString& msg, qsizetype pos)
+{
+    pos += 10;
+    if (pos >= msg.size()) {
+        return pos;
+    }
+    const qsizetype newline = msg.indexOf(QLatin1Char('\n'), pos + 1);
+    return newline < 0 ? msg.size() : newline;
+}
+
+/**
+ * FindGitHashPositions' skip of a word that can't be a hash (it starts with a letter that isn't a hex digit or 'g').
+ * @returns The position after the word's letters and digits.
+ */
+qsizetype skipWord(const QString& msg, qsizetype pos)
+{
+    ++pos;
+    while (pos < msg.size() && isAsciiAlnum(msg.at(pos))) {
+        ++pos;
+    }
+    return pos;
+}
+
+/**
+ * FindGitHashPositions' match of a hash at pos, which may carry git describe's 'g' prefix (left out of the link) and
+ * must not run on into a letter or digit. Moves pos past the hash and the character after it.
+ * @returns The hash's range, or nothing.
+ */
+std::optional<TextRange> matchGitHash(const QString& msg, qsizetype& pos)
+{
+    qsizetype start = pos;
+    if (msg.at(pos) == QLatin1Char('g')) {
+        ++start;
+        ++pos;
+    }
+    std::optional<TextRange> range;
+    if (lookLikeGitHash(msg, pos) && !isAsciiAlnum(charAt(msg, pos))) {
+        range = TextRange{.start = start, .end = pos};
+    }
+    ++pos;
+    return range;
 }
 
 /**
@@ -853,14 +937,14 @@ void LogDlg::fillLogMessage(const GitRevLoglist& rev)
     cursor.insertText(msg, normal);
 
     const auto format = [this](const TextRange& range, const QTextCharFormat& charFormat) {
-        QTextCursor c(m_msgView->document());
-        c.setPosition(static_cast<int>(range.start));
-        c.setPosition(static_cast<int>(range.end), QTextCursor::KeepAnchor);
-        c.mergeCharFormat(charFormat);
+        QTextCursor rangeCursor(m_msgView->document());
+        rangeCursor.setPosition(static_cast<int>(range.start));
+        rangeCursor.setPosition(static_cast<int>(range.end), QTextCursor::KeepAnchor);
+        rangeCursor.mergeCharFormat(charFormat);
     };
     QTextCharFormat bold;
     bold.setFontWeight(QFont::Bold);
-    format({boldStart, boldEnd}, bold);
+    format({.start = boldStart, .end = boldEnd}, bold);
 
     // CAppUtils::SetCharFormat(CFM_LINK): links in the palette's link colour
     const auto linkFormat = [this](const QString& href) {
@@ -909,7 +993,7 @@ void LogDlg::onMsgViewLinkClicked(const QUrl& link)
 void LogDlg::jumpToGitHash(const QString& hash)
 {
     // CLogDlg::JumpToGitHash: start searching downwards, because it's unlikely that a hash is a forward reference
-    GitLogListModel *model = m_logList->logModel();
+    const GitLogListModel *model = m_logList->logModel();
     const int currentPos = m_logList->selectionModel()->currentIndex().row();
     const int cnt = model->rowCount();
     if (cnt == 0 || currentPos < 0) {
@@ -959,58 +1043,35 @@ void LogDlg::showFiles(const GitRevLoglist& rev)
 bool lookLikeGitHash(const QString& msg, qsizetype& pos)
 {
     // LookLikeGitHash
-    qsizetype c = 0;
+    qsizetype count = 0;
     for (; pos < msg.size(); ++pos) {
         if (isHexDigit(msg.at(pos))) {
-            ++c;
+            ++count;
         } else {
-            return c >= shortHashLength && c <= gitHashHexSize && msg.at(pos) != QLatin1Char('@');
+            return count >= shortHashLength && count <= gitHashHexSize && msg.at(pos) != QLatin1Char('@');
         }
     }
-    return c >= shortHashLength && c <= gitHashHexSize;
+    return count >= shortHashLength && count <= gitHashHexSize;
 }
 
 QList<TextRange> findGitHashPositions(const QString& msg, qsizetype offset)
 {
     // FindGitHashPositions
     QList<TextRange> result;
-    const qsizetype len = msg.size();
-    const auto at = [&msg, len](qsizetype i) {
-        return i < len ? msg.at(i) : QChar();
-    };
-    const auto startsAt = [&msg](qsizetype i, QLatin1StringView word) {
-        return QStringView(msg).mid(i).startsWith(word);
-    };
     offset = std::max<qsizetype>(offset, 0);
-    while (offset < len) {
-        qsizetype old = offset;
-        QChar e = msg.at(offset);
-        if (e == QLatin1Char('\n')) {
+    while (offset < msg.size()) {
+        const QChar chr = msg.at(offset);
+        if (chr == QLatin1Char('\n')) {
             ++offset;
-            if (startsAt(offset, QLatin1StringView("git-svn-id:")) || startsAt(offset, QLatin1StringView("Signed-off-by:"))
-                || startsAt(offset, QLatin1StringView("Change-Id:"))) {
-                offset += 10;
-                while (offset < len) {
-                    if (at(++offset) == QLatin1Char('\n')) {
-                        break;
-                    }
-                }
+            if (startsWithHashTrailer(msg, offset)) {
+                offset = skipHashTrailer(msg, offset);
             }
-        } else if ((e >= QLatin1Char('A') && e <= QLatin1Char('Z')) || (e >= QLatin1Char('h') && e <= QLatin1Char('z'))) {
-            do {
-                e = at(++offset);
-            } while (offset < len && isAsciiAlnum(e));
-        } else if ((e >= QLatin1Char('a') && e <= QLatin1Char('g')) || (e >= QLatin1Char('0') && e <= QLatin1Char('9'))) {
-            if (e == QLatin1Char('g')) {
-                ++old;
-                ++offset;
+        } else if (startsNonHashWord(chr)) {
+            offset = skipWord(msg, offset);
+        } else if (startsHash(chr)) {
+            if (const std::optional<TextRange> range = matchGitHash(msg, offset)) {
+                result.append(*range);
             }
-            if (lookLikeGitHash(msg, offset)) {
-                if (!isAsciiAlnum(at(offset))) {
-                    result.append({old, offset});
-                }
-            }
-            ++offset;
         } else {
             ++offset;
         }

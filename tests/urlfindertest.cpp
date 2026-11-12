@@ -30,6 +30,7 @@ class UrlFinderTest : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
     void isUrlOrEmail_data()
     {
         QTest::addColumn<QString>("text");
@@ -52,11 +53,12 @@ private Q_SLOTS:
 
     void isUrlOrEmail()
     {
-        QFETCH(QString, text);
-        QFETCH(bool, expected);
+        QFETCH(const QString, text);
+        QFETCH(const bool, expected);
         QCOMPARE(kgt::isUrlOrEmail(text), expected);
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
     void findUrlMatches_data()
     {
         QTest::addColumn<QString>("msg");
@@ -78,11 +80,12 @@ private Q_SLOTS:
 
     void findUrlMatches()
     {
-        QFETCH(QString, msg);
-        QFETCH(QStringList, expected);
+        QFETCH(const QString, msg);
+        QFETCH(const QStringList, expected);
         QCOMPARE(texts(msg, kgt::findUrlMatches(msg)), expected);
     }
 
+    // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix
     void findGitHashPositions_data()
     {
         QTest::addColumn<QString>("msg");
@@ -104,8 +107,8 @@ private Q_SLOTS:
 
     void findGitHashPositions()
     {
-        QFETCH(QString, msg);
-        QFETCH(QStringList, expected);
+        QFETCH(const QString, msg);
+        QFETCH(const QStringList, expected);
         QCOMPARE(texts(msg, kgt::findGitHashPositions(msg, msg.indexOf(QLatin1Char('\n')))), expected);
     }
 };
