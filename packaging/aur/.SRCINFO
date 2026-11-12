@@ -1,6 +1,6 @@
 pkgbase = kortoisegit
 	pkgdesc = A port of TortoiseGit to KDE: Dolphin plugin and git dialogs
-	pkgver = 0.10.2
+	pkgver = 0.10.3
 	pkgrel = 1
 	url = https://github.com/xwize/KortoiseGit
 	arch = x86_64
@@ -23,7 +23,7 @@ pkgbase = kortoisegit
 	optdepends = ksshaskpass: password and host key prompts for SSH remotes
 	optdepends = kdiff3: diff and conflict editing tool
 	optdepends = meld: diff and conflict editing tool
-	source = kortoisegit-0.10.2.tar.gz::https://github.com/xwize/KortoiseGit/archive/refs/tags/0.10.2.tar.gz
-	sha256sums = 0333f902f79ff1944b47f308a3d9c7483eeba1c88d7aa6f98802baf7d01a2098
+	source = kortoisegit-0.10.3.tar.gz::https://github.com/xwize/KortoiseGit/archive/refs/tags/0.10.3.tar.gz
+	sha256sums = 3d4e7e536ba71a13413f71c58de129bc4f3fa751a9978c3afd70f034aeb4e5b0
 
 pkgname = kortoisegit
