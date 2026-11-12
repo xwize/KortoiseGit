@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Vendored tl-expected, kept byte-identical to upstream
+src/utils/expected.hpp

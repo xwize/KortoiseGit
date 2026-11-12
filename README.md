@@ -97,6 +97,9 @@ TortoiseSVN Icon License (see `src/proc/icons/license.txt`); KortoiseGit uses th
 `scripts/recolour-icons.sh` recolours them to pastel shades from the unmodified originals kept in
 `src/proc/icons/original/`.
 
+`src/utils/expected.hpp` is an unmodified copy of [tl-expected](https://github.com/TartanLlama/expected) 1.3.1 by Sy
+Brand, which is CC0-1.0 (public domain).
+
 ## Developer
 
 ### Architecture
@@ -113,7 +116,7 @@ KortoiseGit has two parts, split the way TortoiseGit splits TortoiseShell and To
 
 ```sh
 sudo pacman -S --needed base-devel cmake ninja extra-cmake-modules clang \
-    qt6-base kcoreaddons ki18n kio dolphin tl-expected
+    qt6-base kcoreaddons ki18n kio dolphin
 cmake --preset gcc-debug
 cmake --build --preset gcc-debug
 ctest --preset gcc-debug

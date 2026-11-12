@@ -32,7 +32,6 @@ kde_enable_exceptions()
 find_package(Qt6 ${QT_MIN_VERSION} REQUIRED COMPONENTS Core DBus Gui Widgets Test)
 find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS Config CoreAddons I18n KIO WidgetsAddons)
 find_package(DolphinVcs REQUIRED)
-find_package(tl-expected REQUIRED)
 
 set_package_properties(DolphinVcs PROPERTIES
     DESCRIPTION "The Dolphin version control plugin library"
@@ -67,6 +66,8 @@ file(GLOB_RECURSE KGT_CLANG_FORMAT_SOURCE_FILES
     ${CMAKE_SOURCE_DIR}/src/*.cpp ${CMAKE_SOURCE_DIR}/src/*.hpp
     ${CMAKE_SOURCE_DIR}/tests/*.cpp ${CMAKE_SOURCE_DIR}/tests/*.hpp
 )
+# The vendored tl-expected header stays byte-identical to upstream (.clang-format-ignore covers git clang-format)
+list(FILTER KGT_CLANG_FORMAT_SOURCE_FILES EXCLUDE REGEX "/src/utils/expected\\.hpp$")
 kde_clang_format(${KGT_CLANG_FORMAT_SOURCE_FILES})
 kde_configure_git_pre_commit_hook(CHECKS CLANG_FORMAT)
 
