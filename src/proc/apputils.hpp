@@ -37,15 +37,7 @@ struct CreateBranchTagParams;
 struct GitSwitchOptions;
 struct RebaseOptions;
 struct StashSaveOptions;
-
-/**
- * What a unified diff compares (CAppUtils::StartShowUnifiedDiff's url1, rev1 and rev2).
- */
-struct UnifiedDiffOf {
-    QString rev1; // The old side; empty for the working tree (GitRev::GetWorkingCopyRef)
-    QString rev2; // The new side; empty for the working tree
-    QString path; // The file to limit it to, relative to the working tree root; empty for the whole tree
-};
+struct UnifiedDiffOf;
 
 /**
  * The titles and hashes of the two sides of a conflict, as CAppUtils::GetConflictTitles fills them in.
@@ -183,14 +175,6 @@ public:
      * @param parent The window an error is shown over.
      */
     static void launchAlternativeEditor(const QString& file, QWidget *parent = nullptr);
-
-    /**
-     * GetUnifiedDiffCmd in CGit.
-     * @param diff What to compare.
-     * @param diffContext diff.context, or a negative number if not set.
-     * @returns The arguments after "git".
-     */
-    [[nodiscard]] static QStringList unifiedDiffArguments(const UnifiedDiffOf& diff, int diffContext);
 
     /**
      * Ported from CAppUtils::StartShowUnifiedDiff: writes the unified diff to a read-only temp file and opens it.

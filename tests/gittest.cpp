@@ -373,6 +373,32 @@ private Q_SLOTS:
         QVERIFY(!GitRev::isWorkingCopyRef(QStringLiteral("00000000a")));
     }
 
+    void unifiedDiffArguments()
+    {
+        const UnifiedDiffOf twoRevs{.rev1 = QStringLiteral("a"), .rev2 = QStringLiteral("b"), .path = {}};
+        QCOMPARE(Git::unifiedDiffArguments(twoRevs, -1),
+                 (QStringList{QStringLiteral("diff-tree"),
+                              QStringLiteral("-r"),
+                              QStringLiteral("-p"),
+                              QStringLiteral("--stat"),
+                              QStringLiteral("--end-of-options"),
+                              QStringLiteral("a"),
+                              QStringLiteral("b"),
+                              QStringLiteral("--")}));
+        QVERIFY(Git::unifiedDiffArguments(twoRevs, 5).contains(QStringLiteral("--unified=5")));
+        // The command runs
+        const TestRepo repo;
+        repo.write(QStringLiteral("a.txt"), "a\n");
+        repo.commitAll(QStringLiteral("One"));
+        repo.run({QStringLiteral("tag"), QStringLiteral("main")});
+        repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("-b"), QStringLiteral("other")});
+        repo.write(QStringLiteral("b.txt"), "b\n");
+        repo.commitAll(QStringLiteral("other work"));
+        const UnifiedDiffOf branches{.rev1 = QStringLiteral("main"), .rev2 = QStringLiteral("other"), .path = {}};
+        const QString diff = QString::fromUtf8(repo.git().unifiedDiff(branches, -1));
+        QVERIFY(diff.contains(QStringLiteral("+++ b/b.txt")));
+    }
+
 private:
     QTemporaryDir m_dir;
 

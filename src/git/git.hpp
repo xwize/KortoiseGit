@@ -103,6 +103,15 @@ struct CommitDiffList {
 };
 
 /**
+ * What a unified diff compares: CGit::GetUnifiedDiff's path, rev1 and rev2.
+ */
+struct UnifiedDiffOf {
+    QString rev1; // The old side; empty for the working tree (GitRev::GetWorkingCopyRef)
+    QString rev2; // The new side; empty for the working tree
+    QString path; // The file to limit it to, relative to the working tree root; empty for the whole tree
+};
+
+/**
  * Runs git in one directory, either blocking (for the plugin, which Dolphin calls on a worker thread) or
  * asynchronously (for the app, whose UI thread must never wait on git).
  */
@@ -421,6 +430,23 @@ public:
      * @returns The arguments after "git".
      */
     [[nodiscard]] static QStringList commitDiffListArguments(const CommitDiffList& diff);
+
+    /**
+     * The static GetUnifiedDiffCmd in TortoiseGit's Git.cpp: the git command of a unified diff with its stat.
+     * @param diff What to compare.
+     * @param diffContext diff.context, or a negative number if not set.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList unifiedDiffArguments(const UnifiedDiffOf& diff, int diffContext);
+
+    /**
+     * CGit::GetUnifiedDiff, the overload that fills a buffer: runs unifiedDiffArguments.
+     * @param diff What to compare.
+     * @param diffContext diff.context, or a negative number if not set.
+     * @returns The diff.
+     * @throws RuntimeError If git fails, as run() does.
+     */
+    [[nodiscard]] QByteArray unifiedDiff(const UnifiedDiffOf& diff, int diffContext) const;
 
 private:
     QString m_workingDirectory;
