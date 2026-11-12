@@ -56,15 +56,27 @@ Configure Dolphin > Interface > Version Control, tick KortoiseGit and untick Git
 
 - **Status overlays in Dolphin**, showing each file's git status
 - **Context menu in Dolphin**, laid out like TortoiseGit's, with most entries in a "KortoiseGit" submenu
-- **Log:** commit graph, message and changed files for each commit
-- **Commit** with a checkable file list and Amend Last Commit
+- **Log:** commit graph, message and changed files for each commit, with the full history loaded in the background,
+  filters by date, text, author and path, and the walk options (first parent, no merges, follow renames)
+  - Right-click a commit to Switch/Checkout to it, Create Branch or Tag at it, Merge it, Rebase onto it, Reset to it,
+    Cherry Pick it, Revert the change it made, compare it, or copy its details
+  - Right-click a changed file to compare it, Revert to this revision, view or Save revision to, or Show log
+- **Commit** with a checkable file list, Amend Last Commit, Add Signed-off-by, Paste recent message, and git's merge
+  or squash message when concluding a merge
+- **Follow-up buttons** when a command finishes, such as Push or Pull after a commit, Resolve or Commit after a merge or
+  pull with conflicts, and Stash Pop after a stash
 - **Add** and **Revert**
 - **Diff** and **Diff with previous version**, through `git difftool`
-- **Pull, Fetch and Push**, to a remote or an arbitrary URL, asking for passwords and host keys through ksshaskpass
-- **Switch/Checkout** and **Create Branch**
+- **Pull, Fetch and Push**, to a remote or an arbitrary URL, asking for passwords and host keys through ksshaskpass;
+  Pull honours `pull.rebase`
+- **Switch/Checkout**, **Create Branch** and **Create Tag**
 - **Merge**, with Abort Merge while a merge is in progress
+- **Resolve:** Edit conflicts through `git mergetool`, resolve a file using theirs or mine, and mark files resolved
 - **Rebase**, with pick, squash, edit and skip for each commit
-- **Browse References**, to filter and delete branches and tags
+- **Stash:** Stash Save, Stash Apply, Stash Pop and the Stash List
+- **RefLog**, to see where a branch has been and get back lost commits
+- **Browse References:** filter branches and tags, then Switch, Merge, Create Branch or Tag, Rename, Delete (including
+  remote branches and tags), set the tracked branch, Compare, Fetch or Show log from the right-click menu
 - **Clone** and **Create repository**
 - **Settings:** your git name, e-mail and signing key, line endings (AutoCrLf, SafeCrLf), QuotePath and Prune, the
   repository's remotes (also reached through Manage Remotes in
