@@ -424,6 +424,7 @@ void LogDlg::createWidgets()
 
     createWalkBehaviorMenu();
     createViewMenu();
+    attachMenus();
     createFilterMenu();
     setFilterCueText();
     updateSearchValidity();
@@ -507,8 +508,6 @@ QLayout *LogDlg::createBottomRow()
     connect(m_refresh, &QPushButton::clicked, this, [this] {
         refresh(true);
     });
-    connect(m_walkBehavior, &QPushButton::clicked, this, &LogDlg::onWalkBehaviorClicked);
-    connect(m_view, &QPushButton::clicked, this, &LogDlg::onViewClicked);
     row->addStretch();
 
     m_buttons = new QDialogButtonBox(QDialogButtonBox::Ok, this);
@@ -516,6 +515,26 @@ QLayout *LogDlg::createBottomRow()
     connect(m_buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     row->addWidget(m_buttons);
     return row;
+}
+
+void LogDlg::attachMenus()
+{
+    // OnInitDialog's m_bAlwaysShowArrow: the menus are attached so the style draws the drop-down arrow.
+    // OnBnClickedWalkBehaviour / OnBnClickedView: the button is checked while its popup is open. Walk
+    // Behavior then shows whether a walk option is on; the options' own handlers keep that up to date
+    // when one is chosen, since aboutToHide comes before the action triggers.
+    m_walkBehavior->setMenu(m_walkMenu);
+    m_view->setMenu(m_viewMenu);
+    connect(m_walkMenu, &QMenu::aboutToShow, this, [this] {
+        m_walkBehavior->setChecked(true);
+    });
+    connect(m_walkMenu, &QMenu::aboutToHide, this, &LogDlg::updateWalkBehaviorChecked);
+    connect(m_viewMenu, &QMenu::aboutToShow, this, [this] {
+        m_view->setChecked(true);
+    });
+    connect(m_viewMenu, &QMenu::aboutToHide, this, [this] {
+        m_view->setChecked(false);
+    });
 }
 
 QAction *LogDlg::addCheckAction(QMenu *menu, const QString& text, bool checked)
@@ -700,20 +719,6 @@ void LogDlg::onToDateChanged()
         m_walkOptions.to = newest;
         m_dateTimer.start();
     }
-}
-
-void LogDlg::onWalkBehaviorClicked()
-{
-    m_walkBehavior->setChecked(true);
-    m_walkMenu->exec(m_walkBehavior->mapToGlobal(QPoint(0, -m_walkMenu->sizeHint().height())));
-    updateWalkBehaviorChecked();
-}
-
-void LogDlg::onViewClicked()
-{
-    m_view->setChecked(true);
-    m_viewMenu->exec(m_view->mapToGlobal(QPoint(0, -m_viewMenu->sizeHint().height())));
-    m_view->setChecked(false);
 }
 
 void LogDlg::onFilterIconClicked()
