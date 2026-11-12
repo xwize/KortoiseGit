@@ -5,20 +5,17 @@
 #include "apputils.hpp"
 #include "git/gitcall.hpp"
 #include "git/gitrev.hpp"
-#include "git/tgitpath.hpp"
 #include "testrepo.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <QBuffer>
 #include <QDir>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 
 #include <memory>
-#include <optional>
 #include <tuple>
 
 Q_DECLARE_METATYPE(kgt::ConflictKind)
@@ -401,84 +398,6 @@ private Q_SLOTS:
 
 private:
     QTemporaryDir m_dir;
-
-    void aStuckGitIsKilledAtTheTimeout()
-    {
-        // A git that never answers: the plugin must not wait for it on Dolphin's UI thread
-        const QTemporaryDir bin;
-        QFile script(QDir(bin.path()).filePath(QStringLiteral("git")));
-        QVERIFY(script.open(QIODevice::WriteOnly));
-        script.write("#!/bin/sh\nexec sleep 30\n");
-        script.close();
-        QVERIFY(script.setPermissions(script.permissions() | QFileDevice::ExeOwner));
-        const QByteArray path = qgetenv("PATH");
-        qputenv("PATH", QByteArray(bin.path().toLocal8Bit() + ':' + path));
-
-        Git git(QDir::tempPath());
-        git.setRunTimeout(200);
-        QElapsedTimer elapsed;
-        elapsed.start();
-        bool threw = false;
-        try {
-            std::ignore = git.run({QStringLiteral("status")});
-        } catch (const RuntimeError& e) {
-            threw = e.error().category == ErrorCategory::Git && e.error().message.contains(QLatin1String("timed out"));
-        }
-        qputenv("PATH", path);
-        QVERIFY(threw);
-        QVERIFY(elapsed.elapsed() < 10000);
-    }
-
-    void repositoryRootFallsBackForABareRepository()
-    {
-        const QTemporaryDir bare;
-        QVERIFY(bare.isValid());
-        std::ignore = Git(bare.path()).run({QStringLiteral("init"), QStringLiteral("--bare")});
-        QCOMPARE(Git::repositoryRoot(bare.path()), bare.path());
-    }
-
-    void takesDelimitedFields()
-    {
-        const QByteArray output("one\ttwo\0\0", 9);
-        qsizetype pos = 0;
-        QCOMPARE(Git::takeField(output, pos, '\t'), std::optional(QStringLiteral("one")));
-        QCOMPARE(Git::takeField(output, pos, '\0'), std::optional(QStringLiteral("two")));
-        QCOMPARE(Git::takeField(output, pos, '\0'), std::nullopt); // An empty field
-        QCOMPARE(pos, 8);
-    }
-
-    void relativePathsResolveLinksAndTheRoot()
-    {
-        const QTemporaryDir dir;
-        const QString root = QFileInfo(dir.path()).canonicalFilePath();
-        const QString tree = root + QStringLiteral("/tree");
-        QVERIFY(QDir(root).mkpath(QStringLiteral("tree/sub")));
-        QVERIFY(QFile::link(tree, root + QStringLiteral("/link")));
-        QCOMPARE(TGitPath::relativePaths(tree, {root + QStringLiteral("/link/a.txt"), tree + QStringLiteral("/sub")}),
-                 (QStringList{QStringLiteral("a.txt"), QStringLiteral("sub")}));
-        QVERIFY(TGitPath::relativePaths(tree, {tree + QStringLiteral("/sub"), tree}).isEmpty());
-    }
-
-    void outputOrEmptyIgnoresGitFailing()
-    {
-        const auto outputOf = [this](const QString& argument) {
-            const std::unique_ptr<GitCall> call = Git(m_dir.path()).runAsync({argument}, RunMode::ReadOnly);
-            QSignalSpy finished(call.get(), &GitCall::finished);
-            finished.wait();
-            return AppUtils::outputOrEmpty(*call);
-        };
-        QVERIFY(outputOf(QStringLiteral("--version")).startsWith("git version"));
-        QVERIFY(outputOf(QStringLiteral("no-such-command")).isEmpty());
-    }
-
-    void knowsAnUnbornBranch()
-    {
-        const TestRepo repo;
-        QVERIFY(repo.git().isUnbornBranch());
-        repo.write(QStringLiteral("f.txt"), "1");
-        repo.commitAll(QStringLiteral("One"));
-        QVERIFY(!repo.git().isUnbornBranch());
-    }
 };
 
 QTEST_GUILESS_MAIN(GitTest)

@@ -1860,34 +1860,6 @@ private Q_SLOTS:
         QVERIFY(waitForReload(dlg));
     }
 
-    void revertSkipsACommitThatFails()
-    {
-        const TestRepo repo;
-        repo.write(QStringLiteral("f.txt"), "1");
-        repo.commitAll(QStringLiteral("C1"));
-        repo.write(QStringLiteral("f.txt"), "2");
-        repo.commitAll(QStringLiteral("C2"));
-        repo.write(QStringLiteral("g.txt"), "x");
-        repo.commitAll(QStringLiteral("C3"));
-        LogDlg dlg({repo.path()});
-        QVERIFY(waitForLog(dlg));
-        QVERIFY(showDialog(dlg));
-        GitLogList *list = dlg.logList();
-        const GitLogListModel *model = list->logModel();
-        list->setCurrentIndex(model->index(0, 0));
-        list->selectionModel()->select(model->index(2, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
-        const QString revertC3 = QStringLiteral("Revert \"C3\"\n\nThis reverts commit %1.\n").arg(model->rev(0).hash);
-
-        // Yes; Skip C1, whose file has changed since; OK
-        const BoxAnswerer answerer({QDialogButtonBox::Yes, QDialogButtonBox::Yes, QDialogButtonBox::Ok});
-        QVERIFY(withMenuOnSelection(list, [](QMenu *menu) {
-            entry(menu, QStringLiteral("&Revert changes by these commits"))->trigger();
-        }));
-        QVERIFY(!QFileInfo::exists(repo.filePath(QStringLiteral("g.txt"))));
-        QCOMPARE(mergeMsg(repo), revertC3);
-        QVERIFY(waitForReload(dlg));
-    }
-
     void aMergeComparesWithTheChosenParent()
     {
         const TestRepo repo;

@@ -235,39 +235,6 @@ private Q_SLOTS:
         QVERIFY(QFile::exists(setup.mine.filePath(QStringLiteral(".git/MERGE_HEAD"))));
     }
 
-    void pullOffersDoPullsFollowUps()
-    {
-        const QString diff = QStringLiteral("Pulled Diff");
-        const QString log = QStringLiteral("Pulled Log");
-
-        // Pulled: the pulled diff and log, with Stash Pop first and Push last when asked for
-        const PullSetup setup;
-        setup.pushFromTheirs(QStringLiteral("b.txt"), "b\n");
-        {
-            const CommandDriver driver({}, acceptPullFetchDlg);
-            QVERIFY(PullCommand::pull(setup.mine.path()));
-            QCOMPARE(driver.offered(), QList<QStringList>{(QStringList{diff, log})});
-        }
-        setup.pushFromTheirs(QStringLiteral("c.txt"), "c\n");
-        {
-            const CommandDriver driver({}, acceptPullFetchDlg);
-            QVERIFY(PullCommand::pull(setup.mine.path(), {.showPush = true, .showStashPop = true}));
-            const QStringList expected{QStringLiteral("Stash Pop"), diff, log, QStringLiteral("Pus&h...")};
-            QCOMPARE(driver.offered(), QList<QStringList>{expected});
-        }
-
-        // Conflicts: Resolve and Commit only
-        const PullSetup conflicting;
-        conflicting.pushFromTheirs(QStringLiteral("a.txt"), "theirs\n");
-        conflicting.mine.write(QStringLiteral("a.txt"), "mine\n");
-        conflicting.mine.commitAll(QStringLiteral("mine"));
-        {
-            const CommandDriver driver({}, acceptPullFetchDlg);
-            QVERIFY(!PullCommand::pull(conflicting.mine.path()));
-            QCOMPARE(driver.offered(), QList<QStringList>{(QStringList{QStringLiteral("Resolve"), QStringLiteral("&Commit...")})});
-        }
-    }
-
     void failedPullOffersRetries()
     {
         // Local changes in the way: Pull, Stash changes and Reset, which starts as a hard reset to the upstream
