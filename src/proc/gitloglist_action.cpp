@@ -20,6 +20,7 @@
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 #include "git/gitcall.hpp"
+#include "git/gitrev.hpp"
 #include "gitdiff.hpp"
 #include "gitstatuslistmodel.hpp"
 #include "rebasedlg.hpp"
@@ -546,7 +547,7 @@ void GitLogList::startCompare(int row, const QString& rev1, const QString& rev2)
         // CGitDiff::DiffCommit shows the changed files with rev2 as the base (SetDiff), a folder in the filter box
         const QString folder = m_pathFilter.size() == 1 ? m_pathFilter.constFirst() : QString();
         FileDiffDlg dlg(m_workingTree, this);
-        dlg.setDiff(folder, rev2, rev1.isEmpty() ? FileDiffDlg::workingCopyRef() : rev1);
+        dlg.setDiff(folder, rev2, rev1.isEmpty() ? GitRev::workingCopyRef() : rev1);
         dlg.exec();
         return;
     }

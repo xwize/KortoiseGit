@@ -682,4 +682,46 @@ QStringList Git::deleteRemoteRefsArguments(const QString& remote, const QStringL
     return arguments;
 }
 
+QStringList DiffIgnoreOptions::arguments() const
+{
+    QStringList arguments;
+    if (spaceAtEol) {
+        arguments.append(QStringLiteral("--ignore-space-at-eol"));
+    }
+    if (spaceChange) {
+        arguments.append(QStringLiteral("--ignore-space-change"));
+    }
+    if (allSpace) {
+        arguments.append(QStringLiteral("--ignore-all-space"));
+    }
+    if (blankLines) {
+        arguments.append(QStringLiteral("--ignore-blank-lines"));
+    }
+    return arguments;
+}
+
+QStringList Git::commitDiffListArguments(const CommitDiffList& diff)
+{
+    const QString& rev1 = diff.rev1;
+    const QString& rev2 = diff.rev2;
+    const bool withWorkingTree = rev1.isEmpty() || rev2.isEmpty();
+    const QString command = withWorkingTree ? QStringLiteral("diff") : QStringLiteral("diff-tree");
+    QStringList arguments{command, QStringLiteral("-r")};
+    if (rev2.isEmpty()) {
+        arguments.append(QStringLiteral("-R"));
+    }
+    // TortoiseGit's default similarity index (ms_iSimilarityIndexThreshold, 50%) for renames and copies
+    arguments << QStringLiteral("--raw") << QStringLiteral("-C50%") << QStringLiteral("-M50%");
+    arguments << QStringLiteral("--numstat") << QStringLiteral("-z");
+    arguments << diff.ignore.arguments() << QStringLiteral("--end-of-options");
+    // git diff-tree <rev2> <rev1>, or git diff against whichever isn't the working tree
+    for (const QString& rev : {rev2, rev1}) {
+        if (!rev.isEmpty()) {
+            arguments.append(rev);
+        }
+    }
+    arguments.append(QStringLiteral("--"));
+    return arguments;
+}
+
 } // namespace kgt

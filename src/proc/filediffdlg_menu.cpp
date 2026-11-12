@@ -65,7 +65,7 @@ QAction *addEntry(QMenu& menu, const QString& icon, const QString& text, QObject
  * @param rev A version.
  * @returns Its short hash and the start of its subject, for a menu entry.
  */
-QString commitTitle(const FileDiffRev& rev)
+QString commitTitle(const GitRev& rev)
 {
     QString title = rev.subject;
     if (title.size() > maxTitleLength) {
@@ -161,8 +161,8 @@ void FileDiffDlg::showContextMenu(const QPoint& pos)
 void FileDiffDlg::addRevertEntries(QMenu& menu, const FileDiffEntry& first)
 {
     // ID_REVERT1 and ID_REVERT2: a file deleted in version 2 can't go back to it unless version 1 is the working tree
-    const FileDiffRev& rev1 = m_sides.at(0).rev;
-    const FileDiffRev& rev2 = m_sides.at(1).rev;
+    const GitRev& rev1 = m_sides.at(0).rev;
+    const GitRev& rev2 = m_sides.at(1).rev;
     const QString icon = QStringLiteral("edit-undo");
     if (!rev1.hash.isEmpty()) {
         addEntry(menu, icon, i18n("Revert to revision %1", commitTitle(rev1)), this, [this] {
@@ -182,7 +182,7 @@ void FileDiffDlg::doDiff(const FileDiffEntry& entry)
     const QString& rev1 = m_sides.at(0).rev.hash;
     const QString& rev2 = m_sides.at(1).rev.hash;
     const bool unborn = rev2.isEmpty() && m_git.isUnbornBranch();
-    const QStringList arguments = diffArguments(entry, {.rev1 = rev1, .rev2 = rev2, .options = {}}, unborn);
+    const QStringList arguments = diffArguments(entry, {.rev1 = rev1, .rev2 = rev2, .ignore = {}}, unborn);
     std::ignore = GitDiff::start(this, {.workingDirectory = m_workingTree, .arguments = arguments});
 }
 
@@ -345,8 +345,8 @@ void FileDiffDlg::saveList()
         QMessageBox::critical(this, i18n("KortoiseGit"), file.errorString());
         return;
     }
-    const QString rev1 = m_sides.at(0).rev.hash.isEmpty() ? workingCopyRef() : m_sides.at(0).rev.hash;
-    const QString rev2 = m_sides.at(1).rev.hash.isEmpty() ? workingCopyRef() : m_sides.at(1).rev.hash;
+    const QString rev1 = m_sides.at(0).rev.hash.isEmpty() ? GitRev::workingCopyRef() : m_sides.at(0).rev.hash;
+    const QString rev2 = m_sides.at(1).rev.hash.isEmpty() ? GitRev::workingCopyRef() : m_sides.at(1).rev.hash;
     QString text = i18n("Changed files between %1 and %2", rev1, rev2) + QLatin1Char('\n');
     for (const FileDiffEntry& entry : selected) {
         text += entry.path + QLatin1Char('\n');

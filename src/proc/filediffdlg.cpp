@@ -91,29 +91,7 @@ GitCall *takeFinished(std::unique_ptr<GitCall>& call)
  */
 QString hashText(const QString& hash)
 {
-    return hash.isEmpty() ? FileDiffDlg::workingCopyRef() : hash;
-}
-
-/**
- * @param options The Diff Options.
- * @returns The diff options for the whitespace choices, as CGit::GetCommitDiffList and FillPatchView add them.
- */
-QStringList ignoreArguments(const FileDiffOptions& options)
-{
-    QStringList arguments;
-    if (options.ignoreSpaceAtEol) {
-        arguments.append(QStringLiteral("--ignore-space-at-eol"));
-    }
-    if (options.ignoreSpaceChange) {
-        arguments.append(QStringLiteral("--ignore-space-change"));
-    }
-    if (options.ignoreAllSpace) {
-        arguments.append(QStringLiteral("--ignore-all-space"));
-    }
-    if (options.ignoreBlankLines) {
-        arguments.append(QStringLiteral("--ignore-blank-lines"));
-    }
-    return arguments;
+    return hash.isEmpty() ? GitRev::workingCopyRef() : hash;
 }
 
 /**
@@ -123,29 +101,6 @@ QStringList ignoreArguments(const FileDiffOptions& options)
 bool anyOption(const FileDiffOptions& options)
 {
     return options != FileDiffOptions{};
-}
-
-/**
- * Parses what readRev's git log printed.
- * @param output %H, %s, %aN, %at and %ct, separated by NULs.
- * @returns The commit, or a Parse error.
- */
-Result<FileDiffRev> parseRev(const QByteArray& output)
-{
-    const QList<QByteArray> fields = output.trimmed().split('\0');
-    constexpr qsizetype fieldCount = 5;
-    if (fields.size() != fieldCount) {
-        const QString message = QStringLiteral("Unexpected output from git log: %1").arg(QString::fromUtf8(output));
-        return makeError(ErrorCategory::Parse, message);
-    }
-    return FileDiffRev{
-        .hash = QString::fromLatin1(fields.at(0)),
-        .subject = QString::fromUtf8(fields.at(1)),
-        .authorName = QString::fromUtf8(fields.at(2)),
-        .authorDate = QDateTime::fromSecsSinceEpoch(fields.at(3).toLongLong()),
-        .committerDate = QDateTime::fromSecsSinceEpoch(fields.at(4).toLongLong()),
-        .isCommit = true,
-    };
 }
 
 } // namespace
@@ -201,39 +156,6 @@ FileDiffDlg::FileDiffDlg(const QString& workingTree, QWidget *parent)
 
 FileDiffDlg::~FileDiffDlg() = default;
 
-QString FileDiffDlg::workingCopyRef()
-{
-    return QString(40, QLatin1Char('0'));
-}
-
-bool FileDiffDlg::isWorkingCopyRef(const QString& text)
-{
-    constexpr qsizetype minLength = 8;
-    return text.size() >= minLength && workingCopyRef().startsWith(text);
-}
-
-QStringList FileDiffDlg::diffListArguments(const FileDiffQuery& query)
-{
-    // CGit::GetCommitDiffList: a diff against the working tree is turned round when the base is the working tree
-    const bool withWorkingTree = query.rev1.isEmpty() || query.rev2.isEmpty();
-    const QString command = withWorkingTree ? QStringLiteral("diff") : QStringLiteral("diff-tree");
-    QStringList arguments{command, QStringLiteral("-r")};
-    if (query.rev1.isEmpty()) {
-        arguments.append(QStringLiteral("-R"));
-    }
-    // TortoiseGit's default similarity index (ms_iSimilarityIndexThreshold, 50%) for renames and copies
-    arguments << QStringLiteral("--raw") << QStringLiteral("-C50%") << QStringLiteral("-M50%");
-    arguments << QStringLiteral("--numstat") << QStringLiteral("-z");
-    arguments << ignoreArguments(query.options) << QStringLiteral("--end-of-options");
-    for (const QString& rev : {query.rev1, query.rev2}) {
-        if (!rev.isEmpty()) {
-            arguments.append(rev);
-        }
-    }
-    arguments.append(QStringLiteral("--"));
-    return arguments;
-}
-
 QStringList FileDiffDlg::diffArguments(const FileDiffEntry& file, const FileDiffQuery& query, bool unborn)
 {
     const QString& path = file.path;
@@ -260,7 +182,7 @@ QStringList FileDiffDlg::diffArguments(const FileDiffEntry& file, const FileDiff
 
 QStringList FileDiffDlg::patchArguments(const FileDiffQuery& query, const QList<FileDiffEntry>& selected)
 {
-    QStringList arguments = QStringList{QStringLiteral("diff")} + ignoreArguments(query.options);
+    QStringList arguments = QStringList{QStringLiteral("diff")} + query.ignore.arguments();
     if (selected.isEmpty()) {
         arguments << QStringLiteral("--stat");
     }
@@ -306,12 +228,12 @@ void FileDiffDlg::setDiff(const QString& path, const QString& baseRev1, const QS
     m_filterTimer.stop();
 }
 
-const FileDiffRev& FileDiffDlg::rev1() const
+const GitRev& FileDiffDlg::rev1() const
 {
     return m_sides.at(0).rev;
 }
 
-const FileDiffRev& FileDiffDlg::rev2() const
+const GitRev& FileDiffDlg::rev2() const
 {
     return m_sides.at(1).rev;
 }
@@ -596,67 +518,10 @@ void FileDiffDlg::createDiffOptionsMenu()
     });
 }
 
-Result<FileDiffRev> FileDiffDlg::readRev(const QString& text) const
-{
-    // GitRev::GetCommit(text, allowTree = true), with the mailmap applied (ApplyMailmap)
-    if (isWorkingCopyRef(text)) {
-        return FileDiffRev{
-            .hash = {},
-            .subject = i18n("Working Tree"),
-            .authorName = {},
-            .authorDate = {},
-            .committerDate = {},
-            .isCommit = true,
-        };
-    }
-    // Dereferences signed tags
-    const QString name = m_git.fixBranchName(text);
-    try {
-        const QStringList arguments{
-            QStringLiteral("log"),
-            QStringLiteral("-1"),
-            QStringLiteral("--no-walk"),
-            QStringLiteral("--no-show-signature"),
-            QStringLiteral("--encoding=UTF-8"),
-            QStringLiteral("--format=%H%x00%s%x00%aN%x00%at%x00%ct"),
-            QStringLiteral("--end-of-options"),
-            name + QStringLiteral("^{commit}"),
-            QStringLiteral("--"),
-        };
-        return parseRev(m_git.run(arguments, RunMode::ReadOnly));
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-    }
-    try {
-        const QStringList arguments{
-            QStringLiteral("rev-parse"),
-            QStringLiteral("--verify"),
-            QStringLiteral("--end-of-options"),
-            name + QStringLiteral("^{tree}"),
-        };
-        const QString hash = QString::fromLatin1(m_git.run(arguments, RunMode::ReadOnly).trimmed());
-        return FileDiffRev{
-            .hash = hash,
-            .subject = {},
-            .authorName = {},
-            .authorDate = {},
-            .committerDate = {},
-            .isCommit = false,
-        };
-    } catch (const RuntimeError& e) {
-        if (e.error().category != ErrorCategory::Git) {
-            throw;
-        }
-        return makeError(ErrorCategory::Git, QStringLiteral("Ref \"%1\" is neither a commit nor a tree.").arg(name));
-    }
-}
-
-bool FileDiffDlg::fillRevFromString(FileDiffRev& rev, const QString& text)
+bool FileDiffDlg::fillRevFromString(GitRev& rev, const QString& text)
 {
     // FillRevFromString
-    Result<FileDiffRev> read = readRev(text);
+    Result<GitRev> read = GitRev::getCommit(m_git, text);
     if (!read) {
         m_diffCall.reset();
         showHint(i18n("\"%1\" is invalid.", text) + QLatin1Char('\n') + read.error().message);
@@ -678,8 +543,8 @@ void FileDiffDlg::startDiff()
     m_entries.clear();
     enableInputControl(false);
 
-    const FileDiffRev& rev1 = m_sides.at(0).rev;
-    const FileDiffRev& rev2 = m_sides.at(1).rev;
+    const GitRev& rev1 = m_sides.at(0).rev;
+    const GitRev& rev2 = m_sides.at(1).rev;
     QString base = rev1.hash;
     /**
      * TortoiseGit asks CGit::IsFastForward for the common ancestor but only uses it when rev1 already is that
@@ -691,8 +556,9 @@ void FileDiffDlg::startDiff()
         }
     }
     // git diff refreshes the index's stat information itself, which CGit::RefreshGitIndex does first
-    const FileDiffQuery query{.rev1 = base, .rev2 = rev2.hash, .options = m_options};
-    m_diffCall = m_git.runAsync(diffListArguments(query), RunMode::ReadOnly);
+    // CGit::GetCommitDiffList takes version 2 first
+    const CommitDiffList diff{.rev1 = rev2.hash, .rev2 = base, .ignore = m_options.ignore};
+    m_diffCall = m_git.runAsync(Git::commitDiffListArguments(diff), RunMode::ReadOnly);
     connect(m_diffCall.get(), &GitCall::finished, this, &FileDiffDlg::onDiffFinished);
 }
 
@@ -767,8 +633,8 @@ void FileDiffDlg::setUrlLabels(unsigned int mask)
     if ((mask & bothSides) != bothSides || !isBothCommits()) {
         return;
     }
-    const FileDiffRev& rev1 = m_sides.at(0).rev;
-    const FileDiffRev& rev2 = m_sides.at(1).rev;
+    const GitRev& rev1 = m_sides.at(0).rev;
+    const GitRev& rev2 = m_sides.at(1).rev;
     if (rev1.committerDate > rev2.committerDate) {
         m_sides.at(0).group->setTitle(i18n("Version 1 (Base, Newer commit time)"));
     } else if (rev1.committerDate < rev2.committerDate) {
@@ -842,7 +708,7 @@ void FileDiffDlg::clickRevButton(int index)
         chosen = BrowseRefsDlg::pickRef(m_workingTree, {}, this);
         break;
     case 1: { // Log
-        const QString revision = isWorkingCopyRef(side.edit->text()) ? QString() : side.edit->text();
+        const QString revision = GitRev::isWorkingCopyRef(side.edit->text()) ? QString() : side.edit->text();
         LogDlg dlg({m_workingTree}, revision, this);
         if (!revision.isEmpty()) {
             dlg.setHighlightRevision(revision);
@@ -891,13 +757,13 @@ void FileDiffDlg::onHeaderClicked(int section)
 void FileDiffDlg::onDiffOptionTriggered()
 {
     // OnBnClickedDiffoption
-    m_options = FileDiffOptions{
-        .ignoreSpaceAtEol = m_diffOptionActions.at(0)->isChecked(),
-        .ignoreSpaceChange = m_diffOptionActions.at(1)->isChecked(),
-        .ignoreAllSpace = m_diffOptionActions.at(2)->isChecked(),
-        .ignoreBlankLines = m_diffOptionActions.at(3)->isChecked(),
-        .commonAncestor = m_diffOptionActions.at(4)->isChecked(),
+    const DiffIgnoreOptions ignore{
+        .spaceAtEol = m_diffOptionActions.at(0)->isChecked(),
+        .spaceChange = m_diffOptionActions.at(1)->isChecked(),
+        .allSpace = m_diffOptionActions.at(2)->isChecked(),
+        .blankLines = m_diffOptionActions.at(3)->isChecked(),
     };
+    m_options = FileDiffOptions{.ignore = ignore, .commonAncestor = m_diffOptionActions.at(4)->isChecked()};
     m_diffOptions->setChecked(anyOption(m_options));
     onInputTimer();
 }
@@ -986,7 +852,9 @@ void FileDiffDlg::fillPatchView(bool onlySetTimer)
         m_patchView->clear();
         return;
     }
-    const FileDiffQuery query{.rev1 = m_sides.at(0).rev.hash, .rev2 = m_sides.at(1).rev.hash, .options = m_options};
+    const QString& rev1 = m_sides.at(0).rev.hash;
+    const QString& rev2 = m_sides.at(1).rev.hash;
+    const FileDiffQuery query{.rev1 = rev1, .rev2 = rev2, .ignore = m_options.ignore};
     m_patchCall = m_git.runAsync(patchArguments(query, selectedEntries()), RunMode::ReadOnly);
     connect(m_patchCall.get(), &GitCall::finished, this, &FileDiffDlg::onPatchFinished);
 }
@@ -1006,8 +874,8 @@ void FileDiffDlg::onPatchFinished()
 
 bool FileDiffDlg::isBothCommits() const
 {
-    const FileDiffRev& rev1 = m_sides.at(0).rev;
-    const FileDiffRev& rev2 = m_sides.at(1).rev;
+    const GitRev& rev1 = m_sides.at(0).rev;
+    const GitRev& rev2 = m_sides.at(1).rev;
     return !rev1.hash.isEmpty() && !rev2.hash.isEmpty() && rev1.isCommit && rev2.isCommit;
 }
 

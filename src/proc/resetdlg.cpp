@@ -14,6 +14,7 @@
 #include "filediffdlg.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
+#include "git/gitrev.hpp"
 
 #include <KConfigGroup>
 #include <KLocalizedString>
@@ -80,7 +81,7 @@ ResetDlg::ResetDlg(const Git& git, const QString& initialRefName, QWidget *paren
     connect(showModifiedFiles, &QPushButton::clicked, this, [this, workingTree = git.workingDirectory()] {
         // OnBnClickedShowModifiedFiles
         FileDiffDlg dlg(workingTree, this);
-        dlg.setDiff({}, QStringLiteral("HEAD"), FileDiffDlg::workingCopyRef());
+        dlg.setDiff({}, QStringLiteral("HEAD"), GitRev::workingCopyRef());
         dlg.exec();
     });
     layout->addWidget(showModifiedFiles);

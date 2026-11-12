@@ -13,9 +13,8 @@
 
 #include "filedifflistmodel.hpp"
 #include "git/git.hpp"
-#include "utils/result.hpp"
+#include "git/gitrev.hpp"
 
-#include <QDateTime>
 #include <QDialog>
 #include <QString>
 #include <QStringList>
@@ -41,39 +40,22 @@ namespace kgt
 class GitCall;
 
 /**
- * One of the versions compared, the parts of GitRev the dialog uses.
- */
-struct FileDiffRev {
-    QString hash; // m_CommitHash: the full hash; empty for the working tree
-    QString subject; // GetSubject(): "Working Tree" for the working tree
-    QString authorName; // GetAuthorName()
-    QDateTime authorDate; // GetAuthorDate()
-    QDateTime committerDate; // GetCommitterDate()
-    bool isCommit = true; // IsCommit(): false for a tree
-
-    bool operator==(const FileDiffRev&) const = default;
-};
-
-/**
  * The Diff Options menu's choices.
  */
 struct FileDiffOptions {
-    bool ignoreSpaceAtEol = false; // m_bIgnoreSpaceAtEol
-    bool ignoreSpaceChange = false; // m_bIgnoreSpaceChange
-    bool ignoreAllSpace = false; // m_bIgnoreAllSpace
-    bool ignoreBlankLines = false; // m_bIgnoreBlankLines
+    DiffIgnoreOptions ignore; // m_bIgnoreSpaceAtEol, m_bIgnoreSpaceChange, m_bIgnoreAllSpace, m_bIgnoreBlankLines
     bool commonAncestor = false; // m_bCommonAncestorDiff: diff from the merge base (A...B)
 
     bool operator==(const FileDiffOptions&) const = default;
 };
 
 /**
- * What is compared: the versions' hashes and the Diff Options.
+ * What a file or the patch view compares: the versions' hashes and the whitespace options.
  */
 struct FileDiffQuery {
     QString rev1; // The base's hash; empty for the working tree
     QString rev2; // Version 2's hash; empty for the working tree
-    FileDiffOptions options; // The whitespace options; commonAncestor is applied to rev1 already
+    DiffIgnoreOptions ignore; // The whitespace options
 };
 
 /**
@@ -100,25 +82,6 @@ public:
     FileDiffDlg& operator=(FileDiffDlg&&) = delete;
 
     /**
-     * @returns How the working tree is named as a version: GitRev::GetWorkingCopyRef, forty zeros.
-     */
-    [[nodiscard]] static QString workingCopyRef();
-
-    /**
-     * The test GitRev::GetCommit makes.
-     * @param text A version as typed.
-     * @returns Whether it names the working tree: at least eight zeros, and no more than forty.
-     */
-    [[nodiscard]] static bool isWorkingCopyRef(const QString& text);
-
-    /**
-     * Ported from CGit::GetCommitDiffList.
-     * @param query What to compare.
-     * @returns The arguments after "git" for a diff whose output GitRevLoglist::parseFiles reads.
-     */
-    [[nodiscard]] static QStringList diffListArguments(const FileDiffQuery& query);
-
-    /**
      * Ported from CFileDiffDlg::DoDiff: how a file is compared, left the base and right version 2. A file added
      * in the working tree is compared with nothing (CGitDiff::DiffNull). git difftool can't reverse a comparison
      * of two named blobs, so a rename against a working tree base shows the working tree on the right.
@@ -140,7 +103,7 @@ public:
     /**
      * Ported from CFileDiffDlg::SetDiff: what to compare, as the user could type it. Loading starts at once.
      * @param path A folder to put into the filter box, relative to the working tree root (m_sFilter); empty for none.
-     * @param baseRev1 Version 1, the base: a hash, ref or workingCopyRef().
+     * @param baseRev1 Version 1, the base: a hash, ref or GitRev::workingCopyRef().
      * @param rev2 Version 2.
      */
     void setDiff(const QString& path, const QString& baseRev1, const QString& rev2);
@@ -148,12 +111,12 @@ public:
     /**
      * @returns Version 1 as last read.
      */
-    [[nodiscard]] const FileDiffRev& rev1() const;
+    [[nodiscard]] const GitRev& rev1() const;
 
     /**
      * @returns Version 2 as last read.
      */
-    [[nodiscard]] const FileDiffRev& rev2() const;
+    [[nodiscard]] const GitRev& rev2() const;
 
     /**
      * @returns Whether the list is loading.
@@ -243,7 +206,7 @@ private:
         QLineEdit *edit = nullptr; // IDC_REV1EDIT, IDC_REV2EDIT
         QToolButton *button = nullptr; // IDC_REV1BTN, IDC_REV2BTN
         QLineEdit *label = nullptr; // IDC_FIRSTURL, IDC_SECONDURL
-        FileDiffRev rev; // m_rev1, m_rev2
+        GitRev rev; // m_rev1, m_rev2
         int buttonEntry = 0; // The CMenuButton's current entry: Reference Browser, Log or RefLog
     };
 
@@ -252,8 +215,7 @@ private:
     QLayout *createTopRow();
     void createRevSide(int index, const QString& title);
     void createDiffOptionsMenu();
-    [[nodiscard]] Result<FileDiffRev> readRev(const QString& text) const;
-    bool fillRevFromString(FileDiffRev& rev, const QString& text);
+    bool fillRevFromString(GitRev& rev, const QString& text);
     void startDiff();
     void onDiffFinished();
     void showHint(const QString& text);

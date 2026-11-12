@@ -10,6 +10,7 @@
 #include "mergeabortdlg.hpp"
 
 #include "filediffdlg.hpp"
+#include "git/gitrev.hpp"
 
 #include <KLocalizedString>
 
@@ -48,7 +49,7 @@ MergeAbortDlg::MergeAbortDlg(const QString& workingTree, QWidget *parent)
     connect(showModifiedFiles, &QPushButton::clicked, this, [this, workingTree] {
         // OnBnClickedShowModifiedFiles
         FileDiffDlg dlg(workingTree, this);
-        dlg.setDiff({}, QStringLiteral("HEAD"), FileDiffDlg::workingCopyRef());
+        dlg.setDiff({}, QStringLiteral("HEAD"), GitRev::workingCopyRef());
         dlg.exec();
     });
     layout->addWidget(showModifiedFiles);

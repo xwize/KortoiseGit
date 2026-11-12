@@ -3,6 +3,7 @@
 
 #include "filediffdlg.hpp"
 #include "filedifflistmodel.hpp"
+#include "git/gitrev.hpp"
 #include "testrepo.hpp"
 
 #include <QLineEdit>
@@ -199,15 +200,6 @@ private Q_SLOTS:
         QCOMPARE(Model::fileExtension(plain), QString());
     }
 
-    void recognisesTheWorkingTree()
-    {
-        QVERIFY(FileDiffDlg::isWorkingCopyRef(FileDiffDlg::workingCopyRef()));
-        QVERIFY(FileDiffDlg::isWorkingCopyRef(u"00000000"_s));
-        QVERIFY(!FileDiffDlg::isWorkingCopyRef(u"0000000"_s));
-        QVERIFY(!FileDiffDlg::isWorkingCopyRef(FileDiffDlg::workingCopyRef() + QLatin1Char('0')));
-        QVERIFY(!FileDiffDlg::isWorkingCopyRef(u"00000000a"_s));
-    }
-
     void diffsEachKindOfFile()
     {
         const QString base = u"1111111"_s;
@@ -218,7 +210,7 @@ private Q_SLOTS:
         const FileDiffEntry renamed = renamedEntry(u"new.txt"_s, u"old.txt"_s);
 
         const auto diff = [](const FileDiffEntry& file, const QString& rev1, const QString& rev2, bool unborn) {
-            return FileDiffDlg::diffArguments(file, {.rev1 = rev1, .rev2 = rev2, .options = {}}, unborn);
+            return FileDiffDlg::diffArguments(file, {.rev1 = rev1, .rev2 = rev2, .ignore = {}}, unborn);
         };
         // The base on the left, version 2 on the right
         QCOMPARE(diff(modified, base, second, false), difftool({base, second, dashes, u"a.txt"_s}));
@@ -279,7 +271,7 @@ private Q_SLOTS:
         repo.run({u"add"_s, u"staged.txt"_s});
 
         FileDiffDlg dlg(repo.path());
-        dlg.setDiff({}, u"HEAD"_s, FileDiffDlg::workingCopyRef());
+        dlg.setDiff({}, u"HEAD"_s, GitRev::workingCopyRef());
         QVERIFY(waitForList(dlg));
         QVERIFY(dlg.rev2().hash.isEmpty());
         QCOMPARE(dlg.rev2().subject, u"Working Tree"_s);
