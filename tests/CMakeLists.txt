@@ -38,6 +38,7 @@ set(kgt_tests
     stashrestoretest
     stashsavetest
     switchtest
+    urlfindertest
 )
 
 foreach(test ${kgt_tests})

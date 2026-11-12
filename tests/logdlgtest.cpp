@@ -29,10 +29,12 @@
 #include <QComboBox>
 #include <QContextMenuEvent>
 #include <QDateEdit>
+#include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QImage>
 #include <QLineEdit>
 #include <QMenu>
@@ -47,6 +49,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTextBlock>
+#include <QTextBrowser>
 #include <QTimer>
 
 #include <algorithm>
@@ -807,6 +811,58 @@ public:
     TestRepo repo;
 };
 
+/**
+ * Takes the URLs QDesktopServices::openUrl is asked to open for a scheme, in place of the desktop's handler.
+ */
+class UrlCatcher : public QObject
+{
+    Q_OBJECT
+
+public:
+    explicit UrlCatcher(const QString& scheme)
+        : m_scheme(scheme)
+    {
+        QDesktopServices::setUrlHandler(scheme, this, "handleUrl");
+    }
+
+    ~UrlCatcher() override
+    {
+        QDesktopServices::unsetUrlHandler(m_scheme);
+    }
+
+    UrlCatcher(const UrlCatcher&) = delete;
+    UrlCatcher& operator=(const UrlCatcher&) = delete;
+    UrlCatcher(UrlCatcher&&) = delete;
+    UrlCatcher& operator=(UrlCatcher&&) = delete;
+
+    QList<QUrl> urls;
+
+public Q_SLOTS:
+    void handleUrl(const QUrl& url)
+    {
+        urls.append(url);
+    }
+
+private:
+    QString m_scheme;
+};
+
+/**
+ * @param view The message pane.
+ * @param text Text it shows.
+ * @returns The format of the first character of text.
+ */
+QTextCharFormat formatOf(const QTextBrowser& view, const QString& text)
+{
+    const int pos = static_cast<int>(view.toPlainText().indexOf(text));
+    if (pos < 0) {
+        return {};
+    }
+    QTextCursor cursor(view.document());
+    cursor.setPosition(pos + 1); // The format of the character before the cursor
+    return cursor.charFormat();
+}
+
 class LogDlgTest : public QObject
 {
     Q_OBJECT
@@ -1399,6 +1455,77 @@ private Q_SLOTS:
         QCOMPARE(files->entry(files->index(0, 0, files->index(1, 0)))->path, QStringLiteral("main.txt"));
         QCOMPARE(files->entry(files->index(0, 0, files->index(1, 0)))->parentNo, 1);
         QCOMPARE(model->rev(0).actions, TGitPath::Actions(TGitPath::Action::Added));
+    }
+
+    void messageViewLinks()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("f.txt"), "1");
+        repo.commitAll(QStringLiteral("First"));
+        repo.write(QStringLiteral("f.txt"), "2");
+        repo.commitAll(QStringLiteral("Second"));
+        LogDlg dlg({repo.path()});
+        QVERIFY(waitForLog(dlg));
+        const GitLogListModel *model = dlg.logList()->logModel();
+        const QString firstHash = model->rev(1).hash;
+        const QString shortHash = firstHash.left(10);
+
+        repo.write(QStringLiteral("f.txt"), "3");
+        repo.commitAll(QStringLiteral("Fix the crash from %1\n\nSee https://example.com/bug?id=7.\nReported-by: A U Thor "
+                                      "<author@example.com>")
+                           .arg(shortHash));
+        dlg.refreshButton()->click();
+        QVERIFY(waitForReload(dlg));
+        selectRow(dlg, 0);
+        QTextBrowser *view = dlg.messageView();
+
+        // The log font throughout, the subject in bold
+        const QString fixedFamily = QFontDatabase::systemFont(QFontDatabase::FixedFont).family();
+        QCOMPARE(formatOf(*view, QStringLiteral("SHA-1")).font().family(), fixedFamily);
+        QCOMPARE(formatOf(*view, QStringLiteral("Fix the crash")).font().family(), fixedFamily);
+        QCOMPARE(formatOf(*view, QStringLiteral("Fix the crash")).fontWeight(), QFont::Bold);
+        QCOMPARE(formatOf(*view, QStringLiteral("See ")).fontWeight(), QFont::Normal);
+
+        // The SHA-1 line is not a link; a hash in the message is, and so are the URL and the email address
+        QVERIFY(!formatOf(*view, model->rev(0).hash).isAnchor());
+        QCOMPARE(formatOf(*view, shortHash).anchorHref(), shortHash);
+        QVERIFY(formatOf(*view, shortHash).toolTip().isEmpty());
+        QCOMPARE(formatOf(*view, QStringLiteral("https://")).anchorHref(), QStringLiteral("https://example.com/bug?id=7"));
+        QCOMPARE(formatOf(*view, QStringLiteral("https://")).toolTip(), QStringLiteral("https://example.com/bug?id=7"));
+        QCOMPARE(formatOf(*view, QStringLiteral("author@")).anchorHref(), QStringLiteral("author@example.com"));
+        QCOMPARE(formatOf(*view, QStringLiteral("author@")).toolTip(), QStringLiteral("mailto:author@example.com"));
+        QVERIFY(!formatOf(*view, QStringLiteral("<author@")).isAnchor());
+
+        const QString screenshotDir = qEnvironmentVariable("KGT_SCREENSHOT_DIR");
+        if (!screenshotDir.isEmpty()) {
+            dlg.show();
+            QVERIFY(QTest::qWaitForWindowExposed(&dlg));
+            QVERIFY(dlg.grab().save(QDir(screenshotDir).absoluteFilePath(QStringLiteral("logdlg-links.png"))));
+        }
+
+        // A URL opens in the desktop's handler, an email address as mailto:
+        UrlCatcher https(QStringLiteral("https"));
+        UrlCatcher mailto(QStringLiteral("mailto"));
+        Q_EMIT view->anchorClicked(QUrl(QStringLiteral("https://example.com/bug?id=7")));
+        Q_EMIT view->anchorClicked(QUrl(QStringLiteral("author@example.com")));
+        QTRY_COMPARE(https.urls, QList<QUrl>{QUrl(QStringLiteral("https://example.com/bug?id=7"))});
+        QTRY_COMPARE(mailto.urls, QList<QUrl>{QUrl(QStringLiteral("mailto:author@example.com"))});
+
+        // Nothing happens while text is selected
+        QTextCursor selection(view->document());
+        selection.movePosition(QTextCursor::NextWord, QTextCursor::KeepAnchor);
+        view->setTextCursor(selection);
+        Q_EMIT view->anchorClicked(QUrl(QStringLiteral("https://example.com/bug?id=7")));
+        Q_EMIT view->anchorClicked(QUrl(shortHash));
+        QTest::qWait(50);
+        QCOMPARE(https.urls.size(), 1);
+        QCOMPARE(dlg.logList()->selectedRow(), 0);
+
+        // A hash selects its commit
+        view->setTextCursor(QTextCursor(view->document()));
+        Q_EMIT view->anchorClicked(QUrl(shortHash));
+        QTRY_COMPARE(dlg.logList()->selectedRow(), 2);
+        QVERIFY(dlg.messageText().contains(QStringLiteral("First")));
     }
 
     void showsSelectedCommit()
