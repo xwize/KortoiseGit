@@ -83,15 +83,23 @@ bool ToolProcess::isTerminalTool(const QString& tool)
     return terminalTools.match(tool).hasMatch();
 }
 
-bool ToolProcess::toolFailed(ToolMode mode, int exitCode, const QString& output)
+bool ToolProcess::toolFailed(ToolMode mode, const QStringList& arguments, int exitCode, const QString& output)
 {
     if (exitCode == 0) {
         return false;
     }
+    if (mode == ToolMode::Diff) {
+        // git diff --no-index implies --exit-code, so git difftool --no-index exits 1 whenever the files differ, even
+        // though the tool ran. A tool git can't run still exits 128 ("fatal: external diff died"). TortoiseGit reports
+        // only a viewer that couldn't be started (CAppUtils::StartExtDiff), so exit 1 isn't a failure here.
+        const qsizetype separator = arguments.indexOf(QStringLiteral("--"));
+        const QStringList options = separator < 0 ? arguments : arguments.first(separator);
+        return exitCode != 1 || !options.contains(QStringLiteral("--no-index"));
+    }
     // Printed untranslated, perhaps after a prompt, only when the tool ran and left the file unresolved (merge_file in
     // git-mergetool). Any other failure is git's own: no usable tool, or a prompt for a tool it guessed
     static const QRegularExpression unresolved(QStringLiteral("merge of .+ failed$"), QRegularExpression::MultilineOption);
-    return mode == ToolMode::Diff || !unresolved.match(output).hasMatch();
+    return !unresolved.match(output).hasMatch();
 }
 
 QString ToolProcess::failureMessage(ToolMode mode, const QString& detail)
@@ -144,7 +152,7 @@ void ToolProcess::waitForAll()
 void ToolProcess::onFinished(int exitCode, bool crashed)
 {
     const QString output = QString::fromLocal8Bit(m_output.readAll()).trimmed();
-    if (crashed || toolFailed(m_mode, exitCode, output)) {
+    if (crashed || toolFailed(m_mode, m_process->arguments(), exitCode, output)) {
         Q_EMIT failed(failureMessage(m_mode, output));
     }
     Q_EMIT finished();

@@ -72,12 +72,13 @@ public:
 
     /**
      * @param mode Which git command ran.
+     * @param arguments Its arguments after "git".
      * @param exitCode Its exit code.
      * @param output What it printed.
      * @returns Whether git couldn't run the tool. git mergetool also fails when the tool ran but the file is still
-     *          unresolved, which is the user's choice and not reported.
+     *          unresolved, and git difftool --no-index when the files differ; neither is reported.
      */
-    [[nodiscard]] static bool toolFailed(ToolMode mode, int exitCode, const QString& output);
+    [[nodiscard]] static bool toolFailed(ToolMode mode, const QStringList& arguments, int exitCode, const QString& output);
 
     /**
      * @param mode Which git command it is.
