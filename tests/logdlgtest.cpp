@@ -57,6 +57,7 @@
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
+#include <memory>
 #include <optional>
 #include <tuple>
 #include <utility>
@@ -835,16 +836,37 @@ public:
     UrlCatcher(UrlCatcher&&) = delete;
     UrlCatcher& operator=(UrlCatcher&&) = delete;
 
-    QList<QUrl> urls;
+    /**
+     * @returns The URLs caught so far.
+     */
+    [[nodiscard]] const QList<QUrl>& urls() const
+    {
+        return m_urls;
+    }
+
+    /**
+     * Waits for the handler to have been asked to open exactly expected.
+     * @param expected The URLs.
+     * @returns Whether it was.
+     */
+    [[nodiscard]] bool waitForUrls(const QList<QUrl>& expected) const
+    {
+        return QTest::qWaitFor(
+            [this, &expected] {
+                return m_urls == expected;
+            },
+            timeout);
+    }
 
 public Q_SLOTS:
     void handleUrl(const QUrl& url)
     {
-        urls.append(url);
+        m_urls.append(url);
     }
 
 private:
     QString m_scheme;
+    QList<QUrl> m_urls;
 };
 
 /**
@@ -1504,12 +1526,13 @@ private Q_SLOTS:
         }
 
         // A URL opens in the desktop's handler, an email address as mailto:
-        UrlCatcher https(QStringLiteral("https"));
-        UrlCatcher mailto(QStringLiteral("mailto"));
+        // Held through pointers: the handler slot changes them, so the objects themselves can't be const
+        const auto https = std::make_unique<UrlCatcher>(QStringLiteral("https"));
+        const auto mailto = std::make_unique<UrlCatcher>(QStringLiteral("mailto"));
         Q_EMIT view->anchorClicked(QUrl(QStringLiteral("https://example.com/bug?id=7")));
         Q_EMIT view->anchorClicked(QUrl(QStringLiteral("author@example.com")));
-        QTRY_COMPARE(https.urls, QList<QUrl>{QUrl(QStringLiteral("https://example.com/bug?id=7"))});
-        QTRY_COMPARE(mailto.urls, QList<QUrl>{QUrl(QStringLiteral("mailto:author@example.com"))});
+        QVERIFY(https->waitForUrls({QUrl(QStringLiteral("https://example.com/bug?id=7"))}));
+        QVERIFY(mailto->waitForUrls({QUrl(QStringLiteral("mailto:author@example.com"))}));
 
         // Nothing happens while text is selected
         QTextCursor selection(view->document());
@@ -1518,13 +1541,17 @@ private Q_SLOTS:
         Q_EMIT view->anchorClicked(QUrl(QStringLiteral("https://example.com/bug?id=7")));
         Q_EMIT view->anchorClicked(QUrl(shortHash));
         QTest::qWait(50);
-        QCOMPARE(https.urls.size(), 1);
+        QCOMPARE(https->urls().size(), 1);
         QCOMPARE(dlg.logList()->selectedRow(), 0);
 
         // A hash selects its commit
         view->setTextCursor(QTextCursor(view->document()));
         Q_EMIT view->anchorClicked(QUrl(shortHash));
-        QTRY_COMPARE(dlg.logList()->selectedRow(), 2);
+        QVERIFY(QTest::qWaitFor(
+            [&dlg] {
+                return dlg.logList()->selectedRow() == 2;
+            },
+            timeout));
         QVERIFY(dlg.messageText().contains(QStringLiteral("First")));
     }
 
