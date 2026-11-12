@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
-# Points the AUR package at the release scripts/release.sh last made: sets pkgver to project(VERSION), resets pkgrel,
-# fills in the tarball's checksum, regenerates .SRCINFO and commits both. Run it after the release tag is pushed,
-# because the checksum is of GitHub's tarball of that tag. Publishing to the AUR is a separate step (README.md here).
+# Points the AUR package at the release scripts/version_and_tag.sh last made: sets pkgver to project(VERSION), resets
+# pkgrel, fills in the tarball's checksum, regenerates .SRCINFO and commits both. It needs the release tag pushed,
+# because the checksum is of GitHub's tarball of that tag. scripts/release.sh runs it at the right point.
 # Usage: packaging/aur/update.sh
 set -euo pipefail
 

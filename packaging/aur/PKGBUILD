@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
-# Builds a KortoiseGit release tag for the AUR. scripts/release.sh sets pkgver; packaging/aur/README.md has the rest
-# of the release and publish steps.
+# Builds a KortoiseGit release tag for the AUR. scripts/release.sh keeps it up to date, through update.sh here;
+# packaging/aur/README.md has the details.
 
 pkgname=kortoisegit
 pkgver=0.10.1

@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.27)
 
-# The one place the version is set: scripts/release.sh changes it and creates the matching tag
+# The one place the version is set: scripts/version_and_tag.sh changes it and creates the matching tag
 project(kortoisegit VERSION 0.10.1 LANGUAGES CXX)
 
 set(QT_MIN_VERSION "6.7.0")

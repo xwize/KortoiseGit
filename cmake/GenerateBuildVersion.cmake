@@ -6,7 +6,7 @@
 #
 # Takes -DSOURCE_DIR, -DOUTPUT, -DPROJECT_VERSION and -DGIT_EXECUTABLE.
 #
-# PROJECT_VERSION (project() in the top-level CMakeLists.txt) is the version; scripts/release.sh tags from it. This
+# PROJECT_VERSION (project() in the top-level CMakeLists.txt) is the version; scripts/version_and_tag.sh tags from it. This
 # automates what TortoiseGit does by hand with PREVIEW_INFO in src/version.h: anything that isn't exactly a release
 # gets its commit appended, as in 0.5.0+12.g1a2b3c4 or 0.5.0+12.g1a2b3c4.dirty. Without git metadata (a source
 # tarball) the version is reported as it stands.

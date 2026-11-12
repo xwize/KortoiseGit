@@ -6,3 +6,4 @@
 /pkg/
 /*.tar.gz
 /*.pkg.tar.*
+/makepkg.log
