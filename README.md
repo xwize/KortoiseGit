@@ -173,6 +173,11 @@ build/gcc-debug/bin/kortoisegitproc --command log --path ~/src/some-repo
 build/gcc-debug/bin/kortoisegitproc --help
 ```
 
+Run this way, it logs `Failed to register with host portal ... App info not found for 'org.kde.kortoisegitproc'`, and
+on Wayland its windows show no KortoiseGit name or icon in the taskbar. Both are expected: xdg-desktop-portal and
+Plasma look for `org.kde.kortoisegitproc.desktop` in their own data directories, so setting `XDG_DATA_DIRS` for the app
+doesn't help. An installed KortoiseGit has the file.
+
 To use the plugin in your own Dolphin without installing it:
 
 ```sh

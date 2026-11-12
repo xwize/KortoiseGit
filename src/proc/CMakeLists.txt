@@ -199,3 +199,4 @@ ecm_qt_install_logging_categories(
     FILE kortoisegit.categories
     DESTINATION ${KDE_INSTALL_LOGGINGCATEGORIESDIR}
 )
+install(FILES org.kde.kortoisegitproc.desktop DESTINATION ${KDE_INSTALL_APPDIR})

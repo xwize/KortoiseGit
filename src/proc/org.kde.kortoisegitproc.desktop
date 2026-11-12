@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Lets the Wayland compositor and xdg-desktop-portal match kortoisegitproc's app ID (KAboutData's desktop file name,
+# set in main.cpp) to a name and icon. Hidden from the menus: Dolphin's context menu starts it with a --command.
+[Desktop Entry]
+Type=Application
+Name=KortoiseGit
+GenericName=Git Client
+Comment=A port of TortoiseGit to KDE
+Icon=kortoisegit
+Exec=kortoisegitproc
+Terminal=false
+NoDisplay=true
+Categories=Qt;KDE;Development;RevisionControl;
