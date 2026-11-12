@@ -1523,6 +1523,7 @@ private Q_SLOTS:
         const QString rebase = QStringLiteral("Rebase \"main\" onto this...(&G)");
         const QString revert = QStringLiteral("&Revert change by this commit");
         const QString push = QStringLiteral("Pus&h...");
+        const QString cherryPick = QStringLiteral("Cherr&y Pick this commit...");
         const QString sep = QStringLiteral("-");
         const QString copy = QStringLiteral("Copy to clipboard");
 
@@ -1537,17 +1538,37 @@ private Q_SLOTS:
         QVERIFY(withMenuOn(list, 1, collect));
         const QString deleteTag = QStringLiteral("&Delete refs/tags/v1");
         QCOMPARE(texts,
-                 (QStringList{compare, previous, sep, merge, reset, switchTo, createBranch, createTag, rebase, revert, sep, push, deleteTag, sep, copy}));
+                 (QStringList{compare,
+                              previous,
+                              sep,
+                              merge,
+                              reset,
+                              switchTo,
+                              createBranch,
+                              createTag,
+                              rebase,
+                              revert,
+                              sep,
+                              push,
+                              deleteTag,
+                              sep,
+                              cherryPick,
+                              sep,
+                              copy}));
         // No refs: nothing to push or delete. A root commit has nothing to compare with or revert
         QVERIFY(withMenuOn(list, 2, collect));
-        QCOMPARE(texts, (QStringList{compare, sep, merge, reset, switchTo, createBranch, createTag, rebase, sep, copy}));
+        QCOMPARE(texts, (QStringList{compare, sep, merge, reset, switchTo, createBranch, createTag, rebase, sep, cherryPick, sep, copy}));
 
-        // Several commits can be reverted together
+        // Several commits can be reverted together; they can't be cherry-picked when the first one is HEAD
         const QString revertAll = QStringLiteral("&Revert changes by these commits");
         list->setCurrentIndex(list->logModel()->index(0, 0));
         list->selectAll();
         QVERIFY(withMenuOnSelection(list, collect));
         QCOMPARE(texts, (QStringList{revertAll, sep, copy}));
+        list->selectionModel()->select(QItemSelection(list->logModel()->index(1, 0), list->logModel()->index(2, 0)),
+                                       QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        QVERIFY(withMenuOnSelection(list, collect));
+        QCOMPARE(texts, (QStringList{revertAll, QStringLiteral("Cherr&y Pick selected commits..."), sep, copy}));
 
         // While a merge is being concluded, nothing that merges, rebases or reverts
         QFile mergeHead(repo.filePath(QStringLiteral(".git/MERGE_HEAD")));
@@ -1658,6 +1679,68 @@ private Q_SLOTS:
         // Rebase: a local branch, else the first ref, else the commit
         QCOMPARE(preselected(1, std::nullopt, rebase), QStringLiteral("feature"));
         QCOMPARE(preselected(2, std::nullopt, rebase), hash);
+    }
+
+    void cherryPicksTheSelectedCommits()
+    {
+        const TestRepo repo;
+        repo.write(QStringLiteral("base.txt"), "base\n");
+        repo.commitAll(QStringLiteral("Base"));
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("side")});
+        for (const int number : {1, 2}) {
+            repo.write(QStringLiteral("s%1.txt").arg(number), "side\n");
+            repo.commitAll(QStringLiteral("Side %1").arg(number));
+        }
+        repo.run({QStringLiteral("switch"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        repo.write(QStringLiteral("main.txt"), "main\n");
+        repo.commitAll(QStringLiteral("Main"));
+        LogDlg dlg({repo.path()}, QStringLiteral("refs/heads/side"));
+        QVERIFY(waitForLog(dlg));
+        QVERIFY(showDialog(dlg));
+        const GitLogList *list = dlg.logList();
+        list->selectionModel()->select(QItemSelection(list->logModel()->index(0, 0), list->logModel()->index(1, 0)),
+                                       QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+
+        // The dialog opens in cherry-pick mode with the commits as Pick, onto HEAD; Start, then Done
+        QString title;
+        QString upstream;
+        bool branchEnabled = true;
+        QStringList listed;
+        const ModalWatcher watcher([&](QWidget *modal) {
+            const auto *rebaseDlg = qobject_cast<RebaseDlg *>(modal);
+            if (!rebaseDlg || rebaseDlg->isThreadRunning()) {
+                return false;
+            }
+            if (rebaseDlg->stage() == RebaseDlg::RebaseStage::ChooseBranch && title.isEmpty()) {
+                title = rebaseDlg->windowTitle();
+                upstream = rebaseDlg->upstreamCombo()->currentText();
+                branchEnabled = rebaseDlg->branchCombo()->isEnabled() || rebaseDlg->upstreamCombo()->isEnabled();
+                const GitLogListModel *model = rebaseDlg->commitList()->logModel();
+                for (int row = 0; row < model->rowCount(); ++row) {
+                    listed.append(model->rev(row).subject + QLatin1Char(' ') + GitLogListModel::rebaseActionName(model->rev(row).rebaseAction));
+                }
+                rebaseDlg->continueButton()->click();
+                return false;
+            }
+            if (rebaseDlg->stage() == RebaseDlg::RebaseStage::Done) {
+                rebaseDlg->continueButton()->click();
+                return true;
+            }
+            return false;
+        });
+        QSignalSpy reloaded(list, &GitLogList::loaded);
+        QVERIFY(withMenuOnSelection(list, [](QMenu *menu) {
+            entry(menu, QStringLiteral("Cherr&y Pick selected commits..."))->trigger();
+        }));
+        QVERIFY(title.endsWith(QStringLiteral(" - Cherry Pick")));
+        QCOMPARE(upstream, QStringLiteral("HEAD"));
+        QVERIFY(!branchEnabled);
+        QCOMPARE(listed, (QStringList{QStringLiteral("Side 2 Pick"), QStringLiteral("Side 1 Pick")}));
+        // Picked oldest first onto main, which stays checked out; the log refreshes
+        const QString subjects = QString::fromUtf8(repo.git().run({QStringLiteral("log"), QStringLiteral("--format=%s"), QStringLiteral("main")}));
+        QCOMPARE(subjects, QStringLiteral("Side 2\nSide 1\nMain\nBase\n"));
+        QCOMPARE(Git(repo.path()).currentBranch(), QStringLiteral("main"));
+        QVERIFY(reloaded.count() > 0 || reloaded.wait(timeout));
     }
 
     void revertsAMergeAgainstTheChosenParent()
@@ -1976,13 +2059,15 @@ private Q_SLOTS:
         const QString compare = QStringLiteral("Compare with &working tree");
         const QString previous = QStringLiteral("&Compare with previous revision");
         const QString sep = QStringLiteral("-");
+        // Cherry Pick is the one commit entry TortoiseGit's OnContextMenu doesn't leave out for a stash
+        const QString cherryPick = QStringLiteral("Cherr&y Pick this commit...");
         QVERIFY(withMenuOn(list, 0, collect));
         const QString copy = QStringLiteral("Copy to clipboard");
-        QCOMPARE(texts, (QStringList{compare, previous, sep, sep, QStringLiteral("&Delete refs/stash"), sep, copy}));
+        QCOMPARE(texts, (QStringList{compare, previous, sep, sep, QStringLiteral("&Delete refs/stash"), sep, cherryPick, sep, copy}));
         // The commit holding the stash's index is on the stash too, when listed right below it
         QCOMPARE(model->rev(1).hash, model->rev(0).parents.at(1));
         QVERIFY(withMenuOn(list, 1, collect));
-        QCOMPARE(texts, (QStringList{compare, previous, sep, sep, copy}));
+        QCOMPARE(texts, (QStringList{compare, previous, sep, sep, cherryPick, sep, copy}));
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming): QtTest finds data functions by the _data suffix

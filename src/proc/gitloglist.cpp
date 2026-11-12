@@ -726,6 +726,11 @@ bool GitLogList::isRebaseMenuEnabled() const
     return m_rebaseMenu;
 }
 
+void GitLogList::setCherryPick(bool cherryPick)
+{
+    m_cherryPick = cherryPick;
+}
+
 void GitLogList::setLogMenuEnabled(bool enabled)
 {
     m_logMenu = enabled;
@@ -750,12 +755,12 @@ std::optional<GitRef> GitLogList::refLabelAt(int row, const QPoint& pos) const
 
 bool GitLogList::maySetRebaseAction(int row, unsigned int action) const
 {
-    // CGitLogList::SetSelectedRebaseAction's conditions (cherry-pick mode is not ported)
+    // CGitLogList::SetSelectedRebaseAction's conditions
     const GitRevLoglist& rev = m_model->rev(row);
     if (rev.rebaseAction & (GitRevLoglist::RebaseCurrent | GitRevLoglist::RebaseDone)) {
         return false;
     }
-    if (action == GitRevLoglist::RebaseSquash && (row == m_model->rowCount() - 1 || rev.parents.size() != 1)) {
+    if (action == GitRevLoglist::RebaseSquash && (row == m_model->rowCount() - 1 || (!m_cherryPick && rev.parents.size() != 1))) {
         return false;
     }
     return true;
@@ -811,7 +816,7 @@ void GitLogList::shiftSelectedRebaseAction()
         case GitRevLoglist::RebaseEdit:
             action = GitRevLoglist::RebaseSquash;
             // TortoiseGit's condition, kept as it is: the last row with one parent goes back to Pick
-            if (row == m_model->rowCount() - 1 && rev.parents.size() == 1) {
+            if (row == m_model->rowCount() - 1 && (m_cherryPick || rev.parents.size() == 1)) {
                 action = GitRevLoglist::RebasePick;
             }
             break;
@@ -856,7 +861,7 @@ void GitLogList::showRebaseMenu(QContextMenuEvent *event)
         });
     };
     addEntry(QStringLiteral("dialog-ok-apply"), i18n("Pick"), GitRevLoglist::RebasePick);
-    if (rows.constFirst() != lastRow && rows.constLast() != lastRow && selRev.parents.size() == 1) {
+    if (rows.constFirst() != lastRow && rows.constLast() != lastRow && (m_cherryPick || selRev.parents.size() == 1)) {
         addEntry(QStringLiteral("merge"), i18n("Squash (with commit below)"), GitRevLoglist::RebaseSquash);
     }
     addEntry(QStringLiteral("document-edit"), i18n("Edit"), GitRevLoglist::RebaseEdit);

@@ -257,14 +257,16 @@ void GitLogList::showLogMenu(QContextMenuEvent *event)
 
     QMenu menu(this);
     std::optional<LogMenuTarget> target;
+    const QString headHash = Git(m_workingTree).hash(QStringLiteral("HEAD"));
+    if (headHash.isEmpty()) {
+        KMessageBox::error(this, i18n("Could not get HEAD hash."), QString(), KMessageBox::Options());
+        return;
+    }
+    const bool hasWC = !GitAdminDir::isBareRepo(m_workingTree); // m_hasWC
+    const bool mergeActive = isMergeActive();
     if (rows.size() == 1) {
         const int row = rows.constFirst();
         const GitRevLoglist& rev = m_model->rev(row);
-        const QString headHash = Git(m_workingTree).hash(QStringLiteral("HEAD"));
-        if (headHash.isEmpty()) {
-            KMessageBox::error(this, i18n("Could not get HEAD hash."), QString(), KMessageBox::Options());
-            return;
-        }
         const QStringList refs = sortedRefNames(rev);
         const std::optional<GitRef> label = fromKeyboard ? std::nullopt : refLabelAt(row, event->pos());
         target = LogMenuTarget{
@@ -277,12 +279,27 @@ void GitLogList::showLogMenu(QContextMenuEvent *event)
             .isHead = rev.hash == headHash,
         };
         addSingleCommitEntries(menu, *target);
-    } else if (!GitAdminDir::isBareRepo(m_workingTree) && !isMergeActive()) { // m_hasWC
+    } else if (hasWC && !mergeActive) {
         const QIcon icon = QIcon::fromTheme(QStringLiteral("edit-undo"));
         menu.addAction(icon, i18n("&Revert changes by these commits"), this, [this] {
             revertRev(0);
         });
-        // The Combine, Cherry-pick and Create Patch section that follows in OnContextMenu ends with this separator
+    }
+
+    // The Combine, Cherry-pick and Create Patch section, whose separator also ends the Revert entry above it.
+    // isHeadCommit is about the first selected commit.
+    bool addSeparator = rows.size() > 1 && hasWC && !mergeActive;
+    const bool isHeadCommit = m_model->rev(rows.constFirst()).hash == headHash;
+    if (!isHeadCommit && hasWC && !mergeActive) {
+        addSeparator = true;
+        const QString text = rows.size() >= 2 ? i18n("Cherr&y Pick selected commits...") : i18n("Cherr&y Pick this commit...");
+        menu.addAction(QIcon::fromTheme(QStringLiteral("vcs-cherry-pick"), QIcon::fromTheme(QStringLiteral("edit-paste"))), text, this, [this] {
+            showingGitErrors(this, [this] {
+                cherryPick();
+            });
+        });
+    }
+    if (addSeparator) {
         menu.addSeparator();
     }
     addClipboardEntries(menu, target);
@@ -865,6 +882,27 @@ void GitLogList::rebaseToVersion(const LogMenuTarget& target)
     }
     RebaseOptions options;
     options.upstream = upstream;
+    RebaseDlg dlg(m_workingTree, options, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        reload();
+    }
+}
+
+void GitLogList::cherryPick()
+{
+    // ID_CHERRY_PICK
+    if (isBusy()) {
+        KMessageBox::information(this, i18n("This operation cannot be started while the log dialog is still loading commits."));
+        return;
+    }
+    RebaseOptions options;
+    options.cherryPick = true;
+    options.upstream = Git(m_workingTree).currentBranch(); // m_CurrentBranch, which cherry-pick mode doesn't use
+    for (const int row : selectedRows()) {
+        GitRevLoglist rev = m_model->rev(row);
+        rev.rebaseAction = GitRevLoglist::RebasePick;
+        options.commits.append(rev);
+    }
     RebaseDlg dlg(m_workingTree, options, this);
     if (dlg.exec() == QDialog::Accepted) {
         reload();
