@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Makes a release: sets project(VERSION) in CMakeLists.txt, commits that and creates the matching annotated tag, so the
-# tag and the version the application reports can't differ. Pushing is left to you.
+# tag and the version the application reports can't differ. Pushing is left to you, and so is the AUR package, which
+# needs the pushed tag: packaging/aur/update.sh.
 # Usage: scripts/release.sh X.Y.Z
 set -euo pipefail
 
@@ -39,3 +40,4 @@ git commit --quiet --message "Release $version" -- CMakeLists.txt
 git tag --annotate --message "KortoiseGit $version" "$version"
 
 echo "Tagged $version. To publish: git push origin main $version"
+echo "Then update the AUR package: packaging/aur/update.sh (packaging/aur/README.md)"

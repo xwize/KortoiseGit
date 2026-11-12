@@ -17,6 +17,23 @@ can use it straight away.
 
 ## Install
 
+### Arch Linux (AUR)
+
+The [`kortoisegit`](https://aur.archlinux.org/packages/kortoisegit) package builds the latest release. Install it
+with an AUR helper, or by hand:
+
+```sh
+git clone https://aur.archlinux.org/kortoisegit.git
+cd kortoisegit
+makepkg -si
+```
+
+Then in Dolphin open Configure Dolphin > Interface > Version Control, tick KortoiseGit and untick Git. For SSH
+passwords and host-key prompts install `ksshaskpass`; for diffs and conflicts, `kdiff3` or `meld` (see below).
+Packaging notes are in [packaging/aur/README.md](packaging/aur/README.md).
+
+### Any distribution, from source
+
 Build the latest `main` and install it for your user, into `~/.local` (no sudo). Run it again to upgrade:
 
 ```sh
