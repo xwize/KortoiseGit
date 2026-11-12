@@ -207,6 +207,8 @@ private:
     QLayout *createBottomRow();
     void createWalkBehaviorMenu();
     void createViewMenu();
+    /// Attaches the Walk Behavior and View menus to their buttons.
+    void attachMenus();
     void createFilterMenu();
     QAction *addCheckAction(QMenu *menu, const QString& text, bool checked);
     void addLabelAction(QMenu *menu, const QString& text, bool *shown);
@@ -216,8 +218,6 @@ private:
     void onLogLoaded();
     void onFromDateChanged();
     void onToDateChanged();
-    void onWalkBehaviorClicked();
-    void onViewClicked();
     void onFilterIconClicked();
     void onFilterActionTriggered(unsigned int bit);
     void onCompressedGraph(int mode);
