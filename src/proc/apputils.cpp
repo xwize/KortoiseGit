@@ -653,17 +653,31 @@ void AppUtils::launchAlternativeEditor(const QString& file, QWidget *parent)
     job->start();
 }
 
-QStringList AppUtils::unifiedDiffArguments(const QString& rev1, const QString& rev2, int diffContext)
+QStringList AppUtils::unifiedDiffArguments(const UnifiedDiffOf& diff, int diffContext)
 {
-    QStringList arguments{QStringLiteral("diff-tree"), QStringLiteral("-r"), QStringLiteral("-p")};
-    if (diffContext >= 0) {
-        arguments.append(QStringLiteral("--unified=%1").arg(diffContext));
+    const QString& rev1 = diff.rev1;
+    const QString& rev2 = diff.rev2;
+    QStringList arguments;
+    const QStringList options{QStringLiteral("--stat"), QStringLiteral("-p"), QStringLiteral("--end-of-options")};
+    if (rev2.isEmpty()) {
+        arguments = QStringList{QStringLiteral("diff")} + options << rev1;
+    } else if (rev1.isEmpty()) {
+        arguments = QStringList{QStringLiteral("diff"), QStringLiteral("-R")} + options << rev2;
+    } else {
+        arguments = {QStringLiteral("diff-tree"), QStringLiteral("-r"), QStringLiteral("-p")};
+        if (diffContext >= 0) {
+            arguments.append(QStringLiteral("--unified=%1").arg(diffContext));
+        }
+        arguments << QStringLiteral("--stat") << QStringLiteral("--end-of-options") << rev1 << rev2;
     }
-    arguments << QStringLiteral("--stat") << QStringLiteral("--end-of-options") << rev1 << rev2 << QStringLiteral("--");
+    arguments.append(QStringLiteral("--"));
+    if (!diff.path.isEmpty()) {
+        arguments.append(diff.path);
+    }
     return arguments;
 }
 
-bool AppUtils::startShowUnifiedDiff(const Git& git, const QString& rev1, const QString& rev2, QWidget *parent)
+bool AppUtils::startShowUnifiedDiff(const Git& git, const UnifiedDiffOf& diff, QWidget *parent)
 {
     bool isNumber = false;
     const int configContext = git.configValue(QStringLiteral("diff.context")).toInt(&isNumber);
@@ -676,7 +690,7 @@ bool AppUtils::startShowUnifiedDiff(const Git& git, const QString& rev1, const Q
         return false;
     }
     try {
-        file.write(git.run(unifiedDiffArguments(rev1, rev2, diffContext), RunMode::ReadOnly));
+        file.write(git.run(unifiedDiffArguments(diff, diffContext), RunMode::ReadOnly));
     } catch (const RuntimeError& e) {
         if (e.error().category != ErrorCategory::Git) {
             throw;

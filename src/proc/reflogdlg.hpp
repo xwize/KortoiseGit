@@ -81,6 +81,12 @@ public:
      */
     void done(int result) override;
 
+    /**
+     * @returns The commit of the entry selected when OK was clicked (m_SelectedHash), or an empty string if none or
+     *          several were.
+     */
+    [[nodiscard]] const QString& selectedHash() const;
+
 private:
     /**
      * Ported from CRefLogDlg::OnCbnSelchangeRef: loads the chosen ref's reflog.
@@ -119,6 +125,7 @@ private:
     QPointer<QDialog> m_findDialog;
     qsizetype m_searchLine = 0; // m_nSearchLine: where the next search starts
     bool m_clearing = false; // git stash clear is running
+    QString m_selectedHash; // CRefLogDlg::m_SelectedHash
     std::unique_ptr<GitCall> m_refsCall; // Listing the refs
     std::unique_ptr<GitCall> m_logCall; // Reading the reflog
     std::unique_ptr<GitCall> m_clearCall; // git stash clear

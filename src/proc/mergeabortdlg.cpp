@@ -4,11 +4,12 @@
 
 /**
  * @file
- * Ported from TortoiseGit src/TortoiseProc/MergeAbortDlg.cpp and its IDD_MERGEABORT resource. Its "Show modified
- * files in working tree" button opens CFileDiffDlg, which isn't ported yet, so it is left out.
+ * Ported from TortoiseGit src/TortoiseProc/MergeAbortDlg.cpp and its IDD_MERGEABORT resource.
  */
 
 #include "mergeabortdlg.hpp"
+
+#include "filediffdlg.hpp"
 
 #include <KLocalizedString>
 
@@ -16,6 +17,7 @@
 #include <QDir>
 #include <QGroupBox>
 #include <QLabel>
+#include <QPushButton>
 #include <QRadioButton>
 #include <QVBoxLayout>
 
@@ -40,6 +42,16 @@ MergeAbortDlg::MergeAbortDlg(const QString& workingTree, QWidget *parent)
     groupLayout->addWidget(m_mixed);
     groupLayout->addWidget(m_hard);
     layout->addWidget(group);
+
+    auto *showModifiedFiles = new QPushButton(i18n("Show modified files in &working tree"), this);
+    showModifiedFiles->setAutoDefault(false);
+    connect(showModifiedFiles, &QPushButton::clicked, this, [this, workingTree] {
+        // OnBnClickedShowModifiedFiles
+        FileDiffDlg dlg(workingTree, this);
+        dlg.setDiff({}, QStringLiteral("HEAD"), FileDiffDlg::workingCopyRef());
+        dlg.exec();
+    });
+    layout->addWidget(showModifiedFiles);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
