@@ -190,13 +190,28 @@ private Q_SLOTS:
     {
         const QString unresolved = QStringLiteral("Normal merge conflict for 'f':\nf seems unchanged.\nmerge of f failed");
         const QString unavailable = QStringLiteral("error: 'kompare' can not be used to resolve merges");
-        QVERIFY(!ToolProcess::toolFailed(ToolMode::Diff, 0, {}));
-        QVERIFY(ToolProcess::toolFailed(ToolMode::Diff, 128, unavailable));
-        QVERIFY(!ToolProcess::toolFailed(ToolMode::Merge, 0, {}));
-        QVERIFY(!ToolProcess::toolFailed(ToolMode::Merge, 1, unresolved));
-        QVERIFY(ToolProcess::toolFailed(ToolMode::Merge, 1, unavailable));
+        QVERIFY(!ToolProcess::toolFailed(ToolMode::Diff, {}, 0, {}));
+        QVERIFY(ToolProcess::toolFailed(ToolMode::Diff, {}, 128, unavailable));
+        QVERIFY(!ToolProcess::toolFailed(ToolMode::Merge, {}, 0, {}));
+        QVERIFY(!ToolProcess::toolFailed(ToolMode::Merge, {}, 1, unresolved));
+        QVERIFY(ToolProcess::toolFailed(ToolMode::Merge, {}, 1, unavailable));
         const QString guessed = QStringLiteral("Normal merge conflict for 'f':\nHit return to start merge resolution tool (kdiff3):");
-        QVERIFY(ToolProcess::toolFailed(ToolMode::Merge, 1, guessed));
+        QVERIFY(ToolProcess::toolFailed(ToolMode::Merge, {}, 1, guessed));
+
+        // git difftool --no-index exits 1 when the files differ and the tool ran, and 128 when the tool can't run
+        const QStringList noIndex = GitDiff::diffNullArguments(QStringLiteral("f"));
+        const QString died = QStringLiteral("fatal: external diff died, stopping at f");
+        QVERIFY(!ToolProcess::toolFailed(ToolMode::Diff, noIndex, 0, {}));
+        QVERIFY(!ToolProcess::toolFailed(ToolMode::Diff, noIndex, 1, {}));
+        QVERIFY(ToolProcess::toolFailed(ToolMode::Diff, noIndex, 128, died));
+        QVERIFY(!ToolProcess::toolFailed(ToolMode::Diff, GitDiff::extDiffArguments(QStringLiteral("a"), QStringLiteral("b")), 1, {}));
+        // Exit 1 is still a failure without --no-index, or when "--no-index" is a path
+        QVERIFY(ToolProcess::toolFailed(ToolMode::Diff,
+                                        GitDiff::diffArguments(QStringLiteral("f"), QStringLiteral("f"), QStringLiteral("HEAD"), QStringLiteral("HEAD~1")),
+                                        1,
+                                        {}));
+        QVERIFY(ToolProcess::toolFailed(ToolMode::Diff, {QStringLiteral("difftool"), QStringLiteral("--"), QStringLiteral("--no-index")}, 1, {}));
+        QVERIFY(ToolProcess::toolFailed(ToolMode::Merge, noIndex, 1, {}));
     }
 
     void unavailableDiffToolIsReported()
