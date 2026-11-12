@@ -44,6 +44,12 @@ constexpr auto emptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
  */
 constexpr int squashDate = 0;
 
+// CGit::GetShortHASHLength
+constexpr qsizetype shortHashLength = 8;
+
+// How much of a parent's subject GetCommitTitle shows
+constexpr qsizetype commitTitleLength = 20;
+
 /**
  * @param arguments Git's arguments.
  * @returns The command line for the log, as TortoiseGit writes it.
@@ -127,7 +133,8 @@ bool RebaseDlg::checkRebaseCondition()
     if (checkCleanWorkTree()) {
         return true;
     }
-    if (!Git::isConfigTrue(m_git.configValue(QStringLiteral("rebase.autostash")))) {
+    // A cherry-pick doesn't use rebase.autostash
+    if (m_options.cherryPick || !Git::isConfigTrue(m_git.configValue(QStringLiteral("rebase.autostash")))) {
         const int choice =
             askUser(QMessageBox::Question, i18n("The current working tree is not clean.\nDo you want to stash the changes?"), {i18n("&Stash"), i18n("A&bort")});
         if (choice != 1) {
@@ -197,9 +204,8 @@ bool RebaseDlg::fastForward()
 
 bool RebaseDlg::continueSquashConflict()
 {
-    // OnBnClickedContinue at Squash_Conclict. TortoiseGit's MessageContainsConflictHints is left out: the
-    // message comes from the commit, not from git's MERGE_MSG, so it never holds git's conflict hints.
-    if (!verifyNoConflict()) {
+    // OnBnClickedContinue at Squash_Conclict
+    if (!verifyNoConflict() || messageContainsConflictHints(m_messageText)) {
         return false;
     }
     const int row = m_currentRebaseIndex;
@@ -222,7 +228,7 @@ bool RebaseDlg::continueSquashConflict()
 bool RebaseDlg::continueConflict()
 {
     // OnBnClickedContinue at Conclict: commit the resolved files with the picked commit's message
-    if (!verifyNoConflict()) {
+    if (!verifyNoConflict() || messageContainsConflictHints(m_messageText)) {
         return false;
     }
     setActiveTab(LogTab);
@@ -524,11 +530,16 @@ bool RebaseDlg::startRebase()
         addLogString(QStringLiteral("update ORIG_HEAD Fail"));
         return false;
     }
-    const QString upstream = m_onto.isEmpty() ? m_upstream : m_onto;
+    const QString upstream = m_options.cherryPick || m_onto.isEmpty() ? m_upstream : m_onto;
     m_origUpstreamHash = m_git.hash(upstream);
     if (m_origUpstreamHash.isEmpty()) {
         showError(i18n("Could not get hash of \"%1\".", upstream));
         return false;
+    }
+    if (m_options.cherryPick) {
+        // Cherry-pick mode has no branch: it picks onto HEAD where it is
+        addLogString(i18n("Start Cherry Pick") + QLatin1Char('\n'));
+        return true;
     }
     m_origBranchHash = m_git.hash(m_branch);
     if (m_origBranchHash.isEmpty()) {
@@ -561,6 +572,12 @@ void RebaseDlg::addToSquashMessage(const GitRevLoglist& rev)
         body.chop(1);
     }
     m_squashMessage += rev.subject + QLatin1Char('\n') + body;
+    if (m_addCherryPickedFrom) {
+        if (!rev.body.isEmpty()) {
+            m_squashMessage += QLatin1Char('\n');
+        }
+        m_squashMessage += QStringLiteral("(cherry picked from commit %1)").arg(rev.hash);
+    }
 }
 
 int RebaseDlg::doRebase()
@@ -584,7 +601,7 @@ int RebaseDlg::doRebase()
         std::ignore = askUser(QMessageBox::Warning, i18n("Found an empty commit message. You have to enter one or rebase cannot proceed."), {i18n("OK")});
         mode = GitRevLoglist::RebaseEdit;
     }
-    const std::optional<QStringList> options = pickOptions(rev.hash, mode, noCommit);
+    const std::optional<QStringList> options = pickOptions(rev, mode, noCommit);
     if (!options) {
         return -1;
     }
@@ -612,15 +629,17 @@ bool RebaseDlg::prepareSquash(const GitRevLoglist& rev, unsigned int mode)
     return noCommit;
 }
 
-std::optional<QStringList> RebaseDlg::pickOptions(const QString& hash, unsigned int mode, bool noCommit)
+std::optional<QStringList> RebaseDlg::pickOptions(const GitRevLoglist& rev, unsigned int mode, bool noCommit)
 {
     // DoRebase: git cherry-pick's options
     QStringList options;
-    if (!noCommit) {
+    if (m_addCherryPickedFrom) {
+        options.append(QStringLiteral("-x"));
+    } else if (!m_options.cherryPick && !noCommit) {
         // TortoiseGit issue #1833: if HEAD is the parent of the picked commit, fast-forward to it
         options.append(QStringLiteral("--ff"));
     }
-    const int isEmpty = isCommitEmpty(hash);
+    const int isEmpty = isCommitEmpty(rev.hash);
     if (isEmpty < 0) {
         return std::nullopt;
     }
@@ -632,10 +651,44 @@ std::optional<QStringList> RebaseDlg::pickOptions(const QString& hash, unsigned 
     } else {
         m_currentCommitEmpty = false;
     }
+    if (m_options.cherryPick && rev.parents.size() > 1) {
+        const int parent = askMergeParent(rev);
+        if (parent == 0) {
+            return std::nullopt;
+        }
+        options << QStringLiteral("-m") << QString::number(parent);
+    }
     if (noCommit) {
         options.append(QStringLiteral("--no-commit"));
     }
     return options;
+}
+
+int RebaseDlg::askMergeParent(const GitRevLoglist& rev)
+{
+    // DoRebase in cherry-pick mode: a merge commit is picked against the parent the user chooses
+    const QString text = i18n("\"%1\" - \"%2\"\nis a merge commit.\n\nWhich parent do you want to pick?", rev.hash, rev.subject);
+    const QStringList buttons{i18n("Parent %1", 1) + commitTitle(rev.parents.at(0)), i18n("Parent %1", 2) + commitTitle(rev.parents.at(1)), i18n("Cancel")};
+    const int choice = askUser(QMessageBox::Question, text, buttons);
+    return choice == 1 || choice == 2 ? choice : 0;
+}
+
+QString RebaseDlg::commitTitle(const QString& parentHash) const
+{
+    // GetCommitTitle: a parent's subject, shortened, and its short hash
+    const QString shortHash = parentHash.left(shortHashLength);
+    const std::optional<GitRevLoglist> rev = getCommit(parentHash);
+    if (!rev) {
+        return QStringLiteral("\n(%1)").arg(shortHash);
+    }
+    QString title = rev->subject;
+    if (title.size() > commitTitleLength) {
+        title.truncate(commitTitleLength);
+        title += QStringLiteral("...");
+    }
+    // CStringUtils::EscapeAccellerators
+    title.replace(QLatin1Char('&'), QStringLiteral("&&"));
+    return QStringLiteral("\n%1 (%2)").arg(title, shortHash);
 }
 
 int RebaseDlg::runPick(int row, const GitRevLoglist& rev, unsigned int mode, const QStringList& options)
@@ -881,6 +934,14 @@ int RebaseDlg::handlePickSuccess(int row, const QString& hash, unsigned int mode
 bool RebaseDlg::finishRebase()
 {
     // FinishRebase
+    if (!m_finishedRebase && m_options.cherryPick) {
+        // Cherry-pick mode has no branch to move: it worked at HEAD
+        m_finishedRebase = true;
+        runOnUi([this] {
+            m_statusText = i18n("Done");
+            setStatusText(m_statusText, false);
+        });
+    }
     if (!m_finishedRebase) {
         m_finishedRebase = moveBranchToRebasedCommits();
         m_rebaseAutoEnd = m_finishedRebase && m_options.autoStart;
@@ -958,6 +1019,32 @@ bool RebaseDlg::verifyNoConflict()
         cleanUpRebaseActiveFolder();
     });
     return true;
+}
+
+bool RebaseDlg::messageContainsConflictHints(const QString& message)
+{
+    /**
+     * CAppUtils::MessageContainsConflictHints: a cherry-pick's message comes from git's MERGE_MSG, which lists the
+     * conflicts in comment lines that git commit -F keeps. TortoiseGit reads core.cleanup, which git doesn't have;
+     * git's setting is commit.cleanup. There is no StripCommentedLines setting yet, nor "do not show again".
+     */
+    const QString cleanupMode = m_git.configValue(QStringLiteral("commit.cleanup"));
+    if (cleanupMode == QLatin1String("verbatim") || cleanupMode == QLatin1String("whitespace") || cleanupMode == QLatin1String("scissors")) {
+        return false;
+    }
+    QString commentChar = m_git.configValue(QStringLiteral("core.commentchar"));
+    if (commentChar.isEmpty()) {
+        commentChar = QStringLiteral("#");
+    }
+    const QString conflictsHint = QStringLiteral("\n%1 Conflicts:\n%1\t").arg(commentChar);
+    if (message.indexOf(conflictsHint) <= 0) {
+        return false;
+    }
+    const QString text = i18n(
+        "It looks as if there is a conflict hint (a line like \"# Conflicts:\") in your commit message. This hint is automatically added by Git for "
+        "cli users and there is no need to keep it.\n\nDo you want to ignore this warning and keep these lines or abort committing in order to edit "
+        "the commit message?");
+    return askUser(QMessageBox::Question, text, {i18n("&Ignore"), i18n("A&bort")}) != 1;
 }
 
 void RebaseDlg::resetParentForSquash(const QString& commitMessage)
@@ -1045,6 +1132,11 @@ void RebaseDlg::abortJob()
     setActiveTab(LogTab);
     if (m_isFastForward) {
         std::ignore = runGitCmdRetryOrAbort({QStringLiteral("reset"), QStringLiteral("--hard"), m_origBranchHash, QStringLiteral("--")});
+        return;
+    }
+    if (m_options.cherryPick) {
+        // There is no branch in cherry-pick mode: put HEAD back where it was
+        std::ignore = runGitCmdRetryOrAbort({QStringLiteral("reset"), QStringLiteral("--hard"), m_origUpstreamHash, QStringLiteral("--")});
         return;
     }
     if (m_origHeadBranch == m_branch) {

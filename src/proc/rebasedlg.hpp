@@ -11,6 +11,9 @@
  * The work runs on a worker thread, as TortoiseGit's RebaseThread does. The worker runs git and keeps the rebase
  * state; everything that touches a widget or the commit list's model runs on the UI thread, the worker waiting
  * for it as TortoiseGit's SendMessage does. While the worker runs, the user cannot change the commits' actions.
+ *
+ * In cherry-pick mode (m_IsCherryPick) the commits are given rather than listed from a branch and an upstream, and
+ * they are picked onto HEAD where it is: nothing is checked out first and no branch is moved at the end.
  */
 
 #pragma once
@@ -55,6 +58,8 @@ struct RebaseOptions {
     bool force = false; // m_bForce: "Force Rebase" starts checked
     bool autoStart = false; // m_bRebaseAutoStart: start at once and close when finished, or when there is nothing to do
     bool preserveMerges = false; // m_bPreserveMerges: "Preserve merges" starts checked
+    bool cherryPick = false; // m_IsCherryPick: pick the given commits onto HEAD, with no branch or upstream to choose
+    QList<GitRevLoglist> commits; // Cherry-pick mode: the commits to pick, newest first (m_CommitList's entries)
 };
 
 /**
@@ -93,7 +98,7 @@ public:
      */
     enum class RebaseStage {
         ChooseBranch, // Choose_Branch: choosing branch, upstream and the actions
-        ChooseCommitPickMode, // Choose_Commit_Pick_Mode: cherry-pick mode, not ported
+        ChooseCommitPickMode, // Choose_Commit_Pick_Mode: never entered, as in TortoiseGit; cherry-pick mode starts at ChooseBranch
         Start, // Start: about to check out the upstream
         Continue, // Continue: picking the next commit
         Abort, // Abort
@@ -168,6 +173,11 @@ public:
      * @returns The "Preserve merges" checkbox.
      */
     [[nodiscard]] QCheckBox *preserveMergesCheck() const;
+
+    /**
+     * @returns The add "cherry picked from" checkbox, shown in cherry-pick mode only.
+     */
+    [[nodiscard]] QCheckBox *cherryPickedFromCheck() const;
 
     /**
      * @returns The commit list.
@@ -280,6 +290,7 @@ private:
 
     // rebasedlg.cpp: the UI
     void createWidgets();
+    void initCherryPick();
     void loadBranchInfo();
     void onBranchesLoaded();
     void fetchLogList();
@@ -306,6 +317,7 @@ private:
     void setStatusText(const QString& text, bool warning);
     void onRebaseUpdateUi();
     void showStageMessage();
+    [[nodiscard]] QString conflictMessage(const GitRevLoglist& rev) const;
     void listConflictFile();
     void selectFirstConflict();
     void writeRebaseActiveFolder();
@@ -331,7 +343,9 @@ private:
     [[nodiscard]] bool startRebase();
     [[nodiscard]] int doRebase();
     [[nodiscard]] bool prepareSquash(const GitRevLoglist& rev, unsigned int mode);
-    [[nodiscard]] std::optional<QStringList> pickOptions(const QString& hash, unsigned int mode, bool noCommit);
+    [[nodiscard]] std::optional<QStringList> pickOptions(const GitRevLoglist& rev, unsigned int mode, bool noCommit);
+    [[nodiscard]] int askMergeParent(const GitRevLoglist& rev);
+    [[nodiscard]] QString commitTitle(const QString& parentHash) const;
     [[nodiscard]] int runPick(int row, const GitRevLoglist& rev, unsigned int mode, const QStringList& options);
     void addToSquashMessage(const GitRevLoglist& rev);
     [[nodiscard]] int preserveMergesCommand(const GitRevLoglist& rev, unsigned int mode, const QString& noCommit, QStringList& command);
@@ -342,6 +356,7 @@ private:
     [[nodiscard]] bool moveBranchToRebasedCommits();
     void rewriteNotes();
     [[nodiscard]] bool verifyNoConflict();
+    [[nodiscard]] bool messageContainsConflictHints(const QString& message);
     void resetParentForSquash(const QString& commitMessage);
     [[nodiscard]] bool isNextCommitSquash();
     void goNext();
@@ -383,6 +398,7 @@ private:
     QPushButton *m_downButton;
     QCheckBox *m_preserveMergesCheck;
     QCheckBox *m_forceCheck;
+    QCheckBox *m_cherryPickedFromCheck;
     QTabWidget *m_tabs;
     GitStatusListCtrl *m_fileListCtrl;
     QPlainTextEdit *m_logMessageCtrl;
@@ -413,6 +429,7 @@ private:
     bool m_force = false; // m_bForce
     bool m_preserveMerges = false; // m_bPreserveMerges
     QString m_messageText; // m_LogMessageCtrl.GetText() when Continue was pressed
+    bool m_addCherryPickedFrom = false; // m_bAddCherryPickedFrom when Continue was pressed
 
     // The rebase state, CRebaseDlg's members of the same names
     bool m_isFastForward = false;

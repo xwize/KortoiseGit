@@ -7,7 +7,7 @@
  * Ported from TortoiseGit src/TortoiseProc/RebaseDlg.cpp and its IDD_REBASE resource: the dialog's controls, the
  * commit list and the stages' look. The rebase itself is in rebasedlg_rebase.cpp.
  *
- * Not ported yet: cherry-pick mode, the Add button (picking commits in the log), "Edit/Split commit", the
+ * Not ported yet: the Add button (picking commits in the log), "Edit/Split commit", the
  * post-rebase buttons other than Done, the pre-rebase hook, the reflog entries TortoiseGit writes through libgit2,
  * and the SquashDate setting (TortoiseGit's default, the first commit's date, is used).
  */
@@ -22,6 +22,7 @@
 #include "gitloglistmodel.hpp"
 #include "gitstatuslistctrl.hpp"
 
+#include <KConfigGroup>
 #include <KLocalizedString>
 
 #include <QAbstractProxyModel>
@@ -60,6 +61,9 @@ using namespace kgt;
 using Show = GitStatusListModel::Show;
 
 constexpr int maxToolTipLength = 8000;
+
+// TortoiseGit's CherrypickAddCherryPickedFrom setting: add "cherry picked from" starts checked
+constexpr auto cherryPickedFromKey = "CherrypickAddCherryPickedFrom";
 
 /**
  * The entries of the "Squash ALL" button (IDS_PROC_REBASE_SELECTALL_* and IDS_PROC_REBASE_UNSELECTED_*), in
@@ -145,6 +149,7 @@ RebaseDlg::RebaseDlg(const QString& workingTree, const RebaseOptions& options, Q
     , m_downButton(new QPushButton(i18n("&Down"), this))
     , m_preserveMergesCheck(new QCheckBox(i18n("&Preserve merges"), this))
     , m_forceCheck(new QCheckBox(i18n("&Force Rebase"), this))
+    , m_cherryPickedFromCheck(new QCheckBox(i18n("&add \"cherry picked from\""), this))
     , m_tabs(new QTabWidget(this))
     , m_fileListCtrl(new GitStatusListCtrl(this))
     , m_logMessageCtrl(new QPlainTextEdit(this))
@@ -179,7 +184,12 @@ RebaseDlg::RebaseDlg(const QString& workingTree, const RebaseOptions& options, Q
     setContinueButtonText();
     setControlEnable();
     m_continueButton->setEnabled(false);
-    loadBranchInfo();
+    if (m_options.cherryPick) {
+        initCherryPick();
+    } else {
+        m_cherryPickedFromCheck->hide();
+        loadBranchInfo();
+    }
 
     resize(800, 600);
 }
@@ -196,6 +206,39 @@ RebaseDlg::~RebaseDlg()
             QCoreApplication::processEvents();
         }
     }
+}
+
+void RebaseDlg::initCherryPick()
+{
+    // OnInitDialog's m_IsCherryPick part: no branch, HEAD as the upstream, and the commits given listed as Pick
+    setWindowTitle(i18nc("@title:window %1 is a folder", "%1 - Cherry Pick", QDir::toNativeSeparators(m_git.workingDirectory())));
+    m_branchCtrl->setCurrentIndex(-1);
+    m_upstreamCtrl->addItem(QStringLiteral("HEAD"));
+    m_forceCheck->hide();
+    m_preserveMergesCheck->hide();
+    m_cherryPickedFromCheck->setChecked(AppUtils::generalSettings().readEntry(cherryPickedFromKey, false));
+    // OnBnClickedCheckCherryPickedFrom
+    connect(m_cherryPickedFromCheck, &QCheckBox::toggled, this, [](bool checked) {
+        KConfigGroup config = AppUtils::generalSettings();
+        config.writeEntry(cherryPickedFromKey, checked);
+    });
+    m_commitList->setCherryPick(true);
+
+    // ID_CHERRY_PICK of CGitLogListBase::ContextMenuAction fills the list, each commit marked Pick
+    GitLogListModel *model = m_commitList->logModel();
+    model->appendRevs(m_options.commits);
+    for (int row = 0; row < model->rowCount(); ++row) {
+        model->setRebaseAction(row, GitRevLoglist::RebasePick);
+    }
+    m_branchesLoaded = true;
+    m_currentRebaseIndex = model->rowCount();
+    setControlEnable();
+    m_continueButton->setEnabled(model->rowCount() > 0);
+}
+
+QCheckBox *RebaseDlg::cherryPickedFromCheck() const
+{
+    return m_cherryPickedFromCheck;
 }
 
 void RebaseDlg::createWidgets()
@@ -241,6 +284,7 @@ void RebaseDlg::createWidgets()
     listButtons->addStretch();
     listButtons->addWidget(m_preserveMergesCheck);
     listButtons->addWidget(m_forceCheck);
+    listButtons->addWidget(m_cherryPickedFromCheck);
     topLayout->addLayout(listButtons);
     m_splitter->addWidget(top);
 
@@ -702,7 +746,7 @@ void RebaseDlg::setAllRebaseAction(unsigned int action)
     // SetAllRebaseAction: the last commit and merge commits can't be squashed
     GitLogListModel *model = m_commitList->logModel();
     for (int row = 0; row < model->rowCount(); ++row) {
-        if (action == GitRevLoglist::RebaseSquash && (row == model->rowCount() - 1 || model->rev(row).parents.size() != 1)) {
+        if (action == GitRevLoglist::RebaseSquash && (row == model->rowCount() - 1 || (!m_options.cherryPick && model->rev(row).parents.size() != 1))) {
             continue;
         }
         model->setRebaseAction(row, action);
@@ -927,6 +971,9 @@ void RebaseDlg::refresh()
         listConflictFile();
         return;
     }
+    if (m_options.cherryPick) {
+        return;
+    }
     if (stage == RebaseStage::ChooseBranch && !m_threadRunning) {
         loadBranchInfo();
     }
@@ -1023,18 +1070,16 @@ void RebaseDlg::setControlEnable()
     // SetControlEnable
     const RebaseStage stage = m_rebaseStage;
     const bool choosing = stage == RebaseStage::ChooseBranch || stage == RebaseStage::ChooseCommitPickMode;
-    for (QWidget *widget : std::initializer_list<QWidget *>{m_splitAllOptions,
-                                                            m_upButton,
-                                                            m_downButton,
-                                                            m_branchCtrl,
-                                                            m_upstreamCtrl,
-                                                            m_reverseButton,
-                                                            m_forceCheck,
-                                                            m_preserveMergesCheck,
-                                                            m_browseButton,
-                                                            m_ontoButton}) {
+    for (QWidget *widget : std::initializer_list<QWidget *>{m_splitAllOptions, m_upButton, m_downButton}) {
         widget->setEnabled(choosing && !m_threadRunning);
     }
+    // Cherry-pick mode has no branch or upstream to choose
+    for (QWidget *widget :
+         std::initializer_list<QWidget *>{m_branchCtrl, m_upstreamCtrl, m_reverseButton, m_forceCheck, m_preserveMergesCheck, m_browseButton, m_ontoButton}) {
+        widget->setEnabled(choosing && !m_threadRunning && !m_options.cherryPick);
+    }
+    // TortoiseGit leaves add "cherry picked from" enabled throughout; it is read whenever Continue is pressed
+    m_cherryPickedFromCheck->setEnabled(!m_threadRunning);
     // The actions stay changeable while the rebase is stopped, as TortoiseGit's menu mask does, but not while
     // the worker reads them
     m_commitList->setRebaseMenuEnabled(!m_threadRunning);
@@ -1122,7 +1167,7 @@ void RebaseDlg::showStageMessage()
         listConflictFile();
         m_tabs->setCurrentIndex(ConflictTab);
         m_logMessageCtrl->setReadOnly(false);
-        m_logMessageCtrl->setPlainText(rev.subject + QLatin1Char('\n') + rev.body);
+        m_logMessageCtrl->setPlainText(conflictMessage(rev));
         break;
     case RebaseStage::Edit:
         m_tabs->setCurrentIndex(MessageTab);
@@ -1137,6 +1182,22 @@ void RebaseDlg::showStageMessage()
     default:
         setActiveTab(LogTab);
     }
+}
+
+QString RebaseDlg::conflictMessage(const GitRevLoglist& rev) const
+{
+    // OnRebaseUpdateUI at a conflict
+    if (m_options.cherryPick) {
+        // Vanilla git also re-uses MERGE_MSG on conflict (listing all conflicted files), and it's also needed for
+        // cherry-pick in order to get cherry-picked-from included on conflicts
+        QFile mergeMsg(QDir(GitAdminDir::worktreeAdminDirPath(m_git.workingDirectory())).filePath(QStringLiteral("MERGE_MSG")));
+        if (mergeMsg.open(QIODevice::ReadOnly)) {
+            if (QString message = QString::fromUtf8(mergeMsg.readAll()); !message.isEmpty()) {
+                return message;
+            }
+        }
+    }
+    return rev.subject + QLatin1Char('\n') + rev.body;
 }
 
 void RebaseDlg::listConflictFile()
@@ -1162,7 +1223,10 @@ void RebaseDlg::selectFirstConflict()
 
 void RebaseDlg::writeRebaseActiveFolder()
 {
-    // ListConflictFile: the lock that CAppUtils::IsTGitRebaseActive looks for
+    // ListConflictFile: the lock that CAppUtils::IsTGitRebaseActive looks for; a cherry-pick writes none
+    if (m_options.cherryPick) {
+        return;
+    }
     const QString adminDir = GitAdminDir::worktreeAdminDirPath(m_git.workingDirectory());
     if (adminDir.isEmpty()) {
         return;
@@ -1184,6 +1248,9 @@ void RebaseDlg::writeRebaseActiveFolder()
 void RebaseDlg::cleanUpRebaseActiveFolder()
 {
     // CleanUpRebaseActiveFolder
+    if (m_options.cherryPick) {
+        return;
+    }
     const QString adminDir = GitAdminDir::worktreeAdminDirPath(m_git.workingDirectory());
     if (adminDir.isEmpty()) {
         return;
@@ -1200,7 +1267,8 @@ void RebaseDlg::cleanUpRebaseActiveFolder()
 void RebaseDlg::checkRestoreStash()
 {
     // CheckRestoreStash with CAppUtils::StashPop; TortoiseGit's offer to show the changes needs repostatus
-    const QString autoStashValue = m_git.configValue(QStringLiteral("rebase.autostash")).toLower();
+    // A cherry-pick doesn't use rebase.autostash
+    const QString autoStashValue = m_options.cherryPick ? QString() : m_git.configValue(QStringLiteral("rebase.autostash")).toLower();
     const bool autoStash = autoStashValue == QLatin1String("true") || autoStashValue == QLatin1String("yes") || autoStashValue == QLatin1String("on")
         || autoStashValue == QLatin1String("1");
     if (m_stashed
@@ -1243,6 +1311,7 @@ void RebaseDlg::onContinue()
         m_preserveMerges = m_preserveMergesCheck->isChecked();
     }
     m_messageText = m_logMessageCtrl->toPlainText();
+    m_addCherryPickedFrom = m_options.cherryPick && m_cherryPickedFromCheck->isChecked();
     startThread([this] {
         continueJob();
     });

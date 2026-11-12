@@ -23,6 +23,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTabWidget>
 #include <QTest>
 #include <QTimer>
@@ -157,12 +158,42 @@ struct RebaseSetup {
  */
 std::unique_ptr<RebaseDlg> openDlg(const TestRepo& repo, const QString& upstream = QStringLiteral("main"))
 {
-    auto dlg = std::make_unique<RebaseDlg>(repo.path(), RebaseOptions{.upstream = upstream, .force = false, .autoStart = false, .preserveMerges = false});
+    auto dlg = std::make_unique<RebaseDlg>(
+        repo.path(),
+        RebaseOptions{.upstream = upstream, .force = false, .autoStart = false, .preserveMerges = false, .cherryPick = false, .commits = {}});
     QSignalSpy fetched(dlg.get(), &RebaseDlg::logListFetched);
     if (!fetched.wait(timeout)) {
         return nullptr;
     }
     return dlg;
+}
+
+/**
+ * Opens the dialog in cherry-pick mode, as the log's Cherry Pick entry does.
+ * @param repo The repository.
+ * @param refs The commits to pick, newest first.
+ * @returns The dialog.
+ */
+std::unique_ptr<RebaseDlg> openCherryPickDlg(const TestRepo& repo, const QStringList& refs)
+{
+    QList<GitRevLoglist> commits;
+    for (const QString& ref : refs) {
+        QStringList arguments = GitRevLoglist::logArguments({}, ref);
+        arguments.insert(1, QStringLiteral("-1"));
+        QByteArray output = repo.git().run(arguments);
+        const Result<QList<GitRevLoglist>> revs = GitRevLoglist::takeRecords(output);
+        if (!revs || revs->size() != 1) {
+            return nullptr;
+        }
+        commits.append(revs->constFirst());
+    }
+    return std::make_unique<RebaseDlg>(repo.path(),
+                                       RebaseOptions{.upstream = QStringLiteral("feature"),
+                                                     .force = false,
+                                                     .autoStart = false,
+                                                     .preserveMerges = false,
+                                                     .cherryPick = true,
+                                                     .commits = commits});
 }
 
 /**
@@ -259,6 +290,7 @@ class RebaseTest : public QObject
 private Q_SLOTS:
     void initTestCase()
     {
+        QStandardPaths::setTestModeEnabled(true);
         TestRepo::isolateGit();
     }
 
@@ -576,7 +608,13 @@ private Q_SLOTS:
         {
             const RebaseSetup setup;
             const QString mainHead = setup.rev(QStringLiteral("main"));
-            RebaseDlg dlg(setup.repo.path(), RebaseOptions{.upstream = QStringLiteral("main"), .force = false, .autoStart = true, .preserveMerges = false});
+            RebaseDlg dlg(setup.repo.path(),
+                          RebaseOptions{.upstream = QStringLiteral("main"),
+                                        .force = false,
+                                        .autoStart = true,
+                                        .preserveMerges = false,
+                                        .cherryPick = false,
+                                        .commits = {}});
             QSignalSpy finished(&dlg, &QDialog::finished);
             QVERIFY(finished.wait(timeout));
             QCOMPARE(dlg.result(), int(QDialog::Accepted));
@@ -587,7 +625,13 @@ private Q_SLOTS:
         {
             const RebaseSetup setup;
             setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("old")});
-            RebaseDlg dlg(setup.repo.path(), RebaseOptions{.upstream = QStringLiteral("main"), .force = false, .autoStart = true, .preserveMerges = false});
+            RebaseDlg dlg(setup.repo.path(),
+                          RebaseOptions{.upstream = QStringLiteral("main"),
+                                        .force = false,
+                                        .autoStart = true,
+                                        .preserveMerges = false,
+                                        .cherryPick = false,
+                                        .commits = {}});
             QSignalSpy finished(&dlg, &QDialog::finished);
             QVERIFY(finished.wait(timeout));
             QCOMPARE(dlg.result(), int(QDialog::Accepted));
@@ -597,7 +641,13 @@ private Q_SLOTS:
         {
             const RebaseSetup setup;
             setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
-            RebaseDlg dlg(setup.repo.path(), RebaseOptions{.upstream = QStringLiteral("main"), .force = false, .autoStart = true, .preserveMerges = false});
+            RebaseDlg dlg(setup.repo.path(),
+                          RebaseOptions{.upstream = QStringLiteral("main"),
+                                        .force = false,
+                                        .autoStart = true,
+                                        .preserveMerges = false,
+                                        .cherryPick = false,
+                                        .commits = {}});
             QSignalSpy finished(&dlg, &QDialog::finished);
             QVERIFY(finished.wait(timeout));
             QCOMPARE(dlg.result(), int(QDialog::Rejected));
@@ -609,7 +659,13 @@ private Q_SLOTS:
             setup.repo.write(QStringLiteral("f1.txt"), "main\n");
             setup.repo.commitAll(QStringLiteral("clash"));
             setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("feature")});
-            RebaseDlg dlg(setup.repo.path(), RebaseOptions{.upstream = QStringLiteral("main"), .force = false, .autoStart = true, .preserveMerges = false});
+            RebaseDlg dlg(setup.repo.path(),
+                          RebaseOptions{.upstream = QStringLiteral("main"),
+                                        .force = false,
+                                        .autoStart = true,
+                                        .preserveMerges = false,
+                                        .cherryPick = false,
+                                        .commits = {}});
             QSignalSpy finished(&dlg, &QDialog::finished);
             QSignalSpy stopped(&dlg, &RebaseDlg::threadFinished);
             QVERIFY(stopped.wait(timeout));
@@ -648,6 +704,196 @@ private Q_SLOTS:
         QCOMPARE(dlg->result(), int(QDialog::Accepted));
         QCOMPARE(setup.headBranch(), QStringLiteral("feature"));
         QVERIFY(setup.rev(QStringLiteral("feature")) != oldFeature);
+    }
+
+    void cherryPick()
+    {
+        const RebaseSetup setup;
+        const std::unique_ptr<RebaseDlg> dlg = openCherryPickDlg(setup.repo, {QStringLiteral("main")});
+        QVERIFY(dlg);
+        // No branch or upstream to choose: it picks onto HEAD
+        QVERIFY(dlg->windowTitle().endsWith(QStringLiteral(" - Cherry Pick")));
+        QCOMPARE(dlg->branchCombo()->currentIndex(), -1);
+        QVERIFY(!dlg->branchCombo()->isEnabled());
+        QCOMPARE(dlg->upstreamCombo()->currentText(), QStringLiteral("HEAD"));
+        QVERIFY(!dlg->upstreamCombo()->isEnabled());
+        QVERIFY(!dlg->reverseButton()->isEnabled());
+        QVERIFY(dlg->forceCheck()->isHidden());
+        QVERIFY(dlg->preserveMergesCheck()->isHidden());
+        QVERIFY(!dlg->cherryPickedFromCheck()->isHidden());
+        QVERIFY(!dlg->isLoading());
+        QCOMPARE(actionNames(*dlg), QStringList{QStringLiteral("Pick")});
+        QCOMPARE(dlg->continueButton()->text(), QStringLiteral("Start Rebase"));
+        QVERIFY(dlg->continueButton()->isEnabled());
+        saveScreenshot(*dlg, QStringLiteral("rebasedlg-cherrypick.png"));
+
+        const QString featureHead = setup.rev(QStringLiteral("feature"));
+        QVERIFY(pressContinue(*dlg));
+        QCOMPARE(dlg->stage(), RebaseDlg::RebaseStage::Done);
+        QCOMPARE(dlg->statusLabel()->text(), QStringLiteral("Done"));
+        QVERIFY(dlg->logOutput()->toPlainText().contains(QStringLiteral("Start Cherry Pick")));
+        // Picked onto feature, which stays checked out
+        QCOMPARE(setup.headBranch(), QStringLiteral("feature"));
+        QCOMPARE(setup.rev(QStringLiteral("feature~1")), featureHead);
+        QCOMPARE(setup.subjects().constFirst(), QStringLiteral("main work"));
+        QVERIFY(setup.rev(QStringLiteral("feature")) != setup.rev(QStringLiteral("main")));
+        QVERIFY(setup.status().isEmpty());
+
+        dlg->continueButton()->click();
+        QCOMPARE(dlg->result(), int(QDialog::Accepted));
+    }
+
+    void cherryPickAddsCherryPickedFrom()
+    {
+        const RebaseSetup setup;
+        const QString picked = setup.rev(QStringLiteral("main"));
+        const std::unique_ptr<RebaseDlg> dlg = openCherryPickDlg(setup.repo, {QStringLiteral("main")});
+        QVERIFY(dlg);
+        dlg->cherryPickedFromCheck()->setChecked(true);
+        QVERIFY(pressContinue(*dlg));
+        QCOMPARE(dlg->stage(), RebaseDlg::RebaseStage::Done);
+        const QString message = QString::fromUtf8(setup.repo.git().run({QStringLiteral("log"), QStringLiteral("-1"), QStringLiteral("--format=%B")}));
+        QVERIFY2(message.contains(QStringLiteral("(cherry picked from commit %1)").arg(picked)), qPrintable(message));
+
+        // The choice is remembered (CherrypickAddCherryPickedFrom)
+        const std::unique_ptr<RebaseDlg> again = openCherryPickDlg(setup.repo, {QStringLiteral("main")});
+        QVERIFY(again && again->cherryPickedFromCheck()->isChecked());
+        again->cherryPickedFromCheck()->setChecked(false);
+    }
+
+    void cherryPickAsksForTheParentOfAMerge()
+    {
+        const RebaseSetup setup;
+        setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        setup.repo.run({QStringLiteral("merge"), QStringLiteral("--quiet"), QStringLiteral("--no-edit"), QStringLiteral("feature")});
+        setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("-b"), QStringLiteral("other"), QStringLiteral("old")});
+        // Against parent 2 (feature) the merge brings main's own work, m.txt, and none of feature's files
+        const std::unique_ptr<RebaseDlg> dlg = openCherryPickDlg(setup.repo, {QStringLiteral("main")});
+        QVERIFY(dlg);
+        QStringList texts;
+        QTimer answerer;
+        connect(&answerer, &QTimer::timeout, this, [&texts] {
+            const auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            if (!box) {
+                return;
+            }
+            texts.append(box->text());
+            for (QAbstractButton *button : box->buttons()) {
+                if (button->text().startsWith(QStringLiteral("Parent 2\n"))) {
+                    button->click();
+                    return;
+                }
+            }
+            box->escapeButton()->click();
+        });
+        answerer.start(10);
+        QVERIFY(pressContinue(*dlg));
+        answerer.stop();
+        QCOMPARE(texts.size(), 1);
+        QVERIFY2(texts.constFirst().endsWith(QStringLiteral("is a merge commit.\n\nWhich parent do you want to pick?")), qPrintable(texts.constFirst()));
+        QCOMPARE(dlg->stage(), RebaseDlg::RebaseStage::Done);
+        QVERIFY(dlg->logOutput()->toPlainText().contains(QStringLiteral("Pick 1:")));
+        QCOMPARE(setup.headBranch(), QStringLiteral("other"));
+        QVERIFY(QFile::exists(setup.repo.filePath(QStringLiteral("m.txt"))));
+        QVERIFY(!QFile::exists(setup.repo.filePath(QStringLiteral("f1.txt"))));
+        // A plain commit, not a merge
+        QCOMPARE(setup.rev(QStringLiteral("HEAD^2")), QString());
+    }
+
+    void cherryPickConflictAndAbort()
+    {
+        const RebaseSetup setup;
+        setup.repo.write(QStringLiteral("a.txt"), "feature\n");
+        setup.repo.commitAll(QStringLiteral("c4"));
+        setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        setup.repo.write(QStringLiteral("a.txt"), "main\n");
+        setup.repo.commitAll(QStringLiteral("main change"));
+        setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("feature")});
+        const QString featureHead = setup.rev(QStringLiteral("feature"));
+
+        const std::unique_ptr<RebaseDlg> dlg = openCherryPickDlg(setup.repo, {QStringLiteral("main"), QStringLiteral("main~1")});
+        QVERIFY(dlg);
+        QVERIFY(pressContinue(*dlg));
+        QCOMPARE(dlg->stage(), RebaseDlg::RebaseStage::Conflict);
+        // The message is git's MERGE_MSG; a cherry-pick writes no rebase lock
+        QVERIFY(dlg->messageEdit()->toPlainText().startsWith(QStringLiteral("main change")));
+        QVERIFY(!QDir(setup.repo.filePath(QStringLiteral(".git/tgitrebase.active"))).exists());
+        QCOMPARE(setup.subjects().constFirst(), QStringLiteral("main work"));
+
+        const BoxAnswerer answerer(QMessageBox::Yes);
+        QSignalSpy finished(dlg.get(), &QDialog::finished);
+        dlg->abortButton()->click();
+        QVERIFY(finished.wait(timeout));
+        QCOMPARE(dlg->result(), int(QDialog::Rejected));
+        QCOMPARE(answerer.texts(), QStringList{QStringLiteral("Are you sure you want to abort the rebase process?")});
+        // HEAD goes back where it was, on its branch
+        QCOMPARE(setup.rev(QStringLiteral("HEAD")), featureHead);
+        QCOMPARE(setup.headBranch(), QStringLiteral("feature"));
+        QVERIFY(setup.status().isEmpty());
+    }
+
+    void cherryPickConflictIsCommitted()
+    {
+        const RebaseSetup setup;
+        setup.repo.write(QStringLiteral("a.txt"), "feature\n");
+        setup.repo.commitAll(QStringLiteral("c4"));
+        setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        setup.repo.write(QStringLiteral("a.txt"), "main\n");
+        setup.repo.commitAll(QStringLiteral("main change"));
+        setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("feature")});
+
+        const std::unique_ptr<RebaseDlg> dlg = openCherryPickDlg(setup.repo, {QStringLiteral("main")});
+        QVERIFY(dlg);
+        QVERIFY(pressContinue(*dlg));
+        QCOMPARE(dlg->stage(), RebaseDlg::RebaseStage::Conflict);
+        GitStatusListCtrl *files = dlg->fileList();
+        QVERIFY(waitIdle(files));
+        resolve(setup, files);
+
+        // git's conflict hint in the message is refused, as in TortoiseGit (Abort)
+        if (dlg->messageEdit()->toPlainText().contains(QStringLiteral("# Conflicts:"))) {
+            const BoxAnswerer answerer(QMessageBox::Yes);
+            QVERIFY(pressContinue(*dlg));
+            QCOMPARE(dlg->stage(), RebaseDlg::RebaseStage::Conflict);
+            QCOMPARE(answerer.texts().size(), 1);
+            QVERIFY(answerer.texts().constFirst().startsWith(QStringLiteral("It looks as if there is a conflict hint")));
+        }
+        dlg->messageEdit()->setPlainText(QStringLiteral("main change\n"));
+        QVERIFY(pressContinue(*dlg));
+        QCOMPARE(dlg->stage(), RebaseDlg::RebaseStage::Done);
+        QCOMPARE(setup.headBranch(), QStringLiteral("feature"));
+        QCOMPARE(setup.subjects().mid(0, 2), (QStringList{QStringLiteral("main change"), QStringLiteral("c4")}));
+        QCOMPARE(QString::fromUtf8(setup.repo.git().run({QStringLiteral("show"), QStringLiteral("HEAD:a.txt")})), QStringLiteral("resolved\n"));
+        QVERIFY(setup.status().isEmpty());
+    }
+
+    void cherryPickIgnoresAutoStash()
+    {
+        const RebaseSetup setup;
+        setup.repo.run({QStringLiteral("config"), QStringLiteral("rebase.autostash"), QStringLiteral("true")});
+        setup.repo.write(QStringLiteral("a.txt"), "dirty\n");
+        const std::unique_ptr<RebaseDlg> dlg = openCherryPickDlg(setup.repo, {QStringLiteral("main")});
+        QVERIFY(dlg);
+        // Asks rather than stashing on its own; Abort (the escape button) leaves everything as it was
+        const BoxAnswerer answerer(QMessageBox::Yes);
+        QVERIFY(pressContinue(*dlg));
+        QCOMPARE(answerer.texts(), QStringList{QStringLiteral("The current working tree is not clean.\nDo you want to stash the changes?")});
+        QCOMPARE(dlg->stage(), RebaseDlg::RebaseStage::ChooseBranch);
+        QCOMPARE(setup.status(), QStringLiteral(" M a.txt\n"));
+    }
+
+    void cherryPickSquashesMergeCommits()
+    {
+        // m_bIsCherryPick: a merge commit may be squashed too
+        const RebaseSetup setup;
+        setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("main")});
+        setup.repo.run({QStringLiteral("merge"), QStringLiteral("--quiet"), QStringLiteral("--no-ff"), QStringLiteral("--no-edit"), QStringLiteral("feature")});
+        setup.repo.run({QStringLiteral("checkout"), QStringLiteral("--quiet"), QStringLiteral("old")});
+        const std::unique_ptr<RebaseDlg> dlg = openCherryPickDlg(setup.repo, {QStringLiteral("main"), QStringLiteral("main~1")});
+        QVERIFY(dlg);
+        selectRow(*dlg, 0);
+        dlg->commitList()->setSelectedRebaseAction(GitRevLoglist::RebaseSquash);
+        QCOMPARE(actionNames(*dlg), (QStringList{QStringLiteral("Squash"), QStringLiteral("Pick")}));
     }
 };
 
