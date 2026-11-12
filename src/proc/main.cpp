@@ -103,6 +103,8 @@ int main(int argc, char *argv[])
                          KAboutLicense::GPL_V2,
                          i18n("© 2026 James Jones"));
     aboutData.setLicense(KAboutLicense::GPL_V2, KAboutLicense::OnlyThisVersion);
+    // The Wayland app ID and the portal registration: must match the installed org.kde.kortoisegitproc.desktop
+    aboutData.setDesktopFileName(QStringLiteral("org.kde.kortoisegitproc"));
     KAboutData::setApplicationData(aboutData);
 
     QApplication::setWindowIcon(AppUtils::appIcon());
