@@ -12,6 +12,7 @@
 #pragma once
 
 #include "git/gitrevloglist.hpp"
+#include "utils/urlfinder.hpp"
 
 #include <QDialog>
 #include <QString>
@@ -24,7 +25,8 @@ class QDialogButtonBox;
 class QLineEdit;
 class QMenu;
 class QPushButton;
-class QTextEdit;
+class QTextBrowser;
+class QUrl;
 
 namespace kgt
 {
@@ -32,6 +34,22 @@ namespace kgt
 class GitLogList;
 class GitStatusListCtrl;
 struct GitStatusListEntry;
+
+/**
+ * Ported from LookLikeGitHash: reads the run of lowercase hex digits starting at pos.
+ * @param msg The text.
+ * @param pos Where the run starts; moved to the first character after it.
+ * @returns Whether the run is long enough for a (short) hash and not followed by '@'.
+ */
+[[nodiscard]] bool lookLikeGitHash(const QString& msg, qsizetype& pos);
+
+/**
+ * Ported from FindGitHashPositions: the words in msg that look like commit hashes, from offset on, leaving out
+ * git-svn-id:, Signed-off-by: and Change-Id: lines. A "g" in front of the hex digits, as git describe writes, is
+ * not part of the range.
+ * @returns The hashes' ranges, in order.
+ */
+[[nodiscard]] QList<TextRange> findGitHashPositions(const QString& msg, qsizetype offset);
 
 /**
  * The log dialog: the history of HEAD, limited to the paths it was opened for when they are a file or a
@@ -82,6 +100,18 @@ public:
      * @returns The text of the message pane.
      */
     [[nodiscard]] QString messageText() const;
+
+    /**
+     * @returns The message pane.
+     */
+    [[nodiscard]] QTextBrowser *messageView() const;
+
+    /**
+     * Selects the next listed commit, searching down and wrapping round, whose hash starts with hash
+     * (CLogDlg::JumpToGitHash). Nothing happens when no commit is selected or none matches.
+     * @param hash The full or abbreviated hash, in lowercase.
+     */
+    void jumpToGitHash(const QString& hash);
 
     /**
      * @returns The Refresh button.
@@ -203,13 +233,14 @@ private:
     [[nodiscard]] QList<GitStatusListEntry> applyHidePaths(QList<GitStatusListEntry> entries) const;
     void onSelectedRevChanged();
     void fillLogMessage(const GitRevLoglist& rev);
+    void onMsgViewLinkClicked(const QUrl& url);
     void onFilesLoaded(int row);
     void showFiles(const GitRevLoglist& rev);
 
     QString m_workingTree;
     QStringList m_pathFilter;
     GitLogList *m_logList = nullptr;
-    QTextEdit *m_msgView = nullptr;
+    QTextBrowser *m_msgView = nullptr;
     GitStatusListCtrl *m_changedFileList = nullptr;
     QDateEdit *m_dateFrom = nullptr;
     QDateEdit *m_dateTo = nullptr;

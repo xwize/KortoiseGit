@@ -22,6 +22,7 @@
 
 #include <QAction>
 #include <QDateEdit>
+#include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileInfo>
@@ -36,8 +37,9 @@
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QTextBrowser>
 #include <QTextCursor>
-#include <QTextEdit>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -57,6 +59,29 @@ constexpr int dateDelay = 10; // LOGFTIME_TIMER's timeout in ms
 constexpr int invalidShiftPercent = 10; // CFilterEdit::Validate's SHIFT_PERCENTAGE
 constexpr int fullColor = 255;
 constexpr int percent = 100;
+constexpr qsizetype gitHashHexSize = 40; // GIT_HASH_SIZE * 2
+// ShortHashLengthForHyperLinkInLogMessage's default, CGit::GetShortHASHLength
+constexpr qsizetype shortHashLength = 8;
+
+bool isHexDigit(QChar ch)
+{
+    return (ch >= QLatin1Char('0') && ch <= QLatin1Char('9')) || (ch >= QLatin1Char('a') && ch <= QLatin1Char('f'));
+}
+
+bool isAsciiAlnum(QChar ch)
+{
+    return (ch >= QLatin1Char('A') && ch <= QLatin1Char('Z')) || (ch >= QLatin1Char('a') && ch <= QLatin1Char('z'))
+        || (ch >= QLatin1Char('0') && ch <= QLatin1Char('9'));
+}
+
+/**
+ * The email check of CLogDlg::OnEnLinkMsgview: an '@' with a dot somewhere after it, and no URL scheme.
+ */
+bool isEmailLink(const QString& text)
+{
+    const qsizetype atpos = text.indexOf(QLatin1Char('@'));
+    return atpos > 0 && text.lastIndexOf(QLatin1Char('.')) > atpos && !pathIsUrl(text);
+}
 
 /**
  * @param name A per-repository value of TortoiseGit's LogDialog registry key, such as "ShowTags".
@@ -156,6 +181,11 @@ GitStatusListCtrl *LogDlg::changedFileList() const
 QString LogDlg::messageText() const
 {
     return m_msgView->toPlainText();
+}
+
+QTextBrowser *LogDlg::messageView() const
+{
+    return m_msgView;
 }
 
 QPushButton *LogDlg::refreshButton() const
@@ -291,9 +321,12 @@ void LogDlg::createWidgets()
 
     m_logList = new GitLogList(splitter);
     m_logList->setLogMenuEnabled(true);
-    m_msgView = new QTextEdit(splitter);
-    m_msgView->setReadOnly(true);
-    m_msgView->setAcceptRichText(false);
+    // A browser only for its links: it never follows them itself (CLogDlg::OnEnLinkMsgview does)
+    m_msgView = new QTextBrowser(splitter);
+    m_msgView->setOpenLinks(false);
+    m_msgView->setOpenExternalLinks(false);
+    // CLogDlg::SetupLogMessageViewControl: the log font. There is no LogFontName/LogFontSize setting yet.
+    m_msgView->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     m_changedFileList = new GitStatusListCtrl(splitter);
     m_changedFileList->setHasCheckboxes(false);
     m_changedFileList->setWorkingTree(m_workingTree);
@@ -338,6 +371,8 @@ void LogDlg::createWidgets()
     connect(m_logList, &GitLogList::selectedRevChanged, this, &LogDlg::onSelectedRevChanged);
     connect(m_logList->logModel(), &QAbstractItemModel::modelReset, this, &LogDlg::onSelectedRevChanged);
     connect(m_logList, &GitLogList::filesLoaded, this, &LogDlg::onFilesLoaded);
+    // Queued, as CLogDlg::JumpToGitHash queues its refresh: a jump refills the pane that is still handling the click
+    connect(m_msgView, &QTextBrowser::anchorClicked, this, &LogDlg::onMsgViewLinkClicked, Qt::QueuedConnection);
     resize(initialSize);
 }
 
@@ -802,17 +837,97 @@ void LogDlg::onSelectedRevChanged()
 
 void LogDlg::fillLogMessage(const GitRevLoglist& rev)
 {
-    // "SHA-1: <hash>", a blank line, the subject in bold, then the body
+    // CLogDlg::FillLogMessageCtrl: "SHA-1: <hash>", a blank line, the subject in bold, then the body
+    QString msg = i18n("SHA-1") + QStringLiteral(": ") + rev.hash + QStringLiteral("\n\n");
+    const qsizetype boldStart = msg.size();
+    msg += rev.subject;
+    msg.remove(QLatin1Char('\r'));
+    const qsizetype boldEnd = msg.size();
+    msg += QLatin1Char('\n') + rev.body;
+    msg.remove(QLatin1Char('\r'));
+
     m_msgView->clear();
-    QTextCursor cursor(m_msgView->document());
     QTextCharFormat normal;
-    normal.setFont(QFontDatabase::systemFont(QFontDatabase::GeneralFont));
-    QTextCharFormat bold = normal;
+    normal.setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    QTextCursor cursor(m_msgView->document());
+    cursor.insertText(msg, normal);
+
+    const auto format = [this](const TextRange& range, const QTextCharFormat& charFormat) {
+        QTextCursor c(m_msgView->document());
+        c.setPosition(static_cast<int>(range.start));
+        c.setPosition(static_cast<int>(range.end), QTextCursor::KeepAnchor);
+        c.mergeCharFormat(charFormat);
+    };
+    QTextCharFormat bold;
     bold.setFontWeight(QFont::Bold);
-    cursor.insertText(i18n("SHA-1") + QStringLiteral(": ") + rev.hash + QStringLiteral("\n\n"), normal);
-    cursor.insertText(rev.subject, bold);
-    cursor.insertText(QStringLiteral("\n") + rev.body, normal);
+    format({boldStart, boldEnd}, bold);
+
+    // CAppUtils::SetCharFormat(CFM_LINK): links in the palette's link colour
+    const auto linkFormat = [this](const QString& href) {
+        QTextCharFormat link;
+        link.setAnchor(true);
+        link.setAnchorHref(href);
+        link.setForeground(m_msgView->palette().link());
+        link.setFontUnderline(true);
+        return link;
+    };
+    // FindGitHash, from after the "SHA-1:" line
+    for (const TextRange& range : findGitHashPositions(msg, msg.indexOf(QLatin1Char('\n')))) {
+        format(range, linkFormat(msg.mid(range.start, range.end - range.start)));
+    }
+    // CAppUtils::StyleURLs; OnEnLinkMsgview's tooltip shows what a click opens. TortoiseGit's body keeps the commit's
+    // final newline, which FindURLMatches needs to see a closing "<a@b.org>" as bracketed; ours drops it.
+    for (const TextRange& range : findUrlMatches(msg + QLatin1Char('\n'))) {
+        const QString text = msg.mid(range.start, range.end - range.start);
+        QTextCharFormat link = linkFormat(text);
+        link.setToolTip(isEmailLink(text) ? QStringLiteral("mailto:") + text : text);
+        format(range, link);
+    }
     m_msgView->moveCursor(QTextCursor::Start);
+}
+
+void LogDlg::onMsgViewLinkClicked(const QUrl& link)
+{
+    // CLogDlg::OnEnLinkMsgview: nothing happens while text is selected, the user was dragging to select
+    if (m_msgView->textCursor().hasSelection()) {
+        return;
+    }
+    QString url = link.toString();
+    if (isEmailLink(url)) {
+        url.prepend(QStringLiteral("mailto:"));
+    }
+    if (pathIsUrl(url)) {
+        QDesktopServices::openUrl(QUrl(url));
+        return;
+    }
+    qsizetype pos = 0;
+    if (lookLikeGitHash(url, pos)) {
+        jumpToGitHash(url);
+    }
+}
+
+void LogDlg::jumpToGitHash(const QString& hash)
+{
+    // CLogDlg::JumpToGitHash: start searching downwards, because it's unlikely that a hash is a forward reference
+    GitLogListModel *model = m_logList->logModel();
+    const int currentPos = m_logList->selectionModel()->currentIndex().row();
+    const int cnt = model->rowCount();
+    if (cnt == 0 || currentPos < 0) {
+        return;
+    }
+    for (int i = currentPos + 1; i != currentPos; ++i) {
+        if (i >= cnt) {
+            i = -1;
+            continue;
+        }
+        if (!model->rev(i).hash.startsWith(hash)) {
+            continue;
+        }
+        const QModelIndex cell = model->index(i, GitLogListModel::MessageColumn);
+        m_logList->selectionModel()->setCurrentIndex(cell, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        m_logList->scrollTo(cell);
+        return;
+    }
 }
 
 void LogDlg::onFilesLoaded(int row)
@@ -839,6 +954,68 @@ void LogDlg::showFiles(const GitRevLoglist& rev)
     }
     m_changedFileList->setCurrentVersion(rev.hash, rev.parents);
     m_changedFileList->updateWithGitPathList(applyHidePaths(GitStatusListModel::makeRevisionEntries(rev.files)));
+}
+
+bool lookLikeGitHash(const QString& msg, qsizetype& pos)
+{
+    // LookLikeGitHash
+    qsizetype c = 0;
+    for (; pos < msg.size(); ++pos) {
+        if (isHexDigit(msg.at(pos))) {
+            ++c;
+        } else {
+            return c >= shortHashLength && c <= gitHashHexSize && msg.at(pos) != QLatin1Char('@');
+        }
+    }
+    return c >= shortHashLength && c <= gitHashHexSize;
+}
+
+QList<TextRange> findGitHashPositions(const QString& msg, qsizetype offset)
+{
+    // FindGitHashPositions
+    QList<TextRange> result;
+    const qsizetype len = msg.size();
+    const auto at = [&msg, len](qsizetype i) {
+        return i < len ? msg.at(i) : QChar();
+    };
+    const auto startsAt = [&msg](qsizetype i, QLatin1StringView word) {
+        return QStringView(msg).mid(i).startsWith(word);
+    };
+    offset = std::max<qsizetype>(offset, 0);
+    while (offset < len) {
+        qsizetype old = offset;
+        QChar e = msg.at(offset);
+        if (e == QLatin1Char('\n')) {
+            ++offset;
+            if (startsAt(offset, QLatin1StringView("git-svn-id:")) || startsAt(offset, QLatin1StringView("Signed-off-by:"))
+                || startsAt(offset, QLatin1StringView("Change-Id:"))) {
+                offset += 10;
+                while (offset < len) {
+                    if (at(++offset) == QLatin1Char('\n')) {
+                        break;
+                    }
+                }
+            }
+        } else if ((e >= QLatin1Char('A') && e <= QLatin1Char('Z')) || (e >= QLatin1Char('h') && e <= QLatin1Char('z'))) {
+            do {
+                e = at(++offset);
+            } while (offset < len && isAsciiAlnum(e));
+        } else if ((e >= QLatin1Char('a') && e <= QLatin1Char('g')) || (e >= QLatin1Char('0') && e <= QLatin1Char('9'))) {
+            if (e == QLatin1Char('g')) {
+                ++old;
+                ++offset;
+            }
+            if (lookLikeGitHash(msg, offset)) {
+                if (!isAsciiAlnum(at(offset))) {
+                    result.append({old, offset});
+                }
+            }
+            ++offset;
+        } else {
+            ++offset;
+        }
+    }
+    return result;
 }
 
 } // namespace kgt

@@ -9,6 +9,8 @@ target_sources(kgtutils PRIVATE
     result.hpp
     runtimeerror.cpp
     runtimeerror.hpp
+    urlfinder.cpp
+    urlfinder.hpp
     version.cpp
     version.hpp
 )
