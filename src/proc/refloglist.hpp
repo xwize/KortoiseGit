@@ -99,6 +99,11 @@ public:
      */
     [[nodiscard]] static QString copyText(CopyFormat format, const QList<GitRevLoglist>& entries);
 
+    /**
+     * @returns The selected entries, newest first.
+     */
+    [[nodiscard]] QList<GitRevLoglist> selectedEntries() const;
+
 Q_SIGNALS:
     /**
      * Entries were deleted, MSG_REFLOG_CHANGED: the reflog must be loaded again.
@@ -122,11 +127,6 @@ private:
      * @returns The selected rows, in order.
      */
     [[nodiscard]] QList<int> selectedRows() const;
-
-    /**
-     * @returns The selected entries, newest first.
-     */
-    [[nodiscard]] QList<GitRevLoglist> selectedEntries() const;
 
     /**
      * Ported from CRefLogList::OnNMDblclkLoglist and ID_LOG: opens Show Log at a commit.

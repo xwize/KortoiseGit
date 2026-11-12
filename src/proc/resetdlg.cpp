@@ -11,8 +11,10 @@
 
 #include "apputils.hpp"
 #include "chooseversion.hpp"
+#include "filediffdlg.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
+#include "git/gitrev.hpp"
 
 #include <KConfigGroup>
 #include <KLocalizedString>
@@ -74,7 +76,15 @@ ResetDlg::ResetDlg(const Git& git, const QString& initialRefName, QWidget *paren
     typeLayout->addWidget(m_hard);
     layout->addWidget(typeGroup);
 
-    // TODO: IDC_SHOW_MODIFIED_FILES, "Show modified files in &working tree", opens CFileDiffDlg, which isn't ported
+    auto *showModifiedFiles = new QPushButton(i18n("Show modified files in &working tree"), this);
+    showModifiedFiles->setAutoDefault(false);
+    connect(showModifiedFiles, &QPushButton::clicked, this, [this, workingTree = git.workingDirectory()] {
+        // OnBnClickedShowModifiedFiles
+        FileDiffDlg dlg(workingTree, this);
+        dlg.setDiff({}, QStringLiteral("HEAD"), GitRev::workingCopyRef());
+        dlg.exec();
+    });
+    layout->addWidget(showModifiedFiles);
     layout->addStretch();
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);

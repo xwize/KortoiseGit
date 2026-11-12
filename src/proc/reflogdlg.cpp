@@ -100,7 +100,12 @@ RefLogDlg::RefLogDlg(const QString& workingTree, QWidget *parent)
     buttonRow->addWidget(buttons);
     layout->addLayout(buttonRow);
 
-    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::accepted, this, [this] {
+        // CRefLogDlg::OnBnClickedOk: picks up the revision of a single selected entry
+        const QList<GitRevLoglist> selected = m_refList->selectedEntries();
+        m_selectedHash = selected.size() == 1 ? selected.constFirst().hash : QString();
+        accept();
+    });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(search, &QPushButton::clicked, this, &RefLogDlg::onFind);
     connect(m_clearStash, &QPushButton::clicked, this, &RefLogDlg::onBnClickedClearStash);
@@ -321,6 +326,11 @@ void RefLogDlg::done(int result)
     KWindowConfig::saveWindowSize(windowHandle(), settings);
     settings.sync();
     QDialog::done(result);
+}
+
+const QString& RefLogDlg::selectedHash() const
+{
+    return m_selectedHash;
 }
 
 } // namespace kgt

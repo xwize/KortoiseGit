@@ -245,6 +245,13 @@ public:
     [[nodiscard]] static QString actionName(TGitPath::Actions actions);
 
     /**
+     * @param actions What happened to a file.
+     * @returns The colour of its text, or an invalid QVariant for the normal one
+     *          (CGitStatusListCtrl::OnNMCustomdraw).
+     */
+    [[nodiscard]] static QVariant actionColor(TGitPath::Actions actions);
+
+    /**
      * @param path A path relative to the working tree root.
      * @returns The Extension column's text: from the last dot in the file name on, or empty
      *          (CTGitPath::GetFileExtension).

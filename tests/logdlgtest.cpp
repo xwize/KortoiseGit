@@ -5,6 +5,7 @@
 #include "chooseversion.hpp"
 #include "commitdlg.hpp"
 #include "createbranchtagdlg.hpp"
+#include "filediffdlg.hpp"
 #include "gitloglist.hpp"
 #include "gitstatuslistctrl.hpp"
 #include "gitstatuslistmodel.hpp"
@@ -611,6 +612,52 @@ QString mergeMsg(const TestRepo& repo)
 }
 
 /**
+ * @param repo The repository.
+ * @param rev A revision.
+ * @returns Its full hash.
+ */
+QString revHash(const TestRepo& repo, const QString& rev)
+{
+    return QString::fromLatin1(repo.git().run({QStringLiteral("rev-parse"), rev}).trimmed());
+}
+
+/**
+ * What a Changed Files dialog showed.
+ */
+struct ChangedFiles {
+    QString rev1; // The base's hash; empty for the working tree
+    QString rev2; // Version 2's hash
+    QString filter; // The filter box's text
+    QStringList paths; // The files listed
+
+    bool operator==(const ChangedFiles&) const = default;
+};
+
+/**
+ * Runs something that opens Changed Files, and closes it once its list has loaded.
+ * @param open Opens the dialog and returns when it is closed.
+ * @returns What the dialog showed.
+ */
+ChangedFiles changedFilesOf(const std::function<void()>& open)
+{
+    ChangedFiles seen;
+    const ModalWatcher watcher([&seen](QWidget *modal) {
+        auto *dlg = qobject_cast<FileDiffDlg *>(modal);
+        if (!dlg || dlg->isLoading()) {
+            return false;
+        }
+        seen = {.rev1 = dlg->rev1().hash, .rev2 = dlg->rev2().hash, .filter = dlg->filterEdit()->text(), .paths = {}};
+        for (const FileDiffEntry& entry : dlg->listModel()->entries()) {
+            seen.paths.append(entry.path);
+        }
+        dlg->reject();
+        return true;
+    });
+    open();
+    return seen;
+}
+
+/**
  * Makes git difftool in a repository append a line to a file instead of opening a window: the last lines of both
  * sides, and for a directory diff of dir/a.txt, what the right-hand side's top level holds.
  */
@@ -623,11 +670,8 @@ public:
     explicit DiffRecorder(const TestRepo& repo)
         : m_output(repo.filePath(QStringLiteral(".git/recorded-diffs")))
     {
-        const QString command = QStringLiteral(
-                                    "{ if [ -d \"$LOCAL\" ]; "
-                                    "then tail -qn 1 \"$LOCAL/dir/a.txt\" \"$REMOTE/dir/a.txt\"; ls \"$REMOTE\"; "
-                                    "else tail -qn 1 \"$LOCAL\" \"$REMOTE\"; fi; } | paste -sd ' ' >> '%1'")
-                                    .arg(m_output);
+        const QString script = QStringLiteral("tail -qn 1 \"$LOCAL\" \"$REMOTE\" | paste -sd ' ' >> '%1'");
+        const QString command = script.arg(m_output);
         repo.run({QStringLiteral("config"), QStringLiteral("diff.tool"), QStringLiteral("record")});
         repo.run({QStringLiteral("config"), QStringLiteral("difftool.record.cmd"), command});
     }
@@ -1884,7 +1928,7 @@ private Q_SLOTS:
         QVERIFY(recorder.saw(QStringLiteral("side merged")));
     }
 
-    void comparesAFolderInOneDirDiff()
+    void comparesAFolderInChangedFiles()
     {
         const TestRepo repo;
         const QString file = QStringLiteral("dir/a.txt");
@@ -1897,19 +1941,28 @@ private Q_SLOTS:
         repo.commitAll(QStringLiteral("Second"));
         repo.write(file, "working\n");
         repo.write(outside, "working\n");
-        const DiffRecorder recorder(repo);
+        const QString first = revHash(repo, QStringLiteral("HEAD~1"));
+        const QString second = revHash(repo, QStringLiteral("HEAD"));
+        const QString folderPath = QStringLiteral("dir");
 
-        const LogDlg folder({repo.filePath(QStringLiteral("dir"))});
+        // CGitDiff::DiffCommit: the older version is the base, and the log's folder goes into the filter box
+        const LogDlg folder({repo.filePath(folderPath)});
         QVERIFY(waitForLog(folder));
-        folder.logList()->compareWithWorkingTree(0);
-        QVERIFY(recorder.saw(QStringLiteral("two working dir")));
-        folder.logList()->compareWithPrevious(0, 0);
-        QVERIFY(recorder.saw(QStringLiteral("one two dir")));
+        const ChangedFiles withWorkingTree = changedFilesOf([&folder] {
+            folder.logList()->compareWithWorkingTree(0);
+        });
+        QCOMPARE(withWorkingTree, (ChangedFiles{.rev1 = second, .rev2 = {}, .filter = folderPath, .paths = {file}}));
+        const ChangedFiles withPrevious = changedFilesOf([&folder] {
+            folder.logList()->compareWithPrevious(0, 0);
+        });
+        QCOMPARE(withPrevious, (ChangedFiles{.rev1 = first, .rev2 = second, .filter = folderPath, .paths = {file}}));
 
         const LogDlg whole({repo.path()});
         QVERIFY(waitForLog(whole));
-        whole.logList()->compareWithPrevious(0, 0);
-        QVERIFY(recorder.saw(QStringLiteral("one two dir outside.txt")));
+        const ChangedFiles all = changedFilesOf([&whole] {
+            whole.logList()->compareWithPrevious(0, 0);
+        });
+        QCOMPARE(all, (ChangedFiles{.rev1 = first, .rev2 = second, .filter = {}, .paths = {file, outside}}));
     }
 
     void comparesAFileAcrossItsRenames()

@@ -41,6 +41,11 @@ target_sources(kgtproc PRIVATE
     deleteconflictdlg.hpp
     deleteremotetagdlg.cpp
     deleteremotetagdlg.hpp
+    filediffdlg.cpp
+    filediffdlg.hpp
+    filediffdlg_menu.cpp
+    filedifflistmodel.cpp
+    filedifflistmodel.hpp
     filterhelper.cpp
     filterhelper.hpp
     commands/aboutcommand.cpp
@@ -114,6 +119,8 @@ target_sources(kgtproc PRIVATE
     icons.qrc
     logdlg.cpp
     logdlg.hpp
+    logdlgfilefilter.cpp
+    logdlgfilefilter.hpp
     logdlgfilter.cpp
     logdlgfilter.hpp
     mergeabortdlg.cpp

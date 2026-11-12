@@ -16,9 +16,11 @@
 #include "apputils.hpp"
 #include "commands/mergecommand.hpp"
 #include "createbranchtagdlg.hpp"
+#include "filediffdlg.hpp"
 #include "git/git.hpp"
 #include "git/gitadmindir.hpp"
 #include "git/gitcall.hpp"
+#include "git/gitrev.hpp"
 #include "gitdiff.hpp"
 #include "gitstatuslistmodel.hpp"
 #include "rebasedlg.hpp"
@@ -542,13 +544,11 @@ void GitLogList::startCompare(int row, const QString& rev1, const QString& rev2)
     };
     const bool isFile = m_pathFilter.size() == 1 && !isDirectory(m_pathFilter.constFirst());
     if (!isFile) {
-        /**
-         * CGitDiff::DiffCommit shows the changed files in a CFileDiffDlg, with rev2 as the base (SetDiff), and that
-         * dialog isn't ported yet. Plain git difftool would open one window per file, so --dir-diff shows them all
-         * in one.
-         */
-        const QStringList arguments = GitDiff::dirArguments(m_pathFilter, rev1, rev2);
-        std::ignore = GitDiff::start(this, {.workingDirectory = m_workingTree, .arguments = arguments});
+        // CGitDiff::DiffCommit shows the changed files with rev2 as the base (SetDiff), a folder in the filter box
+        const QString folder = m_pathFilter.size() == 1 ? m_pathFilter.constFirst() : QString();
+        FileDiffDlg dlg(m_workingTree, this);
+        dlg.setDiff(folder, rev2, rev1.isEmpty() ? GitRev::workingCopyRef() : rev1);
+        dlg.exec();
         return;
     }
     if (!m_walkOptions.follow) {

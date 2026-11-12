@@ -76,6 +76,33 @@ struct ConflictHashes {
 };
 
 /**
+ * The whitespace options of a diff, CGit::GetCommitDiffList's ignoreSpaceAtEol, ignoreSpaceChange, ignoreAllSpace
+ * and ignoreBlankLines.
+ */
+struct DiffIgnoreOptions {
+    bool spaceAtEol = false; // --ignore-space-at-eol
+    bool spaceChange = false; // --ignore-space-change
+    bool allSpace = false; // --ignore-all-space
+    bool blankLines = false; // --ignore-blank-lines
+
+    bool operator==(const DiffIgnoreOptions&) const = default;
+
+    /**
+     * @returns The options for git diff, in TortoiseGit's order.
+     */
+    [[nodiscard]] QStringList arguments() const;
+};
+
+/**
+ * CGit::GetCommitDiffList's parameters: two versions and the whitespace options.
+ */
+struct CommitDiffList {
+    QString rev1; // The version compared with the base; empty for the working tree
+    QString rev2; // The base; empty for the working tree
+    DiffIgnoreOptions ignore; // The whitespace options
+};
+
+/**
  * Runs git in one directory, either blocking (for the plugin, which Dolphin calls on a worker thread) or
  * asynchronously (for the app, whose UI thread must never wait on git).
  */
@@ -385,6 +412,15 @@ public:
      * @returns The arguments after "git".
      */
     [[nodiscard]] static QStringList deleteRemoteRefsArguments(const QString& remote, const QStringList& refs);
+
+    /**
+     * The git command CGit::GetCommitDiffList runs, in the same order of revisions: the files that differ, with
+     * renames and copies, as GitRevLoglist::parseFiles reads them. When either side is the working tree it diffs
+     * against that, turned round (-R) when the working tree is rev2.
+     * @param diff What to compare.
+     * @returns The arguments after "git".
+     */
+    [[nodiscard]] static QStringList commitDiffListArguments(const CommitDiffList& diff);
 
 private:
     QString m_workingDirectory;

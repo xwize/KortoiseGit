@@ -810,7 +810,7 @@ void BrowseRefsDlg::addTwoRefEntries(QMenu& popupMenu, const VectorShadowTree& l
             &QAction::triggered,
             this,
             [this, hash1, hash2] {
-                std::ignore = AppUtils::startShowUnifiedDiff(m_git, hash1, hash2, this);
+                std::ignore = AppUtils::startShowUnifiedDiff(m_git, {.rev1 = hash1, .rev2 = hash2, .path = {}}, this);
             });
     const QStringList refNames{refName1, refName2};
     for (const QString& separator : {QStringLiteral(".."), QStringLiteral("...")}) {

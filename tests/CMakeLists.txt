@@ -12,6 +12,7 @@ set(kgt_tests
     createbranchtagtest
     createrepositorytest
     difftest
+    filediffdlgtest
     gitadmindirtest
     gitclioutputparsertest
     gitnumstattest

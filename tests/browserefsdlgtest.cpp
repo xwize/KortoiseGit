@@ -557,7 +557,8 @@ private Q_SLOTS:
 
     void unifiedDiffArguments()
     {
-        QCOMPARE(AppUtils::unifiedDiffArguments(QStringLiteral("a"), QStringLiteral("b"), -1),
+        const UnifiedDiffOf twoRevs{.rev1 = QStringLiteral("a"), .rev2 = QStringLiteral("b"), .path = {}};
+        QCOMPARE(AppUtils::unifiedDiffArguments(twoRevs, -1),
                  (QStringList{QStringLiteral("diff-tree"),
                               QStringLiteral("-r"),
                               QStringLiteral("-p"),
@@ -566,9 +567,10 @@ private Q_SLOTS:
                               QStringLiteral("a"),
                               QStringLiteral("b"),
                               QStringLiteral("--")}));
-        QVERIFY(AppUtils::unifiedDiffArguments(QStringLiteral("a"), QStringLiteral("b"), 5).contains(QStringLiteral("--unified=5")));
+        QVERIFY(AppUtils::unifiedDiffArguments(twoRevs, 5).contains(QStringLiteral("--unified=5")));
         // The command runs
-        const QString diff = QString::fromUtf8(m_repo->git().run(AppUtils::unifiedDiffArguments(QStringLiteral("main"), QStringLiteral("other"), -1)));
+        const UnifiedDiffOf branches{.rev1 = QStringLiteral("main"), .rev2 = QStringLiteral("other"), .path = {}};
+        const QString diff = QString::fromUtf8(m_repo->git().run(AppUtils::unifiedDiffArguments(branches, -1)));
         QVERIFY(diff.contains(QStringLiteral("+++ b/b.txt")));
     }
 

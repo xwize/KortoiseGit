@@ -4,6 +4,7 @@
 #include "git/git.hpp"
 #include "apputils.hpp"
 #include "git/gitcall.hpp"
+#include "git/gitrev.hpp"
 #include "git/tgitpath.hpp"
 #include "testrepo.hpp"
 #include "utils/runtimeerror.hpp"
@@ -320,6 +321,56 @@ private Q_SLOTS:
             return false;
         };
         QVERIFY(AppUtils::mergeToolArguments(QString(), isInstalled).isEmpty());
+    }
+
+    void commitDiffListArguments()
+    {
+        // CGit::GetCommitDiffList: version 2 first, the base second, as git diff-tree takes them the other way
+        const QStringList options{
+            QStringLiteral("--raw"),
+            QStringLiteral("-C50%"),
+            QStringLiteral("-M50%"),
+            QStringLiteral("--numstat"),
+            QStringLiteral("-z"),
+        };
+        const QString base = QStringLiteral("base");
+        const QString second = QStringLiteral("second");
+        const QString endOfOptions = QStringLiteral("--end-of-options");
+        const QString dashes = QStringLiteral("--");
+        const QStringList diffTree{QStringLiteral("diff-tree"), QStringLiteral("-r")};
+        const CommitDiffList commits{.rev1 = second, .rev2 = base, .ignore = {}};
+        const QStringList bothCommits = diffTree + options + QStringList{endOfOptions, base, second, dashes};
+        QCOMPARE(Git::commitDiffListArguments(commits), bothCommits);
+
+        // The working tree against the base, and the base turned round against the working tree
+        const CommitDiffList toWorkingTree{.rev1 = {}, .rev2 = base, .ignore = {}};
+        const QStringList diff{QStringLiteral("diff"), QStringLiteral("-r")};
+        const QStringList againstBase = diff + options + QStringList{endOfOptions, base, dashes};
+        QCOMPARE(Git::commitDiffListArguments(toWorkingTree), againstBase);
+        const CommitDiffList fromWorkingTree{.rev1 = second, .rev2 = {}, .ignore = {}};
+        const QStringList reversed = diff + QStringList{QStringLiteral("-R")} + options;
+        const QStringList againstSecond = reversed + QStringList{endOfOptions, second, dashes};
+        QCOMPARE(Git::commitDiffListArguments(fromWorkingTree), againstSecond);
+
+        const DiffIgnoreOptions ignore{.spaceAtEol = true, .spaceChange = false, .allSpace = true, .blankLines = true};
+        const QStringList ignoring{
+            QStringLiteral("--ignore-space-at-eol"),
+            QStringLiteral("--ignore-all-space"),
+            QStringLiteral("--ignore-blank-lines"),
+        };
+        const CommitDiffList ignored{.rev1 = second, .rev2 = base, .ignore = ignore};
+        const QStringList ignoredCommand = diffTree + options + ignoring + QStringList{endOfOptions, base, second};
+        QCOMPARE(Git::commitDiffListArguments(ignored), ignoredCommand + QStringList{dashes});
+    }
+
+    void recognisesTheWorkingTree()
+    {
+        // GitRev::GetCommit: GIT_REV_ZERO, or at least eight of its zeros
+        QVERIFY(GitRev::isWorkingCopyRef(GitRev::workingCopyRef()));
+        QVERIFY(GitRev::isWorkingCopyRef(QStringLiteral("00000000")));
+        QVERIFY(!GitRev::isWorkingCopyRef(QStringLiteral("0000000")));
+        QVERIFY(!GitRev::isWorkingCopyRef(GitRev::workingCopyRef() + QLatin1Char('0')));
+        QVERIFY(!GitRev::isWorkingCopyRef(QStringLiteral("00000000a")));
     }
 
 private:

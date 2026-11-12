@@ -39,6 +39,15 @@ struct RebaseOptions;
 struct StashSaveOptions;
 
 /**
+ * What a unified diff compares (CAppUtils::StartShowUnifiedDiff's url1, rev1 and rev2).
+ */
+struct UnifiedDiffOf {
+    QString rev1; // The old side; empty for the working tree (GitRev::GetWorkingCopyRef)
+    QString rev2; // The new side; empty for the working tree
+    QString path; // The file to limit it to, relative to the working tree root; empty for the whole tree
+};
+
+/**
  * The titles and hashes of the two sides of a conflict, as CAppUtils::GetConflictTitles fills them in.
  */
 struct ConflictTitles {
@@ -176,24 +185,22 @@ public:
     static void launchAlternativeEditor(const QString& file, QWidget *parent = nullptr);
 
     /**
-     * GetUnifiedDiffCmd in CGit, for two commits and the whole tree.
-     * @param rev1 The old side.
-     * @param rev2 The new side.
+     * GetUnifiedDiffCmd in CGit.
+     * @param diff What to compare.
      * @param diffContext diff.context, or a negative number if not set.
      * @returns The arguments after "git".
      */
-    [[nodiscard]] static QStringList unifiedDiffArguments(const QString& rev1, const QString& rev2, int diffContext);
+    [[nodiscard]] static QStringList unifiedDiffArguments(const UnifiedDiffOf& diff, int diffContext);
 
     /**
-     * Ported from CAppUtils::StartShowUnifiedDiff for two commits: writes the unified diff to a read-only temp file
-     * and opens it. TortoiseUDiff isn't ported, so the user's text editor shows it (launchAlternativeEditor).
+     * Ported from CAppUtils::StartShowUnifiedDiff: writes the unified diff to a read-only temp file and opens it.
+     * TortoiseUDiff isn't ported, so the user's text editor shows it (launchAlternativeEditor).
      * @param git Runs git in the repository.
-     * @param rev1 The old side.
-     * @param rev2 The new side.
+     * @param diff What to compare.
      * @param parent Parent of an error message.
      * @returns Whether the diff was written and opened.
      */
-    static bool startShowUnifiedDiff(const Git& git, const QString& rev1, const QString& rev2, QWidget *parent = nullptr);
+    static bool startShowUnifiedDiff(const Git& git, const UnifiedDiffOf& diff, QWidget *parent = nullptr);
 
     /**
      * Ported from CAppUtils::IsTGitRebaseActive: whether a TortoiseGit rebase holds its lock (a tgitrebase.active

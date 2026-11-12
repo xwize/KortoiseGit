@@ -99,18 +99,6 @@ int lineCountSortKey(const QString& text)
 
 /**
  * @param actions What happened to a file.
- * @returns The colour of its text, or an invalid QVariant for the normal one (CGitStatusListCtrl::OnNMCustomdraw).
- */
-QVariant actionColor(TGitPath::Actions actions)
-{
-    const auto *const found = std::ranges::find_if(actionColors, [actions](const ActionColor& entry) {
-        return (actions & entry.actions) != 0;
-    });
-    return found == actionColors.cend() ? QVariant() : QColor::fromRgb(found->color);
-}
-
-/**
- * @param actions What happened to a file.
  * @returns Its group in a working tree's list (CGitStatusListCtrl::SetItemGroup).
  */
 StatusGroup statusGroup(TGitPath::Actions actions)
@@ -288,6 +276,14 @@ void GitStatusListModel::setAllChecked(bool checked)
     }
     emitCheckStatesChanged();
     Q_EMIT checkedCountChanged();
+}
+
+QVariant GitStatusListModel::actionColor(TGitPath::Actions actions)
+{
+    const auto *const found = std::ranges::find_if(actionColors, [actions](const ActionColor& entry) {
+        return (actions & entry.actions) != 0;
+    });
+    return found == actionColors.cend() ? QVariant() : QColor::fromRgb(found->color);
 }
 
 QString GitStatusListModel::actionName(TGitPath::Actions actions)
