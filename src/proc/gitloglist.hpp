@@ -155,6 +155,13 @@ public:
     [[nodiscard]] bool isRebaseMenuEnabled() const;
 
     /**
+     * Ported from CGitLogListBase::m_bIsCherryPick: the rebase dialog picks the commits onto HEAD, so a merge
+     * commit may be squashed too (it is picked against one parent).
+     * @param cherryPick Whether the list is the cherry-pick dialog's.
+     */
+    void setCherryPick(bool cherryPick);
+
+    /**
      * Offers the log's own entries in the context menu (the rest of CGitLogListBase::OnContextMenu), as the log
      * dialog's m_ContextMenuMask does and the rebase dialog's doesn't.
      * @param enabled Whether they are offered.
@@ -351,6 +358,7 @@ private:
     void switchBranch(const QString& ref);
     void mergeRev(const LogMenuTarget& target);
     void rebaseToVersion(const LogMenuTarget& target);
+    void cherryPick();
     void revertRev(int parent);
     [[nodiscard]] bool revertSelectedCommits(int parent);
     void openCommitDlg();
@@ -389,6 +397,7 @@ private:
     LogDlgFilter m_logFilter; // CGitLogListBase::m_LogFilter
     bool m_rebaseMenu = false; // Whether the rebase actions are offered
     bool m_logMenu = false; // Whether the log's own entries are offered
+    bool m_cherryPick = false; // m_bIsCherryPick
     bool m_isLoading = false; // Whether a reload() is running
     std::unique_ptr<GitCall> m_logCall;
     std::unique_ptr<GitCall> m_tagInfoCall; // The for-each-ref that runs before git log when the filter needs it
