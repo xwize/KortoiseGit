@@ -11,7 +11,7 @@
 
 #include "commands/commitcommand.hpp"
 
-#include "commitdlg.hpp"
+#include "apputils.hpp"
 
 namespace kgt
 {
@@ -24,8 +24,7 @@ CommitCommand::CommitCommand()
 bool CommitCommand::execute()
 {
     // LoadLogMessage: the message passed with --logmsg
-    CommitDlg dlg(paths(), value(QStringLiteral("logmsg")));
-    return dlg.exec() == QDialog::Accepted;
+    return AppUtils::commit(paths(), value(QStringLiteral("logmsg")));
 }
 
 } // namespace kgt

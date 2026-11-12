@@ -144,6 +144,18 @@ void ProgressDlg::addGitCmd(const QStringList& arguments, const QByteArray& inpu
     m_gitCmdList.append(GitCmd{.arguments = arguments, .input = input});
 }
 
+void ProgressDlg::setShowCommand(bool show)
+{
+    Q_ASSERT(!m_started);
+    m_showCommand = show;
+}
+
+void ProgressDlg::setPreText(const QString& text)
+{
+    Q_ASSERT(!m_started);
+    m_preText = text;
+}
+
 void ProgressDlg::setPostExecCallback(PostExecCallback callback)
 {
     Q_ASSERT(!m_started);
@@ -204,6 +216,10 @@ void ProgressDlg::start()
         return;
     }
     m_started = true;
+    // CProgressDlg::OnInitDialog: the pre-text and a line break start the log
+    if (!m_preText.isEmpty()) {
+        m_log->setPlainText(m_preText + QLatin1Char('\n'));
+    }
     m_elapsed.start();
     m_parser.reset();
     m_abortButton->setEnabled(true);
@@ -261,8 +277,10 @@ void ProgressDlg::runNext()
     }
     const auto& [arguments, input] = m_gitCmdList.at(m_nextCmd);
 
-    // TortoiseGit's m_bShowCommand, on by default: the command line goes into the log first
-    m_parser.appendChunk(((m_nextCmd > 0 ? QStringLiteral("\n") : QString()) + GitCall::formatCommandLine(arguments) + QLatin1Char('\n')).toUtf8());
+    // RunCmdList's bShowCommand: the command line goes into the log first
+    if (m_showCommand) {
+        m_parser.appendChunk(((m_nextCmd > 0 ? QStringLiteral("\n") : QString()) + GitCall::formatCommandLine(arguments) + QLatin1Char('\n')).toUtf8());
+    }
     ++m_nextCmd;
 
     m_process = std::make_unique<QProcess>();

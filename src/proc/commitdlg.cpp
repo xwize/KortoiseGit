@@ -8,7 +8,7 @@
  * Ported from TortoiseGit src/TortoiseProc/CommitDlg.cpp: OnInitDialog (the layout), StatusThread (what the list
  * shows and checks), OnUpdateOKButton, OnBnClickedShowunversioned, OnBnClickedCommitAmend, OnCheck (All and None),
  * OnOK with PrepareIndexForCommitWithoutStagingSupport, and GetCommitTemplate with CGit::LoadTextFile for the starting
- * message. TortoiseGit's progress dialog for git commit becomes an error message inside the dialog. Also the recent
+ * message. git commit runs in ProgressDlg, which offers OnOK's follow-ups (m_PostCmdCallback). Also the recent
  * messages (ReloadHistoryEntries, InsertMenuItems, HandleMenuItemClick, OnBnClickedHistory) and Add Signed-off-by
  * (GetSignedOffByLine, OnBnClickedSignOff).
  */
@@ -23,6 +23,7 @@
 #include "gitstatuslistmodel.hpp"
 #include "historycombo.hpp"
 #include "historydlg.hpp"
+#include "progressdlg.hpp"
 #include "utils/runtimeerror.hpp"
 
 #include <KGuiItem>
@@ -38,6 +39,7 @@
 #include <QFontDatabase>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -48,6 +50,7 @@
 #include <QSplitter>
 #include <QTemporaryFile>
 #include <QTextCursor>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -111,12 +114,11 @@ void addTask(QList<CommitStep>& steps, CommitStep step, const QStringList& paths
 /**
  * @param command The git arguments before the paths, separated by spaces.
  * @param ignoreErrors Whether a failure doesn't stop the commit.
- * @param afterCommit Whether it follows git commit, and runs even if git commit failed.
  * @returns The step.
  */
-CommitStep task(QLatin1StringView command, bool ignoreErrors = false, bool afterCommit = false)
+CommitStep task(QLatin1StringView command, bool ignoreErrors = false)
 {
-    return CommitStep{.arguments = QString(command).split(QLatin1Char(' ')), .input = {}, .ignoreErrors = ignoreErrors, .afterCommit = afterCommit};
+    return CommitStep{.arguments = QString(command).split(QLatin1Char(' ')), .input = {}, .ignoreErrors = ignoreErrors};
 }
 
 /**
@@ -394,8 +396,8 @@ CommitPlan CommitDlg::planCommit(const GitStatusListModel& model, bool amendAgai
     addTask(plan.prepareIndex, task(amendAgainstParent ? "reset --quiet HEAD~1"_L1 : "reset --quiet"_L1, true), tasks.reset);
 
     if (readdUnselectedAddedFilesAfterCommit) {
-        addTask(plan.restoreIndex, task("add --ignore-errors -f"_L1, false, true), tasks.reAddAfterCommit);
-        addTask(plan.restoreIndex, task("rm --cached --ignore-unmatch --quiet"_L1, false, true), tasks.reDelAfterCommit);
+        addTask(plan.restoreIndex, task("add --ignore-errors -f"_L1), tasks.reAddAfterCommit);
+        addTask(plan.restoreIndex, task("rm --cached --ignore-unmatch --quiet"_L1), tasks.reDelAfterCommit);
     }
     return plan;
 }
@@ -565,6 +567,9 @@ void CommitDlg::commit()
     }
     m_errorView->hide();
     m_commitError.reset();
+    m_commitStatus.reset();
+    m_preText.clear();
+    m_postCmd = PostCommitCmd::Nothing;
 
     // SaveCommitUnicodeFile: the message goes to git in a file, never on the command line
     m_messageFile = std::make_unique<QTemporaryFile>();
@@ -577,13 +582,12 @@ void CommitDlg::commit()
 
     const CommitPlan plan = planCommit(*m_fileList->statusModel(), isAmending() && !m_amendDiffToLastCommit);
     m_steps = plan.prepareIndex;
-    QStringList commitArguments{QStringLiteral("commit")};
+    m_restoreSteps = plan.restoreIndex;
+    m_commitArguments = QStringList{QStringLiteral("commit")};
     if (isAmending()) {
-        commitArguments.append(QStringLiteral("--amend"));
+        m_commitArguments.append(QStringLiteral("--amend"));
     }
-    commitArguments.append({QStringLiteral("-F"), m_messageFile->fileName()});
-    m_steps.append(CommitStep{.arguments = commitArguments, .input = {}, .ignoreErrors = false, .afterCommit = false});
-    m_steps.append(plan.restoreIndex);
+    m_commitArguments.append({QStringLiteral("-F"), m_messageFile->fileName()});
     setBusy(true);
     runNextStep();
 }
@@ -619,6 +623,11 @@ void CommitDlg::reject()
     const bool hasChangedMessage = !message.isEmpty() && message != (isAmending() ? m_amendStr : m_logTemplate);
     addToHistory(hasChangedMessage ? message : QString());
     QDialog::reject();
+}
+
+PostCommitCmd CommitDlg::postCmd() const
+{
+    return m_postCmd;
 }
 
 void CommitDlg::createWidgets()
@@ -815,14 +824,19 @@ void CommitDlg::onShowUnversionedToggled(bool checked)
 void CommitDlg::runNextStep()
 {
     // CCommitDlg::OnOK: when preparing the index fails (bAddSuccess), neither git commit nor the steps after it run.
-    // When git commit fails only the steps after it are left, and they run; nothing unstages the checked files.
-    if (m_commitError && std::ranges::any_of(m_steps, [](const CommitStep& step) {
-            return !step.afterCommit;
-        })) {
+    // When git commit fails the steps after it still run; nothing unstages the checked files.
+    if (m_commitError) {
         m_steps.clear();
+        finishCommit();
+        return;
     }
     if (m_steps.isEmpty()) {
-        finishCommit();
+        if (m_commitStatus) {
+            finishCommit();
+        } else {
+            // From the event loop, so that Commit's click has returned before ProgressDlg's own loop starts
+            QTimer::singleShot(0, this, &CommitDlg::runCommit);
+        }
         return;
     }
     m_runningStep = m_steps.takeFirst();
@@ -836,12 +850,55 @@ void CommitDlg::onStepFinished()
     GitCall *call = m_stepCall.release();
     call->deleteLater();
     try {
-        std::ignore = call->output();
+        const QByteArray output = call->output();
+        if (!m_commitStatus) {
+            m_preText += QString::fromUtf8(output);
+        }
     } catch (const RuntimeError& e) {
-        if (!m_runningStep.ignoreErrors && !m_commitError) {
+        if (m_commitStatus) {
+            // After git commit, CMassiveGitTaskBase::ReportError: shown, and the next step runs anyway
+            KMessageBox::error(this, e.error().message, QString(), KMessageBox::Options());
+        } else if (!m_runningStep.ignoreErrors && !m_commitError) {
             m_commitError = e.error();
         }
     }
+    runNextStep();
+}
+
+void CommitDlg::runCommit()
+{
+    // CCommitDlg::OnOK
+    ProgressDlg progress(m_workingTree, this);
+    progress.addGitCmd(m_commitArguments);
+    progress.setShowCommand(false); // don't show the commit command
+    QString preText = m_preText;
+    while (preText.endsWith(QLatin1Char('\n'))) {
+        preText.chop(1);
+    }
+    progress.setPreText(preText); // show any output already generated in log window
+    // m_PostCmdCallback. m_bNoPostActions (the log's Combine commits) and AUTOCLOSE_IF_NO_ERRORS (the Commit button's
+    // split entries) aren't ported, so only a failure leaves the follow-ups out. TortoiseGit's SVN DCommit isn't ported.
+    progress.setPostCmdCallback([this](int status, PostCmdList& postCmdList) {
+        if (status != 0) {
+            return;
+        }
+        const auto choose = [this](PostCommitCmd cmd) {
+            return [this, cmd] {
+                m_postCmd = cmd;
+            };
+        };
+        postCmdList.append({QIcon::fromTheme(QStringLiteral("vcs-push")), i18n("Pus&h..."), choose(PostCommitCmd::Push)});
+        postCmdList.append({QIcon::fromTheme(QStringLiteral("vcs-pull")), i18n("&Pull..."), choose(PostCommitCmd::Pull)});
+        postCmdList.append({QIcon::fromTheme(QStringLiteral("vcs-commit")), i18n("&ReCommit"), choose(PostCommitCmd::ReCommit)});
+        postCmdList.append({QIcon::fromTheme(QStringLiteral("tag")), i18n("Create &Tag..."), choose(PostCommitCmd::CreateTag)});
+    });
+    m_postCmd = PostCommitCmd::Nothing;
+    std::ignore = progress.exec();
+    m_commitStatus = progress.gitStatus();
+
+    // RestoreFiles, then mgtReAddAfterCommit and mgtReDelAfterCommit, whatever became of git commit
+    m_steps = m_restoreSteps;
+    m_restoreSteps.clear();
     runNextStep();
 }
 
@@ -849,23 +906,55 @@ void CommitDlg::finishCommit()
 {
     m_messageFile.reset();
     setBusy(false);
-    if (!m_commitError) {
-        addToHistory(m_message->toPlainText());
-        // TortoiseGit resets amend after a successful commit, for when the dialog stays open
-        m_amendStr.clear();
-        {
-            const QSignalBlocker blocker(m_amendButton);
-            m_amendButton->setChecked(false);
-        }
-        accept();
+    // OnOK keeps the message in the history however the commit went
+    addToHistory(m_message->toPlainText());
+    if (m_commitError) {
+        // Preparing the index failed; git commit didn't run
+        const Error error = *m_commitError;
+        m_errorView->setText(error.message);
+        m_errorView->show();
+        refresh();
+        Q_EMIT commitFailed(error);
         return;
     }
-    // TortoiseGit leaves the dialog open, with the message, after git commit fails
-    const Error error = *m_commitError;
-    m_errorView->setText(error.message);
-    m_errorView->show();
+    if (const int status = m_commitStatus.value_or(-1); status != 0) {
+        // TortoiseGit leaves the dialog open, with the message, after git commit fails; ProgressDlg showed why
+        refresh();
+        Q_EMIT commitFailed(Error{.category = ErrorCategory::Git, .message = i18n("git did not exit cleanly (exit code %1)", status)});
+        return;
+    }
+    // TortoiseGit resets amend after a successful commit, for when the dialog stays open
+    m_amendStr.clear();
+    {
+        const QSignalBlocker blocker(m_amendButton);
+        m_amendButton->setChecked(false);
+    }
+    if (m_postCmd == PostCommitCmd::ReCommit) {
+        prepareRecommit();
+        Q_EMIT recommitted();
+        return;
+    }
+    accept();
+}
+
+void CommitDlg::prepareRecommit()
+{
+    // OnOK's ReCommit: the message is already in the history; the template (read again) replaces it, without undo
+    try {
+        m_logTemplate = commitTemplate(m_workingTree);
+    } catch (const RuntimeError& e) {
+        if (e.error().category != ErrorCategory::Io) {
+            throw;
+        }
+        m_logTemplate.clear();
+        m_errorView->setText(e.error().message);
+        m_errorView->show();
+    }
+    m_message->setPlainText(m_logTemplate);
+    m_message->setFocus();
+    // m_ListCtrl.Clear(): the next list starts from the default checks
+    m_fileList->clear();
     refresh();
-    Q_EMIT commitFailed(error);
 }
 
 void CommitDlg::setBusy(bool busy)

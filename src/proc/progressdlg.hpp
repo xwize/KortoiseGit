@@ -88,6 +88,18 @@ public:
     void addGitCmd(const QStringList& arguments, const QByteArray& input = {});
 
     /**
+     * @param show Whether each command line goes into the log before its output, TortoiseGit's m_bShowCommand
+     *             (on by default). Must be set before the commands start.
+     */
+    void setShowCommand(bool show);
+
+    /**
+     * @param text Shown in the log before anything runs, such as output already produced, TortoiseGit's m_PreText.
+     *             Must be set before the commands start.
+     */
+    void setPreText(const QString& text);
+
+    /**
      * Called when the commands end, before the result is shown, with the OR-ed exit status and an empty message.
      * It may change the status, such as to report a success that left conflicts as a failure, and may set a
      * message to append to the log. TortoiseGit's m_PostExecCallback.
@@ -248,6 +260,8 @@ private:
     QElapsedTimer m_elapsed;
     unsigned int m_combinedStatus = 0; // The exit codes so far, OR-ed as TortoiseGit does
     int m_gitStatus = -1;
+    QString m_preText;
+    bool m_showCommand = true;
     bool m_started = false;
     bool m_done = false;
     bool m_abort = false;
