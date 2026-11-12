@@ -6,7 +6,7 @@
 # packaging/aur/README.md has the details.
 
 pkgname=kortoisegit
-pkgver=0.10.1
+pkgver=0.10.2
 pkgrel=1
 pkgdesc="A port of TortoiseGit to KDE: Dolphin plugin and git dialogs"
 arch=('x86_64')
@@ -39,7 +39,7 @@ optdepends=(
     'meld: diff and conflict editing tool'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz")
-sha256sums=('8661f6a1996b3c545d17a68868435a63dba6bbc31efc457036fabb32b868d03f')
+sha256sums=('0333f902f79ff1944b47f308a3d9c7483eeba1c88d7aa6f98802baf7d01a2098')
 
 build() {
     # Errors record their std::source_location: keep the build directory out of the binaries
