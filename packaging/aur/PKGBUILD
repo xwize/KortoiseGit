@@ -18,6 +18,7 @@ depends=(
     'dolphin'
     'git'
     'glibc'
+    'hicolor-icon-theme'
     'kconfig'
     'kcoreaddons'
     'ki18n'

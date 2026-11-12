@@ -11,6 +11,7 @@ pkgbase = kortoisegit
 	depends = dolphin
 	depends = git
 	depends = glibc
+	depends = hicolor-icon-theme
 	depends = kconfig
 	depends = kcoreaddons
 	depends = ki18n
