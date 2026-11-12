@@ -1,0 +1,59 @@
+# Maintainer: James Jones <this.verb@gmail.com>
+# SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Builds a KortoiseGit release tag for the AUR. scripts/release.sh keeps it up to date, through update.sh here;
+# packaging/aur/README.md has the details.
+
+pkgname=kortoisegit
+pkgver=0.10.1
+pkgrel=1
+pkgdesc="A port of TortoiseGit to KDE: Dolphin plugin and git dialogs"
+arch=('x86_64')
+url="https://github.com/xwize/KortoiseGit"
+# The program as a whole is GPL-2.0-only because of the QGit lanes code (src/proc/lanes.cpp); the rest is
+# GPL-2.0-or-later, and the vendored tl-expected header is CC0-1.0
+license=('GPL-2.0-only')
+depends=(
+    'dolphin'
+    'git'
+    'glibc'
+    'hicolor-icon-theme'
+    'kconfig'
+    'kcoreaddons'
+    'ki18n'
+    'kio'
+    'kwidgetsaddons'
+    'libgcc'
+    'libstdc++'
+    'qt6-base'
+)
+makedepends=(
+    'cmake'
+    'extra-cmake-modules'
+    'ninja'
+)
+optdepends=(
+    'ksshaskpass: password and host key prompts for SSH remotes'
+    'kdiff3: diff and conflict editing tool'
+    'meld: diff and conflict editing tool'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz")
+sha256sums=('8661f6a1996b3c545d17a68868435a63dba6bbc31efc457036fabb32b868d03f')
+
+build() {
+    # Errors record their std::source_location: keep the build directory out of the binaries
+    CXXFLAGS+=" -ffile-prefix-map=$srcdir=."
+    # No tests and no clang-tidy: they are for development. Warnings stay warnings with a newer compiler.
+    cmake -S "KortoiseGit-$pkgver" -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DBUILD_TESTING=OFF \
+        -DKGT_CLANG_TIDY=OFF \
+        -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+}

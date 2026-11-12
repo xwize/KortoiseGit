@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 James Jones <this.verb@gmail.com>
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# makepkg's output
+/src/
+/pkg/
+/*.tar.gz
+/*.pkg.tar.*
+/makepkg.log
