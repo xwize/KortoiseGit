@@ -30,9 +30,10 @@ Checks: >
   readability-container-size-empty
 WarningsAsErrors: '*'
 # Only our sources: Qt, KDE Frameworks, generated code (moc output, logging categories: all under build/) and system
-# headers are excluded. CMake does not lint AUTOMOC sources; other generated sources get SKIP_LINTING.
+# headers are excluded, as is the vendored src/utils/expected.hpp (tl-expected, kept byte-identical to upstream).
+# CMake does not lint AUTOMOC sources; other generated sources get SKIP_LINTING.
 HeaderFilterRegex: '.*/(src|tests)/.*\.hpp$'
-ExcludeHeaderFilterRegex: '(.*_autogen/.*|.*/build/.*)'
+ExcludeHeaderFilterRegex: '(.*_autogen/.*|.*/build/.*|.*/utils/expected\.hpp$)'
 CheckOptions:
   readability-function-cognitive-complexity.Threshold: 25
   readability-function-cognitive-complexity.IgnoreMacros: true

@@ -33,4 +33,4 @@ set_target_properties(kgtutils PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(kgtutils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_include_directories(kgtutils PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(kgtutils PUBLIC Qt6::Core tl::expected)
+target_link_libraries(kgtutils PUBLIC Qt6::Core)

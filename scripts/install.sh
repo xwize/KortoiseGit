@@ -87,7 +87,7 @@ EOF
 
 # Stops with the pacman command that installs whatever build dependency is missing. Installs nothing itself.
 check_dependencies() {
-    local packages=(base-devel git cmake ninja extra-cmake-modules qt6-base kcoreaddons ki18n kio dolphin tl-expected)
+    local packages=(base-devel git cmake ninja extra-cmake-modules qt6-base kcoreaddons ki18n kio dolphin)
     if command -v pacman >/dev/null; then
         local missing
         missing="$(pacman -T "${packages[@]}" || true)"
@@ -103,7 +103,7 @@ check_dependencies() {
     for tool in git cmake ninja c++; do
         if ! command -v "$tool" >/dev/null; then
             echo "$tool is missing. KortoiseGit needs git, CMake, Ninja, a C++20 compiler, extra-cmake-modules," >&2
-            echo "Qt 6, KDE Frameworks 6 (CoreAddons, I18n, KIO), Dolphin's development files and tl-expected." >&2
+            echo "Qt 6, KDE Frameworks 6 (CoreAddons, I18n, KIO) and Dolphin's development files." >&2
             exit 1
         fi
     done
